@@ -1,0 +1,7 @@
+node_modules/
+.env
+.wallet.json
+nodes-cache.json
+sellers.json
+server.log
+*.log

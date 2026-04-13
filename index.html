@@ -1,0 +1,3662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel Plan Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #06060b;
+  --bg-card: #0e0e16;
+  --bg-card-hover: #13131d;
+  --bg-input: #0a0a12;
+  --border: #1a1a2e;
+  --border-hover: #2a2a44;
+  --text: #e2e2ef;
+  --text-dim: #6b6b8d;
+  --text-muted: #3e3e5c;
+  --accent: #3B82F6;
+  --accent-glow: rgba(59, 130, 246, 0.15);
+  --accent-hover: #5B9BF7;
+  --green: #10b981;
+  --green-dim: rgba(16, 185, 129, 0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.12);
+  --yellow: #f59e0b;
+  --yellow-dim: rgba(245, 158, 11, 0.12);
+  --sidebar-w: 240px;
+  --header-h: 64px;
+}
+
+html[data-theme="light"] {
+  --bg: #f5f7fb;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f7f8fc;
+  --bg-input: #eef0f5;
+  --border: #dfe1e8;
+  --border-hover: #c5c8d4;
+  --text: #1a1d2e;
+  --text-dim: #5a5d7a;
+  --text-muted: #9b9eb5;
+  --accent: #2563EB;
+  --accent-glow: rgba(37, 99, 235, 0.08);
+  --accent-hover: #1d4ed8;
+  --green: #059669;
+  --green-dim: rgba(5, 150, 105, 0.08);
+  --red: #dc2626;
+  --red-dim: rgba(220, 38, 38, 0.08);
+  --yellow: #d97706;
+  --yellow-dim: rgba(217, 119, 6, 0.08);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Poppins', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Import Overlay ─── */
+.import-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.3s;
+}
+.import-overlay.hidden { display: none; }
+.import-box {
+  width: 420px; padding: 40px 36px; text-align: center;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.import-logo {
+  width: 56px; height: 56px; border-radius: 14px; margin: 0 auto 20px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #0156FC, #2a7aff);
+  box-shadow: 0 0 40px rgba(1, 86, 252, 0.25);
+}
+.import-logo svg { width: 30px; height: 30px; }
+.import-title { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.import-subtitle { font-size: 13px; color: var(--text-dim); margin-bottom: 24px; line-height: 1.5; }
+.import-textarea {
+  width: 100%; min-height: 90px; padding: 14px; resize: none;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 10px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+  outline: none; transition: border-color 0.2s;
+}
+.import-textarea:focus { border-color: var(--accent); }
+.import-textarea::placeholder { color: var(--text-muted); }
+.import-error { color: var(--red); font-size: 12px; min-height: 18px; margin: 8px 0; }
+.import-btn {
+  width: 100%; padding: 12px; border: none; border-radius: 10px; cursor: pointer;
+  background: #0156FC; color: #fff; font-size: 14px; font-weight: 600;
+  font-family: 'Poppins', sans-serif; transition: all 0.2s;
+}
+.import-btn:hover { background: #2a7aff; }
+.import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.wallet-logout-btn {
+  display: inline-block; margin-top: 8px; padding: 4px 10px;
+  border: 1px solid var(--border); border-radius: 6px; background: transparent;
+  color: var(--text-muted); font-size: 11px; cursor: pointer;
+  font-family: 'Poppins', sans-serif; transition: all 0.2s;
+}
+.wallet-logout-btn:hover { border-color: var(--red); color: var(--red); }
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1a1a2e; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2a2a44; }
+
+/* ─── Layout Shell ─── */
+.shell { display: flex; min-height: 100vh; }
+
+/* ─── Sidebar ─── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 100;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-brand {
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+
+.sidebar-brand svg { flex-shrink: 0; }
+
+.sidebar-brand-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+
+.sidebar-brand-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.sidebar-nav { padding: 16px 12px; flex: 1; }
+
+.sidebar-section {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 16px 12px 8px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  position: relative;
+  overflow: visible;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: inherit;
+}
+
+.nav-item:hover { color: var(--text); }
+.nav-item:hover::before { opacity: 0.05; }
+
+.nav-item.active {
+  color: #fff;
+  background: var(--accent-glow);
+}
+
+.nav-item.active::before { opacity: 0.08; }
+
+.nav-item.active::after {
+  content: '';
+  position: absolute;
+  left: -12px; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 20px;
+  background: var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.nav-item svg { flex-shrink: 0; position: relative; z-index: 1; }
+.nav-item span { position: relative; z-index: 1; }
+
+.nav-item:active { transform: scale(0.98); }
+
+.sidebar-wallet {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(59, 130, 246, 0.03);
+}
+
+.wallet-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.wallet-addr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.wallet-bal {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.wallet-bal-usd {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ─── Main Content ─── */
+.main {
+  margin-left: var(--sidebar-w);
+  flex: 1;
+  min-height: 100vh;
+}
+
+.topbar {
+  height: var(--header-h);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  background: rgba(6, 6, 11, 0.8);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.topbar-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+
+.chain-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.chain-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.page { padding: 28px 32px; animation: page-in 0.35s ease; }
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Stats Row ─── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.stat-card:hover { border-color: var(--border-hover); }
+.stat-card:hover::after { opacity: 1; }
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+/* ─── Cards ─── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.25s;
+}
+
+.card:hover { border-color: var(--border-hover); }
+
+.card-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card-body { padding: 22px; }
+
+/* ─── Tables ─── */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tbl th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+}
+
+.tbl td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(26, 26, 46, 0.5);
+  color: var(--text-dim);
+  transition: background 0.15s, color 0.15s;
+}
+
+.tbl tr { transition: background 0.15s; }
+
+.tbl tbody tr:hover td {
+  background: rgba(59, 130, 246, 0.03);
+  color: var(--text);
+}
+
+.tbl .mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+/* ─── Buttons ─── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+}
+
+.btn:active { transform: scale(0.96); }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-hover); box-shadow: 0 0 20px var(--accent-glow); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.btn-ghost:hover { border-color: var(--border-hover); color: var(--text); background: rgba(255,255,255,0.02); }
+
+.btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 6px; }
+
+.btn-green { background: var(--green-dim); color: var(--green); border-color: rgba(16,185,129,0.2); }
+.btn-green:hover { background: rgba(16,185,129,0.2); box-shadow: 0 0 12px rgba(16,185,129,0.1); }
+
+.btn-red { background: var(--red-dim); color: var(--red); border-color: rgba(239,68,68,0.2); }
+.btn-red:hover { background: rgba(239,68,68,0.2); }
+
+.btn-yellow { background: var(--yellow-dim); color: var(--yellow); border-color: rgba(245,158,11,0.2); }
+.btn-yellow:hover { background: rgba(245,158,11,0.2); }
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
+.btn .spinner {
+  width: 14px; height: 14px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ─── Inputs ─── */
+.input-group { margin-bottom: 18px; }
+
+.input-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #fff;
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.input::placeholder { color: var(--text-muted); }
+
+.input-mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+select.input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b6b8d' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+/* ─── Badges ─── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.badge-green { background: var(--green-dim); color: var(--green); }
+.badge-red { background: var(--red-dim); color: var(--red); }
+.badge-yellow { background: var(--yellow-dim); color: var(--yellow); }
+.badge-blue { background: var(--accent-glow); color: var(--accent); }
+.badge-dim { background: rgba(255,255,255,0.03); color: var(--text-muted); }
+
+/* ─── Pagination ─── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 0;
+}
+
+.pagination .info {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 8px;
+}
+
+/* ─── Batch Bar ─── */
+.batch-bar {
+  display: none;
+  position: sticky;
+  bottom: 0;
+  background: rgba(14, 14, 22, 0.95);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border);
+  padding: 12px 18px;
+  align-items: center;
+  gap: 14px;
+  z-index: 10;
+  animation: batch-bar-in 0.25s ease;
+}
+
+@keyframes batch-bar-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.batch-bar .batch-count {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+/* ─── Range Slider ─── */
+.lease-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.lease-slider-wrap label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.lease-slider-wrap input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.lease-slider-wrap input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 8px var(--accent-glow);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.lease-slider-wrap input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.lease-slider-wrap .lease-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  min-width: 70px;
+  text-align: right;
+}
+
+/* ─── Checkbox (legacy) ─── */
+.node-cb {
+  width: 16px; height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ─── Node Cards ─── */
+.node-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.node-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  overflow: hidden;
+}
+
+.node-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.node-card:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-card-hover);
+}
+
+.node-card:hover::before { opacity: 0.5; }
+
+.node-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.12), inset 0 0 20px rgba(59, 130, 246, 0.04);
+}
+
+.node-card.selected::before { opacity: 1; }
+
+.node-card.in-plan {
+  opacity: 0.45;
+  cursor: default;
+  border-color: rgba(16, 185, 129, 0.2);
+  background: rgba(16, 185, 129, 0.03);
+}
+
+.node-card.in-plan:hover {
+  background: rgba(16, 185, 129, 0.03);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.node-card:active:not(.in-plan) { transform: scale(0.985); }
+
+.node-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.node-card-select {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  line-height: 1.6;
+}
+
+.node-card .node-card-select.sel-active {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.node-card .node-card-select.sel-inplan {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.node-card .node-card-select.sel-empty {
+  background: transparent;
+  color: transparent;
+}
+
+.node-card-moniker {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.node-card-addr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.node-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.node-card-meta .badge { font-size: 9px; padding: 2px 6px; }
+
+.node-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(26, 26, 46, 0.4);
+}
+
+.node-card-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.node-card-speed {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ─── Floating Action Bar ─── */
+.action-bar {
+  position: fixed;
+  bottom: 24px;
+  left: calc(var(--sidebar-w) + 32px);
+  right: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: rgba(14, 14, 22, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-hover);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.1);
+  z-index: 60;
+  animation: action-bar-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes action-bar-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.action-bar-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.action-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ─── Enhanced Stat Cards ─── */
+.stat-card-enhanced {
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(14, 14, 22, 0.8) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+
+.stat-card-enhanced::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.stat-card-enhanced:hover { border-color: var(--border-hover); }
+.stat-card-enhanced:hover::before { opacity: 1; }
+
+.stat-card-enhanced .stat-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 12px;
+}
+
+.stat-card-enhanced .stat-icon.blue { background: var(--accent-glow); color: var(--accent); }
+.stat-card-enhanced .stat-icon.green { background: var(--green-dim); color: var(--green); }
+.stat-card-enhanced .stat-icon.yellow { background: var(--yellow-dim); color: var(--yellow); }
+.stat-card-enhanced .stat-icon.red { background: var(--red-dim); color: var(--red); }
+
+/* ─── Remove button for Your Nodes ─── */
+.node-card-remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+  opacity: 0;
+  font-size: 14px;
+}
+
+.node-card:hover .node-card-remove { opacity: 1; }
+.node-card-remove:hover { background: var(--red-dim); color: var(--red); border-color: rgba(239,68,68,0.2); }
+
+@media (max-width: 900px) {
+  .action-bar { left: 16px; right: 16px; bottom: 16px; }
+  .node-cards-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── List View ─── */
+.node-list-view { display: flex; flex-direction: column; gap: 0; }
+
+.node-list-header {
+  display: grid;
+  grid-template-columns: 32px 1.5fr 80px 70px 120px 80px 70px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.node-list-row {
+  display: grid;
+  grid-template-columns: 32px 1.5fr 80px 70px 120px 80px 70px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.node-list-row:first-of-type { border-radius: 10px 10px 0 0; }
+.node-list-row:last-of-type { border-radius: 0 0 10px 10px; border-bottom: none; }
+.node-list-row:only-of-type { border-radius: 10px; }
+.node-list-row:hover { background: var(--bg-card-hover); }
+.node-list-row.selected { background: var(--accent-glow); }
+.node-list-row.in-plan { opacity: 0.45; cursor: default; }
+.node-list-flag {
+  font-size: 16px;
+  line-height: 1;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.node-list-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.node-list-addr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.node-list-moniker { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-list-price { display: flex; flex-direction: column; gap: 1px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.node-list-usd { font-size: 10px; color: var(--text-dim); }
+
+@media (max-width: 900px) {
+  .node-list-header, .node-list-row { grid-template-columns: 28px 1fr 60px 60px; }
+  .node-list-header > :nth-child(5), .node-list-header > :nth-child(6), .node-list-header > :nth-child(7),
+  .node-list-row > :nth-child(5), .node-list-row > :nth-child(6), .node-list-row > :nth-child(7) { display: none; }
+}
+
+/* ─── View Toggle ─── */
+.view-toggle {
+  display: inline-flex; gap: 2px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 8px; padding: 2px;
+}
+.view-toggle-btn {
+  padding: 5px 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  display: flex; align-items: center; transition: all 0.15s;
+  font-family: 'Poppins', sans-serif;
+}
+.view-toggle-btn.active { background: var(--accent); color: #fff; }
+.view-toggle-btn:hover:not(.active) { color: var(--text); }
+
+/* ─── Theme Toggle ─── */
+.theme-toggle {
+  width: 36px; height: 36px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-card);
+  color: var(--text-dim); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s; font-family: 'Poppins', sans-serif;
+}
+.theme-toggle:hover { border-color: var(--border-hover); color: var(--text); }
+
+/* ─── Light Theme Overrides ─── */
+html[data-theme="light"] .topbar { background: rgba(245, 247, 251, 0.9); }
+html[data-theme="light"] .action-bar { background: rgba(255, 255, 255, 0.95); box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.08); }
+html[data-theme="light"] .import-overlay { background: rgba(245, 247, 251, 0.98); }
+html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #ccc; }
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+html[data-theme="light"] .sidebar-brand-text,
+html[data-theme="light"] .wallet-bal,
+html[data-theme="light"] .topbar-title,
+html[data-theme="light"] .lease-slider-wrap .lease-value { color: var(--text); }
+
+/* ─── Subscribers Table ─── */
+.subs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.subs-table th { text-align: left; padding: 10px 14px; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.subs-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.subs-table tr:hover td { background: var(--bg-card-hover); }
+.subs-badge-active { background: var(--green-dim); color: var(--green); padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+.subs-badge-inactive { background: var(--red-dim); color: var(--red); padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+
+/* ─── Filters Bar ─── */
+.filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filters .input { width: auto; min-width: 160px; padding: 8px 12px; font-size: 12px; }
+.filters select.input { min-width: 140px; }
+
+/* ─── Loading ─── */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  gap: 16px;
+}
+
+.loading-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text { font-size: 13px; color: var(--text-muted); }
+
+/* ─── Toast ─── */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toast-in 0.35s ease;
+  backdrop-filter: blur(12px);
+  border: 1px solid;
+  max-width: 380px;
+}
+
+.toast-success { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.2); color: var(--green); }
+.toast-error { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.2); color: var(--red); }
+.toast-info { background: rgba(59,130,246,0.12); border-color: rgba(59,130,246,0.2); color: var(--accent); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.toast-exit { animation: toast-out 0.3s ease forwards; }
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(-8px) scale(0.95); }
+}
+
+/* ─── Protocol / Country tags ─── */
+.tag-wg { color: var(--green); }
+.tag-v2 { color: var(--accent); }
+
+/* ─── Speed bar ─── */
+.speed-bar {
+  width: 50px; height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.speed-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+/* ─── Plan form grid ─── */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.form-grid .full { grid-column: 1 / -1; }
+
+/* ─── In-plan row highlight ─── */
+.row-in-plan td { background: rgba(16, 185, 129, 0.03) !important; }
+
+/* ─── Empty state ─── */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.empty-state svg { margin-bottom: 16px; opacity: 0.3; }
+
+/* ─── Responsive ─── */
+@media (max-width: 900px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); }
+  .main { margin-left: 0; }
+  .form-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- IMPORT WALLET OVERLAY -->
+<div class="import-overlay hidden" id="importOverlay">
+  <div class="import-box">
+    <div class="import-logo">
+      <svg viewBox="0 0 30 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M27.3966 1.4387C27.7459 1.4387 28.0281 1.72093 28.0281 2.07017V12.1372V12.7626C28.0362 14.0032 28.0464 15.5525 27.8291 17.1951C27.5773 19.1099 27.0778 20.6672 26.3103 21.9566C23.8068 26.1535 19.3093 29.2297 15.0879 29.6399C15.0676 29.6419 15.0473 29.6439 15.027 29.6439C15.0067 29.6439 14.9864 29.6439 14.9661 29.6399C10.7407 29.2256 6.24323 26.1515 3.74372 21.9566C2.97214 20.6672 2.47671 19.1078 2.22493 17.1951C2.0097 15.5525 2.01986 14.0053 2.03001 12.7626V12.1372L2.03204 2.07017C2.03204 1.72093 2.31427 1.4387 2.66351 1.4387H27.3966ZM27.3966 0.17981H2.66148C1.61985 0.17981 0.771119 1.02854 0.771119 2.07017V12.7565C0.758936 13.9606 0.746754 15.6154 0.974166 17.3576C1.25031 19.4469 1.80057 21.1606 2.65945 22.6002C3.97926 24.8134 5.82292 26.7667 7.99349 28.253C10.1844 29.7515 12.5458 30.6632 14.826 30.8886C14.891 30.8967 14.958 30.9008 15.025 30.9008C15.092 30.9008 15.157 30.8967 15.224 30.8886C17.5022 30.6632 19.8636 29.7536 22.0545 28.2551C24.225 26.7688 26.0707 24.8134 27.3926 22.6002C28.2535 21.1586 28.8037 19.4449 29.0779 17.3596C29.3053 15.6337 29.2951 14.0418 29.287 12.7606V12.1332V2.0722C29.287 1.02854 28.4383 0.18184 27.3966 0.18184V0.17981Z" fill="white"/>
+        <path d="M25.6792 14.1846C25.864 14.3247 26.1279 14.1927 26.1279 13.9612L26.1218 12.6881V3.61598C26.1239 3.45963 25.998 3.33374 25.8416 3.33374H4.21715C4.0608 3.33374 3.93491 3.45963 3.93491 3.61598V9.1957C3.93491 9.43529 3.98974 9.67083 4.09735 9.88402C4.20496 10.0972 4.35928 10.284 4.55217 10.4262L20.8182 22.5907C20.9604 22.6963 20.9705 22.9013 20.8406 23.0232C20.5401 23.3074 20.2233 23.5734 19.8944 23.8252C19.7929 23.9024 19.6548 23.9024 19.5553 23.8272L4.38365 12.4587C4.19887 12.3206 3.93491 12.4505 3.93491 12.684C3.93491 14.6333 3.76232 18.2699 5.40091 21.0557C7.23036 24.1684 10.3715 26.6252 13.604 27.4212C14.071 27.5349 14.538 27.6161 15.005 27.6587C15.0233 27.6608 15.0416 27.6608 15.0578 27.6587C17.1736 27.4679 19.3259 26.5014 21.1736 25.0415C21.6365 24.6739 22.0812 24.278 22.5035 23.8536C23.336 23.0151 24.0629 22.077 24.6619 21.0597C25.2041 20.1399 25.5472 19.1267 25.7645 18.1135C25.8132 17.8942 25.8538 17.6729 25.8904 17.4495C25.9858 16.8688 25.7502 16.282 25.2812 15.9308L11.5086 5.63223C11.2933 5.46979 11.405 5.12664 11.6791 5.12664H13.5025C13.5634 5.12664 13.6223 5.14695 13.673 5.1835L25.6812 14.1866L25.6792 14.1846Z" fill="white"/>
+      </svg>
+    </div>
+    <div class="import-title">Sentinel Plan Manager</div>
+    <div class="import-subtitle">Create your own dVPN subscription plan.<br>Import your wallet to get started.</div>
+    <textarea class="import-textarea" id="importInput" placeholder="Enter your 12 or 24 word mnemonic phrase..." spellcheck="false"></textarea>
+    <div class="import-error" id="importError"></div>
+    <button class="import-btn" id="importBtn" onclick="doImport()">Import Wallet</button>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:12px">
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <span style="font-size:12px;color:var(--text-muted)">or</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+    <button class="import-btn" id="testImportBtn" onclick="doTestImport()" style="margin-top:12px;background:#10b981">Test Wallet (.env)</button>
+  </div>
+</div>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <svg width="26" height="26" viewBox="0 0 30 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M27.3966 1.4387C27.7459 1.4387 28.0281 1.72093 28.0281 2.07017V12.1372V12.7626C28.0362 14.0032 28.0464 15.5525 27.8291 17.1951C27.5773 19.1099 27.0778 20.6672 26.3103 21.9566C23.8068 26.1535 19.3093 29.2297 15.0879 29.6399C15.0676 29.6419 15.0473 29.6439 15.027 29.6439C15.0067 29.6439 14.9864 29.6439 14.9661 29.6399C10.7407 29.2256 6.24323 26.1515 3.74372 21.9566C2.97214 20.6672 2.47671 19.1078 2.22493 17.1951C2.0097 15.5525 2.01986 14.0053 2.03001 12.7626V12.1372L2.03204 2.07017C2.03204 1.72093 2.31427 1.4387 2.66351 1.4387H27.3966ZM27.3966 0.17981H2.66148C1.61985 0.17981 0.771119 1.02854 0.771119 2.07017V12.7565C0.758936 13.9606 0.746754 15.6154 0.974166 17.3576C1.25031 19.4469 1.80057 21.1606 2.65945 22.6002C3.97926 24.8134 5.82292 26.7667 7.99349 28.253C10.1844 29.7515 12.5458 30.6632 14.826 30.8886C14.891 30.8967 14.958 30.9008 15.025 30.9008C15.092 30.9008 15.157 30.8967 15.224 30.8886C17.5022 30.6632 19.8636 29.7536 22.0545 28.2551C24.225 26.7688 26.0707 24.8134 27.3926 22.6002C28.2535 21.1586 28.8037 19.4449 29.0779 17.3596C29.3053 15.6337 29.2951 14.0418 29.287 12.7606V12.1332V2.0722C29.287 1.02854 28.4383 0.18184 27.3966 0.18184V0.17981Z" fill="#0156FC"/>
+        <path d="M25.6792 14.1846C25.864 14.3247 26.1279 14.1927 26.1279 13.9612L26.1218 12.6881V3.61598C26.1239 3.45963 25.998 3.33374 25.8416 3.33374H4.21715C4.0608 3.33374 3.93491 3.45963 3.93491 3.61598V9.1957C3.93491 9.43529 3.98974 9.67083 4.09735 9.88402C4.20496 10.0972 4.35928 10.284 4.55217 10.4262L20.8182 22.5907C20.9604 22.6963 20.9705 22.9013 20.8406 23.0232C20.5401 23.3074 20.2233 23.5734 19.8944 23.8252C19.7929 23.9024 19.6548 23.9024 19.5553 23.8272L4.38365 12.4587C4.19887 12.3206 3.93491 12.4505 3.93491 12.684C3.93491 14.6333 3.76232 18.2699 5.40091 21.0557C7.23036 24.1684 10.3715 26.6252 13.604 27.4212C14.071 27.5349 14.538 27.6161 15.005 27.6587C15.0233 27.6608 15.0416 27.6608 15.0578 27.6587C17.1736 27.4679 19.3259 26.5014 21.1736 25.0415C21.6365 24.6739 22.0812 24.278 22.5035 23.8536C23.336 23.0151 24.0629 22.077 24.6619 21.0597C25.2041 20.1399 25.5472 19.1267 25.7645 18.1135C25.8132 17.8942 25.8538 17.6729 25.8904 17.4495C25.9858 16.8688 25.7502 16.282 25.2812 15.9308L11.5086 5.63223C11.2933 5.46979 11.405 5.12664 11.6791 5.12664H13.5025C13.5634 5.12664 13.6223 5.14695 13.673 5.1835L25.6812 14.1866L25.6792 14.1846Z" fill="#0156FC"/>
+      </svg>
+      <div>
+        <div class="sidebar-brand-text">Sentinel</div>
+        <div class="sidebar-brand-sub">Plan Manager</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="sidebar-section">Main</div>
+      <div class="nav-item active" onclick="navigate('dashboard')" data-page="dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Dashboard</span>
+      </div>
+      <div class="nav-item" onclick="navigate('create')" data-page="create">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <span>Create Plan</span>
+      </div>
+
+      <div class="sidebar-section">Nodes</div>
+      <div class="nav-item" onclick="navigate('add-nodes')" data-page="add-nodes">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <span>Add Nodes</span>
+      </div>
+      <div class="nav-item" onclick="navigate('your-nodes')" data-page="your-nodes">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Your Nodes</span>
+      </div>
+
+      <div class="nav-item" onclick="navigate('pricing')" data-page="pricing">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Pricing</span>
+      </div>
+      <div class="nav-item" onclick="navigate('subscribers')" data-page="subscribers">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Subscribers</span>
+      </div>
+      <div class="nav-item" onclick="navigate('fee-grants')" data-page="fee-grants">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <span>Fee Grants</span>
+      </div>
+
+      <div class="sidebar-section">Analytics</div>
+      <div class="nav-item" onclick="navigate('rankings')" data-page="rankings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Node Rankings</span>
+      </div>
+      <div class="nav-item" onclick="navigate('rpcs')" data-page="rpcs">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>RPC Health</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-wallet" id="sidebarWallet">
+      <div class="wallet-label">Wallet</div>
+      <div class="wallet-addr" id="walletAddr">Loading...</div>
+      <div class="wallet-bal" id="walletBal">--</div>
+      <div class="wallet-bal-usd" id="walletUsd">--</div>
+      <button class="wallet-logout-btn" onclick="doLogout()">Logout</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-title" id="pageTitle">Dashboard</div>
+      <div class="topbar-right">
+        <div class="chain-badge">
+          <div class="chain-dot"></div>
+          <span>sentinelhub-2 &middot; v12</span>
+        </div>
+        <button class="theme-toggle" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+      </div>
+    </header>
+    <div id="app">
+      <div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Connecting to Sentinel network...</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+const S = {
+  page: 'dashboard',
+  wallet: null,
+  dvpnPrice: null,
+  // Explorer
+  nodes: null, nodePage: 1, nodeFilters: { search: '', country: '', protocol: '' },
+  countries: [], protocols: [],
+  // Manager
+  mgrPlanId: '', mgrNodes: null, mgrPage: 1, myPlans: null, myPlansLoading: false,
+  leaseHours: 24, addSet: new Set(), removeSet: new Set(),
+  // Create
+  creating: false,
+  // UI
+  viewMode: localStorage.getItem('planMgrView') || 'grid',
+  theme: localStorage.getItem('planMgrTheme') || 'dark',
+};
+
+// Apply saved theme immediately
+document.documentElement.setAttribute('data-theme', S.theme);
+
+let walletAddress = '';
+let ADDR_SHORT = '?';
+
+// ─── Utils ───────────────────────────────────────────────────────────────────
+const fmt = (n) => n == null ? '--' : Number(n).toLocaleString();
+const fmtDvpn = (udvpn) => {
+  if (!udvpn) return '0';
+  const d = udvpn / 1e6;
+  if (d >= 1e6) return (d / 1e6).toFixed(1) + 'M';
+  if (d >= 1e3) return (d / 1e3).toFixed(1) + 'K';
+  if (d >= 1) return d.toFixed(1);
+  return d.toFixed(3);
+};
+const fmtUsd = (usd) => !usd ? '--' : usd < 0.01 ? '<$0.01' : '$' + usd.toFixed(2);
+const shortAddr = (a) => a ? a.slice(0, 12) + '...' + a.slice(-6) : '';
+const $ = (id) => document.getElementById(id);
+
+// ─── Country Flags ───────────────────────────────────────────────────────────
+const CC={US:'US',GB:'GB',DE:'DE',FR:'FR',NL:'NL',CA:'CA',AU:'AU',JP:'JP',SG:'SG',IN:'IN',BR:'BR',KR:'KR',HK:'HK',CH:'CH',SE:'SE',NO:'NO',FI:'FI',IE:'IE',AT:'AT',BE:'BE',DK:'DK',ES:'ES',IT:'IT',PL:'PL',CZ:'CZ',RO:'RO',BG:'BG',UA:'UA',RU:'RU',TR:'TR',ZA:'ZA',MX:'MX',AR:'AR',CL:'CL',CO:'CO',PE:'PE',PT:'PT',GR:'GR',HU:'HU',HR:'HR',RS:'RS',LT:'LT',LV:'LV',EE:'EE',SK:'SK',SI:'SI',LU:'LU',MT:'MT',CY:'CY',IS:'IS',ID:'ID',MY:'MY',TH:'TH',VN:'VN',PH:'PH',TW:'TW',NZ:'NZ',AL:'AL',BH:'BH',BO:'BO',EC:'EC',EG:'EG',GE:'GE',GT:'GT',JM:'JM',KZ:'KZ',KG:'KG',MD:'MD',MN:'MN',MA:'MA',PK:'PK',PR:'PR',UY:'UY',PA:'PA',CR:'CR',DO:'DO',SV:'SV',HN:'HN',NI:'NI',PY:'PY',UZ:'UZ',AZ:'AZ',AM:'AM',BA:'BA',ME:'ME',MK:'MK',NG:'NG',KE:'KE',GH:'GH',TN:'TN',LB:'LB',JO:'JO',AE:'AE',QA:'QA',KW:'KW',OM:'OM',SA:'SA',IL:'IL',BD:'BD',LK:'LK',MM:'MM',KH:'KH',LA:'LA',NP:'NP',CN:'CN','United States':'US','United Kingdom':'GB',Germany:'DE',France:'FR',Netherlands:'NL','The Netherlands':'NL',Canada:'CA',Australia:'AU',Japan:'JP',Singapore:'SG',India:'IN',Brazil:'BR','South Korea':'KR','Hong Kong':'HK',Switzerland:'CH',Sweden:'SE',Norway:'NO',Finland:'FI',Ireland:'IE',Austria:'AT',Belgium:'BE',Denmark:'DK',Spain:'ES',Italy:'IT',Poland:'PL','Czech Republic':'CZ',Czechia:'CZ',Romania:'RO',Bulgaria:'BG',Ukraine:'UA',Russia:'RU',Turkey:'TR','Türkiye':'TR','South Africa':'ZA',Mexico:'MX',Argentina:'AR',Chile:'CL',Colombia:'CO',Peru:'PE',Portugal:'PT',Greece:'GR',Hungary:'HU',Croatia:'HR',Serbia:'RS',Lithuania:'LT',Latvia:'LV',Estonia:'EE',Slovakia:'SK',Slovenia:'SI',Luxembourg:'LU',Malta:'MT',Cyprus:'CY',Iceland:'IS',Indonesia:'ID',Malaysia:'MY',Thailand:'TH',Vietnam:'VN',Philippines:'PH',Taiwan:'TW','New Zealand':'NZ',Albania:'AL',Bahrain:'BH',Bolivia:'BO',Ecuador:'EC',Egypt:'EG',Georgia:'GE',Guatemala:'GT',Jamaica:'JM',Kazakhstan:'KZ',Kyrgyzstan:'KG',Moldova:'MD',Mongolia:'MN',Morocco:'MA',Pakistan:'PK','Puerto Rico':'PR',Uruguay:'UY',Panama:'PA','Costa Rica':'CR','Dominican Republic':'DO','El Salvador':'SV',Honduras:'HN',Nicaragua:'NI',Paraguay:'PY',Uzbekistan:'UZ',Azerbaijan:'AZ',Armenia:'AM','Bosnia and Herzegovina':'BA',Montenegro:'ME','North Macedonia':'MK',Nigeria:'NG',Kenya:'KE',Ghana:'GH',Tunisia:'TN',Lebanon:'LB',Jordan:'JO','United Arab Emirates':'AE',Qatar:'QA',Kuwait:'KW',Oman:'OM','Saudi Arabia':'SA',Israel:'IL',Bangladesh:'BD','Sri Lanka':'LK',Myanmar:'MM',Cambodia:'KH',Laos:'LA',Nepal:'NP',China:'CN'};
+function countryFlag(c) {
+  if (!c) return '';
+  const code = c.length === 2 ? c.toUpperCase() : CC[c];
+  if (!code) return '';
+  return String.fromCodePoint(...[...code].map(ch => 127397 + ch.charCodeAt(0)));
+}
+function dvpnToUsdHr(hrUdvpn) {
+  if (!hrUdvpn || !S.dvpnPrice) return null;
+  return (hrUdvpn / 1e6) * S.dvpnPrice;
+}
+
+// ─── Theme ───────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  S.theme = S.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', S.theme);
+  localStorage.setItem('planMgrTheme', S.theme);
+  updateThemeIcon();
+}
+function updateThemeIcon() {
+  const btn = $('themeBtn');
+  if (!btn) return;
+  btn.innerHTML = S.theme === 'dark'
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+}
+
+// ─── View Toggle ─────────────────────────────────────────────────────────────
+function setViewMode(mode) {
+  S.viewMode = mode;
+  localStorage.setItem('planMgrView', mode);
+  if (S.page === 'add-nodes') renderAddNodes();
+  if (S.page === 'your-nodes') renderYourNodes();
+}
+function viewToggleHtml() {
+  return `<div class="view-toggle">
+    <button class="view-toggle-btn ${S.viewMode==='grid'?'active':''}" onclick="setViewMode('grid')" title="Grid view">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+    </button>
+    <button class="view-toggle-btn ${S.viewMode==='list'?'active':''}" onclick="setViewMode('list')" title="List view">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    </button>
+  </div>`;
+}
+
+// ─── Toast ───────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const c = $('toasts');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  const dur = type === 'error' ? 7000 : 4000;
+  setTimeout(() => { el.classList.add('toast-exit'); setTimeout(() => el.remove(), 300); }, dur);
+}
+
+// ─── Friendly error parser ───────────────────────────────────────────────────
+function friendlyError(raw) {
+  if (!raw) return 'Unknown error';
+  const s = String(raw);
+  // Duplicate
+  if (s.includes('duplicate node for plan')) return 'Node is already in this plan';
+  if (s.includes('duplicate provider')) return 'Provider already registered — use Update instead';
+  // Lease
+  if (s.includes('lease') && s.includes('not found')) return 'No active lease for this node — auto-leasing...';
+  if (s.includes('lease') && s.includes('already exists')) return 'Active lease already exists for this node';
+  if (s.includes('insufficient funds')) return 'Insufficient P2P balance for this transaction';
+  if (s.includes('invalid price')) return 'Price mismatch — node may have changed its hourly rate';
+  // Plan
+  if (s.includes('invalid status inactive for plan')) return 'Plan is inactive — activate it first';
+  if (s.includes('plan') && s.includes('does not exist')) return 'Plan not found on chain';
+  // Provider
+  if (s.includes('provider') && s.includes('does not exist')) return 'No provider registered — register first';
+  if (s.includes('expected sentprov, got sent')) return 'Address prefix error (internal bug — needs sentprov)';
+  if (s.includes('expected sent, got sentprov')) return 'Address prefix error (internal bug — needs sent)';
+  // Node
+  if (s.includes('node') && s.includes('does not exist')) return 'Node not found on chain — may be offline';
+  if (s.includes('node') && s.includes('not active')) return 'Node is inactive or has been deregistered';
+  // Sequence
+  if (s.includes('account sequence mismatch')) return 'Chain sequence mismatch — please retry in a few seconds';
+  // Network
+  if (s.includes('ECONNREFUSED') || s.includes('ETIMEDOUT')) return 'Cannot reach Sentinel RPC — network issue';
+  if (s.includes('fetch failed') || s.includes('Failed to fetch')) return 'Server unreachable — is it running?';
+  // Timeout
+  if (s.includes('timed out')) return 'Transaction timed out — check chain explorer';
+  // Gas
+  if (s.includes('out of gas')) return 'Transaction ran out of gas';
+  // Truncate long RPC errors
+  if (s.length > 120) {
+    const descMatch = s.match(/desc = (.+?)(?:\[|With gas|$)/);
+    if (descMatch) return descMatch[1].trim().slice(0, 100);
+  }
+  return s.slice(0, 120);
+}
+
+// ─── Loading helper ──────────────────────────────────────────────────────────
+function showLoading(msg = 'Loading...') {
+  $('app').innerHTML = `<div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">${msg}</div></div>`;
+}
+
+// ─── Frontend Data Cache ──────────────────────────────────────────────────
+// Stale-while-revalidate: show cached data immediately, fetch fresh in background.
+// When fresh data arrives, re-render the page. Shows a subtle "Updating..." badge.
+const _dataCache = {};
+
+/**
+ * Fetch JSON from a URL with local caching.
+ * Returns cached data instantly if available, then refreshes in background.
+ * @param {string} url - API endpoint
+ * @param {number} ttlMs - Cache TTL in ms
+ * @param {Function} [onRefresh] - Called with fresh data when background refresh completes
+ * @returns {Promise<{data: any, stale: boolean}>}
+ */
+async function cachedFetch(url, ttlMs, onRefresh) {
+  const entry = _dataCache[url];
+  const now = Date.now();
+
+  // Fresh cache hit
+  if (entry && (now - entry.ts) < ttlMs) {
+    return { data: entry.data, stale: false };
+  }
+
+  // Stale cache exists — return it instantly, refresh in background
+  if (entry?.data) {
+    // Background refresh
+    fetch(url).then(r => r.json()).then(d => {
+      if (!d.error) {
+        _dataCache[url] = { data: d, ts: Date.now() };
+        if (onRefresh) onRefresh(d);
+      }
+    }).catch(() => {});
+    return { data: entry.data, stale: true };
+  }
+
+  // No cache — must wait
+  const r = await fetch(url);
+  const d = await r.json();
+  if (!d.error) _dataCache[url] = { data: d, ts: Date.now() };
+  return { data: d, stale: false };
+}
+
+/** Show a subtle updating indicator in the page header area */
+function showUpdating() {
+  let el = document.getElementById('updatingBadge');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'updatingBadge';
+    el.style.cssText = 'position:fixed;top:12px;right:24px;z-index:9999;background:var(--accent);color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;display:flex;align-items:center;gap:6px;opacity:0.9;transition:opacity 0.3s';
+    el.innerHTML = '<div style="width:8px;height:8px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div> Updating...';
+    document.body.appendChild(el);
+  }
+  el.style.opacity = '0.9';
+}
+
+function hideUpdating() {
+  const el = document.getElementById('updatingBadge');
+  if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }
+}
+
+// ─── Navigation ──────────────────────────────────────────────────────────────
+const pageTitles = {
+  dashboard: 'Dashboard',
+  create: 'Create Plan',
+  'add-nodes': 'Add Nodes',
+  'your-nodes': 'Your Nodes',
+  pricing: 'Pricing',
+  subscribers: 'Subscribers',
+  'fee-grants': 'Fee Grants',
+  rankings: 'Node Rankings',
+  rpcs: 'RPC Health',
+};
+
+function navigate(page) {
+  if (S.page === page) return; // Don't re-navigate to same page
+  S.page = page;
+  // Cancel any in-flight requests from other pages
+  if (_explorerAbort) { _explorerAbort.abort(); _explorerAbort = null; }
+  if (_mgrNodesAbort) { _mgrNodesAbort.abort(); _mgrNodesAbort = null; }
+  if (_myPlansAbort) { _myPlansAbort.abort(); _myPlansAbort = null; }
+  // Remove floating action bars from previous page
+  const addBar = document.getElementById('addActionBar');
+  const remBar = document.getElementById('removeActionBar');
+  if (addBar) addBar.remove();
+  if (remBar) remBar.remove();
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  $('pageTitle').textContent = pageTitles[page] || page;
+  renderPage();
+}
+
+function renderPage() {
+  switch (S.page) {
+    case 'dashboard': renderDashboard(); break;
+    case 'create': renderCreate(); break;
+    case 'add-nodes': loadAddNodes(); break;
+    case 'your-nodes': loadYourNodes(); break;
+    case 'pricing': loadPricing(); break;
+    case 'subscribers': loadSubscribers(); break;
+    case 'fee-grants': loadFeeGrants(); break;
+    case 'rankings': renderComingSoon('Node Rankings', 'Session scanning & node performance analytics'); break;
+    case 'rpcs': renderComingSoon('RPC Health', 'Endpoint monitoring & provider health checks'); break;
+  }
+}
+
+// ─── Wallet ──────────────────────────────────────────────────────────────────
+async function loadWallet() {
+  try {
+    const updateUI = (d) => {
+      if (d.needsLogin || d.loggedOut) { showImportOverlay(); return; }
+      S.wallet = d;
+      S.dvpnPrice = d.dvpnPriceUsd;
+      walletAddress = d.address || '';
+      ADDR_SHORT = walletAddress ? walletAddress.slice(0, 10) + '...' + walletAddress.slice(-6) : '?';
+      $('walletAddr').textContent = ADDR_SHORT;
+      $('walletBal').textContent = fmt(d.balanceDvpn) + ' P2P';
+      $('walletUsd').textContent = d.balanceUsd ? fmtUsd(d.balanceUsd) : '';
+    };
+    const { data: d, stale } = await cachedFetch('/api/wallet', 30_000, (fresh) => { updateUI(fresh); hideUpdating(); });
+    if (stale) showUpdating();
+    updateUI(d);
+  } catch (e) {
+    $('walletAddr').textContent = '?';
+    $('walletBal').textContent = 'Error';
+  }
+}
+
+// ─── Import / Logout ─────────────────────────────────────────────────────────
+function showImportOverlay() { $('importOverlay').classList.remove('hidden'); }
+function hideImportOverlay() { $('importOverlay').classList.add('hidden'); }
+
+async function doImport() {
+  const input = $('importInput');
+  const err = $('importError');
+  const btn = $('importBtn');
+  const mnemonic = input.value.trim();
+  err.textContent = '';
+
+  const words = mnemonic.split(/\s+/).filter(Boolean);
+  if (words.length !== 12 && words.length !== 24) {
+    err.textContent = 'Mnemonic must be 12 or 24 words';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  try {
+    const r = await fetch('/api/wallet/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mnemonic }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      hideImportOverlay();
+      input.value = '';
+      S.wallet = null;
+      S.myPlans = null;
+      await loadWallet();
+      navigate('dashboard');
+    } else {
+      err.textContent = d.error || 'Import failed';
+    }
+  } catch (e) {
+    err.textContent = 'Connection error: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Import Wallet';
+}
+
+async function doTestImport() {
+  const err = $('importError');
+  const btn = $('testImportBtn');
+  err.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const r = await fetch('/api/wallet/test-import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    });
+    const d = await r.json();
+    if (d.ok) {
+      hideImportOverlay();
+      S.wallet = null;
+      S.myPlans = null;
+      await loadWallet();
+      navigate('dashboard');
+    } else {
+      err.textContent = d.error || 'Test import failed';
+    }
+  } catch (e) {
+    err.textContent = 'Connection error: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Test Wallet (.env)';
+}
+
+async function doLogout() {
+  if (!confirm('Logout and clear wallet?')) return;
+  try {
+    await fetch('/api/wallet/logout', { method: 'POST' });
+  } catch (err) {
+    console.error('Logout request failed:', err.message);
+  }
+  S.wallet = null;
+  S.myPlans = null;
+  walletAddress = '';
+  ADDR_SHORT = '?';
+  $('walletAddr').textContent = '?';
+  $('walletBal').textContent = '--';
+  $('walletUsd').textContent = '';
+  showImportOverlay();
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+async function renderDashboard() {
+  showLoading('Loading dashboard...');
+  if (!S.wallet) await loadWallet();
+  if (S.page !== 'dashboard') return; // navigated away
+
+  // Fetch node count
+  let nodeCount = '--';
+  try {
+    const r = await fetch('/api/all-nodes?page=1&limit=1');
+    const d = await r.json();
+    nodeCount = d.total;
+  } catch (err) {
+    console.error('Failed to fetch node count:', err.message);
+  }
+  if (S.page !== 'dashboard') return; // navigated away
+
+  const w = S.wallet || {};
+  const provName = w.provider?.name || null;
+  const app = $('app');
+  app.innerHTML = `<div class="page">
+    ${provName ? `<div style="margin-bottom:18px;font-size:20px;font-weight:600;color:var(--text)">Welcome, <span style="color:var(--accent)">${provName}</span></div>` : ''}
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">Wallet Balance</div>
+        <div class="stat-value">${fmt(w.balanceDvpn || 0)}</div>
+        <div class="stat-sub">P2P ${w.balanceUsd ? '&middot; ' + fmtUsd(w.balanceUsd) : ''}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">P2P Price</div>
+        <div class="stat-value" style="font-size:18px">${S.dvpnPrice ? '$' + S.dvpnPrice.toFixed(6) : '--'}</div>
+        <div class="stat-sub">CoinGecko</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Available Nodes</div>
+        <div class="stat-value">${fmt(nodeCount)}</div>
+        <div class="stat-sub">on chain</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Provider Status</div>
+        <div class="stat-value" style="font-size:16px">${w.provider ? '<span class="badge badge-green">Registered</span>' : '<span class="badge badge-yellow">Not Registered</span>'}</div>
+        <div class="stat-sub">${w.provider ? w.provider.name : 'Required to create plans'}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Quick Actions</div></div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+          <button class="btn btn-primary" onclick="navigate('create')" style="justify-content:center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Create New Plan
+          </button>
+          <button class="btn btn-ghost" onclick="navigate('add-nodes')" style="justify-content:center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Add Nodes to Plan
+          </button>
+          <button class="btn btn-ghost" onclick="navigate('your-nodes')" style="justify-content:center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            View Your Plan Nodes
+          </button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Network Info</div></div>
+        <div class="card-body">
+          <div style="display:flex;flex-direction:column;gap:12px;font-size:13px">
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Chain</span><span>sentinelhub-2</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Version</span><span>v12.0.0</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Plan Msgs</span><span class="mono">sentinel.plan.v2</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Wallet</span><span class="mono" style="font-size:11px">${ADDR_SHORT || '?'}</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Gas Price</span><span>0.2 udvpn</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─── Create Plan ─────────────────────────────────────────────────────────────
+function renderCreate() {
+  const app = $('app');
+  app.innerHTML = `<div class="page">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <!-- Register / Update Provider -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">1. ${S.wallet?.provider ? 'Update Provider' : 'Register as Provider'}</div>
+          <span class="badge ${S.wallet?.provider ? 'badge-green' : 'badge-dim'}">${S.wallet?.provider ? S.wallet.provider.name : 'sentprov prefix'}</span>
+        </div>
+        <div class="card-body">
+          <p style="font-size:12px;color:var(--text-dim);margin-bottom:18px">${S.wallet?.provider
+            ? 'Your provider is registered. You can update your name, website, and description below.'
+            : 'A provider address is required before creating plans. This registers your wallet key with a <code style="color:var(--accent)">sentprov</code> prefix on chain.'}</p>
+          <div class="input-group">
+            <label class="input-label">Provider Name</label>
+            <input class="input" id="provName" placeholder="My VPN Service" value="${S.wallet?.provider?.name || ''}">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Website (optional)</label>
+            <input class="input" id="provWebsite" placeholder="https://..." value="${S.wallet?.provider?.website || ''}">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Description (optional)</label>
+            <input class="input" id="provDesc" placeholder="Premium dVPN plan provider" value="${S.wallet?.provider?.description || ''}">
+          </div>
+          <button class="btn btn-primary" id="btnRegister" onclick="registerProvider()" style="width:100%;justify-content:center">
+            ${S.wallet?.provider ? 'Update Provider' : 'Register Provider'}
+          </button>
+        </div>
+      </div>
+
+      <!-- Create Plan -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">2. Create Subscription Plan</div>
+          <span class="badge badge-blue">MsgCreateRequest</span>
+        </div>
+        <div class="card-body">
+          <p style="font-size:12px;color:var(--text-dim);margin-bottom:18px">Define the plan parameters. Users subscribing will pay the set price for the duration & data cap you choose.</p>
+          <div class="form-grid">
+            <div class="input-group">
+              <label class="input-label">Duration</label>
+              <select class="input" id="planDuration">
+                <option value="3600">1 Hour</option>
+                <option value="86400">1 Day</option>
+                <option value="604800">7 Days</option>
+                <option value="2592000" selected>30 Days</option>
+                <option value="7776000">90 Days</option>
+                <option value="15552000">180 Days</option>
+                <option value="31536000">365 Days</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label class="input-label">Data Cap (GB)</label>
+              <input class="input" id="planGB" type="number" value="1000" min="1">
+            </div>
+            <div class="input-group">
+              <label class="input-label">Price (udvpn)</label>
+              <input class="input input-mono" id="planPrice" type="number" value="1000000" min="1">
+            </div>
+            <div class="input-group">
+              <label class="input-label">Price in P2P</label>
+              <div style="padding:10px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;font-size:14px;font-weight:600;color:#fff" id="planPriceDvpn">1.0 P2P</div>
+            </div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:18px">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Cost Summary</div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+              <span style="color:var(--text-dim)">Subscription Price</span>
+              <span id="summaryPrice">1.0 P2P</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+              <span style="color:var(--text-dim)">Duration</span>
+              <span id="summaryDuration">30 days</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px">
+              <span style="color:var(--text-dim)">USD Equivalent</span>
+              <span style="color:var(--accent)" id="summaryUsd">--</span>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btnCreate" onclick="createPlan()" style="width:100%;justify-content:center">
+            Create Plan on Chain
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  // Live price calc
+  const updateCalc = () => {
+    const price = parseInt($('planPrice').value) || 0;
+    const dvpn = price / 1e6;
+    $('planPriceDvpn').textContent = dvpn.toFixed(dvpn >= 1 ? 1 : 6) + ' P2P';
+    $('summaryPrice').textContent = dvpn.toFixed(dvpn >= 1 ? 1 : 6) + ' P2P';
+    $('summaryUsd').textContent = S.dvpnPrice ? fmtUsd(dvpn * S.dvpnPrice) : '--';
+    const dur = parseInt($('planDuration').value);
+    const days = Math.round(dur / 86400);
+    $('summaryDuration').textContent = days >= 1 ? days + ' days' : Math.round(dur / 3600) + ' hours';
+  };
+  $('planPrice').addEventListener('input', updateCalc);
+  $('planDuration').addEventListener('change', updateCalc);
+  updateCalc();
+}
+
+async function registerProvider() {
+  const btn = $('btnRegister');
+  const name = $('provName').value.trim();
+  if (!name) return toast('Provider name is required', 'error');
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Broadcasting...';
+  try {
+    const r = await fetch('/api/provider/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, website: $('provWebsite').value.trim(), description: $('provDesc').value.trim() }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('Provider registered! TX: ' + d.txHash.slice(0, 16) + '...', 'success');
+      loadWallet();
+    } else {
+      toast(friendlyError(d.error || d.rawLog || 'Registration failed'), 'error');
+    }
+  } catch (e) {
+    toast(friendlyError(e.message), 'error');
+  }
+  btn.disabled = false;
+  btn.innerHTML = 'Register Provider';
+}
+
+async function createPlan() {
+  const btn = $('btnCreate');
+  const gb = parseInt($('planGB').value);
+  const dur = parseInt($('planDuration').value);
+  const price = parseInt($('planPrice').value);
+
+  if (!gb || gb < 1) return toast('Bandwidth must be at least 1 GB', 'error');
+  if (!dur || dur < 3600) return toast('Duration must be at least 1 hour', 'error');
+  if (!price && price !== 0) return toast('Price is required (0 for free plans)', 'error');
+  if (!S.wallet?.provider) return toast('Register as a provider first', 'error');
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Broadcasting...';
+  try {
+    const r = await fetch('/api/plan/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        durationSeconds: dur,
+        gigabytes: gb,
+        priceDenom: 'udvpn',
+        priceAmount: price,
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const planMsg = d.planId ? `Plan #${d.planId} created!` : 'Plan created!';
+      toast(planMsg + ' TX: ' + d.txHash.slice(0, 16) + '...', 'success');
+      if (d.planId) {
+        S.myPlans = null; // Force refresh on manage page
+      }
+    } else {
+      toast(friendlyError(d.error || d.rawLog || 'Plan creation failed'), 'error');
+    }
+  } catch (e) {
+    toast(friendlyError(e.message), 'error');
+  }
+  btn.disabled = false;
+  btn.innerHTML = 'Create Plan on Chain';
+}
+
+// ─── Shared: Plan Picker, Speed Bar, Protocol Badge ─────────────────────────
+function buildPlanPicker(onRefresh) {
+  const plans = S.myPlans || [];
+  if (S.myPlansLoading) {
+    return '<div class="loading-state" style="padding:20px"><div class="loading-spinner"></div><div class="loading-text">Loading your plans...</div></div>';
+  }
+  if (plans.length === 0) return '';
+  return `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
+    ${plans.map(p => {
+      const active = String(p.planId) === String(S.mgrPlanId);
+      return `<button class="stat-card" onclick="selectPlan(${p.planId})" style="cursor:pointer;flex:0 0 auto;min-width:160px;border:1.5px solid ${active ? 'var(--accent)' : 'var(--border)'};background:${active ? 'var(--accent-glow)' : 'var(--bg-card)'};transition:all 0.2s">
+        <div class="stat-label">Plan #${p.planId}</div>
+        <div style="display:flex;gap:12px;margin-top:6px;font-size:13px">
+          <span style="color:var(--green)">${fmt(p.totalNodes)} nodes</span>
+          <span style="color:var(--text-dim)">${fmt(p.totalSubscriptions)} subs</span>
+        </div>
+      </button>`;
+    }).join('')}
+    <button class="stat-card" onclick="${onRefresh}" style="cursor:pointer;flex:0 0 auto;min-width:80px;border:1.5px dashed var(--border);background:transparent;display:flex;align-items:center;justify-content:center;transition:all 0.2s">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+  </div>`;
+}
+
+function speedBarHtml(mbps) {
+  if (!mbps) return '<span style="color:var(--text-muted)">--</span>';
+  const pct = Math.min(100, (mbps / 100) * 100);
+  const color = mbps >= 15 ? 'var(--green)' : mbps >= 5 ? 'var(--yellow)' : 'var(--red)';
+  return `<div class="speed-bar"><div class="speed-bar-fill" style="width:${pct}%;background:${color}"></div></div>${mbps.toFixed(1)}`;
+}
+
+function protocolBadge(p) {
+  if (!p) return '<span class="badge badge-dim">?</span>';
+  return p === 'WireGuard' ? '<span class="badge badge-green">WG</span>' : '<span class="badge badge-blue">V2Ray</span>';
+}
+
+function getLeaseLabel() {
+  return S.leaseHours >= 48 ? (S.leaseHours / 24).toFixed(S.leaseHours % 24 === 0 ? 0 : 1) + ' days' : S.leaseHours + ' hours';
+}
+
+// ─── Plan loading (shared by both pages) ─────────────────────────────────────
+let _myPlansAbort = null;
+async function _ensurePlansLoaded(forPage) {
+  if (S.myPlans) {
+    if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId);
+    return;
+  }
+  if (S.myPlansLoading) return;
+  S.myPlansLoading = true;
+  try {
+    const onRefresh = (fresh) => {
+      S.myPlans = fresh.plans || [];
+      if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId);
+      hideUpdating();
+      // Re-render current page with fresh data
+      const handler = { 'add-nodes': loadAddNodes, 'your-nodes': loadYourNodes, pricing: loadPricing, subscribers: loadSubscribers, 'fee-grants': loadFeeGrants };
+      if (handler[S.page]) handler[S.page]();
+    };
+    const { data: d, stale } = await cachedFetch('/api/my-plans', 120_000, onRefresh);
+    if (S.page !== forPage) return;
+    if (stale) showUpdating();
+    S.myPlans = d.plans || [];
+  } catch (e) {
+    S.myPlans = [];
+    toast('Failed to load plans', 'error');
+  }
+  S.myPlansLoading = false;
+  if (!S.mgrPlanId && S.myPlans && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId);
+}
+
+function selectPlan(id) {
+  S.mgrPlanId = String(id);
+  S.mgrPage = 1;
+  S.mgrNodes = null;
+  S.addSet.clear();
+  S.removeSet.clear();
+  loadMgrNodes();
+  if (S.page === 'fee-grants') renderFeeGrants();
+  if (S.page === 'subscribers') renderSubscribers();
+}
+
+let _mgrNodesAbort = null;
+async function loadMgrNodes() {
+  if (!S.mgrPlanId) {
+    if (S.page === 'add-nodes') renderAddNodes();
+    if (S.page === 'your-nodes') renderYourNodes();
+    return;
+  }
+  S.mgrNodes = null;
+  if (S.page === 'add-nodes') renderAddNodes();
+  if (S.page === 'your-nodes') renderYourNodes();
+  try {
+    if (_mgrNodesAbort) _mgrNodesAbort.abort();
+    _mgrNodesAbort = new AbortController();
+    const f = S.nodeFilters;
+    const params = new URLSearchParams({ page: S.mgrPage, limit: 50, planId: S.mgrPlanId, search: f.search, country: f.country, protocol: f.protocol });
+    const r = await fetch('/api/all-nodes?' + params, { signal: _mgrNodesAbort.signal });
+    const d = await r.json();
+    S.mgrNodes = d;
+    S.countries = d.countries || S.countries;
+    S.protocols = d.protocols || S.protocols;
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    toast('Failed to load nodes', 'error');
+  }
+  _mgrNodesAbort = null;
+  if (S.page === 'add-nodes') renderAddNodes();
+  if (S.page === 'your-nodes') renderYourNodes();
+}
+
+// ─── Add Nodes Page ──────────────────────────────────────────────────────────
+let _explorerAbort = null;
+
+async function loadAddNodes() {
+  if (!S.mgrNodes && !S.mgrPlanId) showLoading('Loading plans...');
+  await _ensurePlansLoaded('add-nodes');
+  if (S.page === 'add-nodes') renderAddNodes();
+  if (S.mgrPlanId && !S.mgrNodes) loadMgrNodes();
+}
+
+function renderAddNodes() {
+  const d = S.mgrNodes;
+  const hasData = d && d.nodes;
+  const plans = S.myPlans || [];
+
+  const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadAddNodes()");
+
+  // Lease slider
+  const leaseLabel = getLeaseLabel();
+  const leaseSliderHtml = S.mgrPlanId ? `
+    <div class="lease-slider-wrap">
+      <label>Lease Duration</label>
+      <input type="range" id="globalLeaseSlider" min="1" max="168" value="${S.leaseHours}" oninput="updateLeaseDisplay()">
+      <div class="lease-value" id="leaseDisplay">${leaseLabel}</div>
+    </div>` : '';
+
+  // Filters
+  const filtersHtml = S.mgrPlanId ? `
+    <div class="filters">
+      <input class="input input-mono" placeholder="Search address..." value="${S.nodeFilters.search}" oninput="S.nodeFilters.search=this.value" onkeydown="if(event.key==='Enter'){S.mgrPage=1;loadMgrNodes()}">
+      <select class="input" onchange="S.nodeFilters.country=this.value;S.mgrPage=1;loadMgrNodes()">
+        <option value="">All Countries</option>
+        ${S.countries.map(c => `<option value="${c}" ${S.nodeFilters.country===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select class="input" onchange="S.nodeFilters.protocol=this.value;S.mgrPage=1;loadMgrNodes()">
+        <option value="">All Protocols</option>
+        ${S.protocols.map(p => `<option value="${p}" ${S.nodeFilters.protocol===p?'selected':''}>${p}</option>`).join('')}
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="S.nodeFilters={search:'',country:'',protocol:''};S.mgrPage=1;loadMgrNodes()">Clear</button>
+      ${viewToggleHtml()}
+      ${hasData ? `<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${fmt(d.total)} nodes &middot; ${fmt(d.planNodesCount)} in plan</span>` : ''}
+    </div>` : '';
+
+  let contentHtml = '';
+  if (!S.mgrPlanId) {
+    if (plans.length === 0 && !S.myPlansLoading) {
+      contentHtml = `<div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <div>No plans found. <a href="#" onclick="navigate('create');return false" style="color:var(--accent)">Create one first</a>.</div>
+      </div>`;
+    } else if (!S.myPlansLoading) {
+      contentHtml = `<div class="empty-state" style="padding:30px">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><path d="M3 3h7l2 2h9v14H3z"/></svg>
+        <div style="margin-top:8px;color:var(--text-dim)">Select a plan above to browse and add nodes</div>
+      </div>`;
+    }
+  } else if (!hasData) {
+    contentHtml = '<div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading nodes...</div></div>';
+  } else {
+    const nodes = d.nodes || [];
+    const pages = d.totalPages || 1;
+
+    if (nodes.length === 0) {
+      contentHtml = '<div style="padding:40px;text-align:center;color:var(--text-muted);font-size:13px">No nodes found matching filters</div>';
+    } else {
+      const isList = S.viewMode === 'list';
+      const cardsHtml = nodes.map((n) => {
+        const inPlan = n.inPlan;
+        const selected = !inPlan && S.addSet.has(n.address);
+        const selClass = inPlan ? 'in-plan' : selected ? 'selected' : '';
+        const selBadge = inPlan ? 'sel-inplan' : selected ? 'sel-active' : 'sel-empty';
+        const selText = inPlan ? 'In Plan' : selected ? 'Selected' : '\u00A0';
+        const onclick = inPlan ? '' : `onclick="toggleAddCard('${n.address}')"`;
+        const speed = n.speedMbps ? n.speedMbps.toFixed(1) + ' Mbps' : '--';
+        const speedColor = !n.speedMbps ? 'var(--text-muted)' : n.speedMbps >= 15 ? 'var(--green)' : n.speedMbps >= 5 ? 'var(--yellow)' : 'var(--red)';
+        const flag = countryFlag(n.country);
+        const usdHr = dvpnToUsdHr(n.hrPriceUdvpn);
+
+        if (isList) {
+          return `<div class="node-list-row ${selClass}" ${onclick} id="acard_${n.address.slice(-12)}">
+            <span class="node-list-flag">${flag}</span>
+            <div class="node-list-info">
+              <span class="node-list-addr">${shortAddr(n.address)}</span>
+              ${n.moniker ? `<span class="node-list-moniker">${n.moniker}</span>` : ''}
+            </div>
+            <span>${n.country || '??'}</span>
+            <span>${protocolBadge(n.protocol)}</span>
+            <div class="node-list-price">
+              <span>${fmtDvpn(n.hrPriceUdvpn)} P2P</span>
+              ${usdHr !== null ? `<span class="node-list-usd">${fmtUsd(usdHr)}/hr</span>` : ''}
+            </div>
+            <span style="color:${speedColor}">${speed}</span>
+            <span class="node-card-select ${selBadge}" style="font-size:10px">${selText}</span>
+          </div>`;
+        }
+
+        return `<div class="node-card ${selClass}" ${onclick} id="acard_${n.address.slice(-12)}">
+          <div class="node-card-top">
+            <span class="node-card-select ${selBadge}">${selText}</span>
+            ${n.moniker ? `<span class="node-card-moniker" title="${n.moniker}">${n.moniker}</span>` : ''}
+          </div>
+          <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)}</div>
+          <div class="node-card-meta">
+            ${protocolBadge(n.protocol)}
+            <span>${flag} ${n.country || 'Unknown'}</span>
+            ${n.city ? `<span style="color:var(--text-muted)">/ ${n.city}</span>` : ''}
+          </div>
+          <div class="node-card-bottom">
+            <div class="node-card-price">
+              ${fmtDvpn(n.hrPriceUdvpn)} <span style="color:var(--text-muted);font-size:10px">P2P/hr</span>
+              ${usdHr !== null ? `<div style="font-size:10px;color:var(--text-dim);margin-top:1px">${fmtUsd(usdHr)}/hr</div>` : ''}
+            </div>
+            <div class="node-card-speed" style="color:${speedColor}">${speed}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>Protocol</span><span>Price/hr</span><span>Speed</span><span>Status</span></div>` : '';
+      const containerClass = isList ? 'node-list-view' : 'node-cards-grid';
+      contentHtml = `
+        ${listHeader}
+        <div class="${containerClass}" id="addNodesGrid">${cardsHtml}</div>
+        <div class="pagination">
+          <button class="btn btn-ghost btn-sm" ${S.mgrPage <= 1 ? 'disabled' : ''} onclick="S.mgrPage--;loadMgrNodes()">Prev</button>
+          <span class="info">Page ${S.mgrPage} of ${pages}</span>
+          <button class="btn btn-ghost btn-sm" ${S.mgrPage >= pages ? 'disabled' : ''} onclick="S.mgrPage++;loadMgrNodes()">Next</button>
+        </div>`;
+    }
+  }
+
+  // Floating action bar
+  const addCount = S.addSet.size;
+  const actionBarHtml = addCount > 0 ? `
+    <div class="action-bar" id="addActionBar">
+      <div class="action-bar-count">${addCount} node${addCount > 1 ? 's' : ''} selected</div>
+      <div class="action-bar-right">
+        <span style="font-size:12px;color:var(--text-dim)">${getLeaseLabel()} lease</span>
+        <button class="btn btn-ghost btn-sm" onclick="S.addSet.clear();renderAddNodes()">Clear</button>
+        <button class="btn btn-primary" id="batchLinkBtn" onclick="linkBatch()">Add ${addCount} to Plan</button>
+      </div>
+    </div>` : '';
+
+  $('app').innerHTML = `<div class="page" style="${addCount > 0 ? 'padding-bottom:80px' : ''}">
+    ${planPicker}
+    ${leaseSliderHtml}
+    ${filtersHtml}
+    ${contentHtml}
+  </div>${actionBarHtml}`;
+}
+
+// Toggle a node card on the Add Nodes page — surgical DOM update
+function toggleAddCard(addr) {
+  if (S.addSet.has(addr)) S.addSet.delete(addr); else S.addSet.add(addr);
+  const card = document.getElementById('acard_' + addr.slice(-12));
+  if (card) {
+    const selected = S.addSet.has(addr);
+    card.classList.toggle('selected', selected);
+    const badge = card.querySelector('.node-card-select');
+    if (badge) {
+      badge.className = 'node-card-select ' + (selected ? 'sel-active' : 'sel-empty');
+      badge.textContent = selected ? 'Selected' : '\u00A0';
+    }
+  }
+  refreshAddActionBar();
+}
+
+// Update the floating action bar count without full re-render
+function refreshAddActionBar() {
+  const count = S.addSet.size;
+  const existing = document.getElementById('addActionBar');
+  if (count === 0 && existing) { existing.remove(); adjustPagePadding(false); return; }
+  if (count > 0 && !existing) {
+    const bar = document.createElement('div');
+    bar.className = 'action-bar';
+    bar.id = 'addActionBar';
+    bar.innerHTML = `<div class="action-bar-count">${count} node${count > 1 ? 's' : ''} selected</div>
+      <div class="action-bar-right">
+        <span style="font-size:12px;color:var(--text-dim)">${getLeaseLabel()} lease</span>
+        <button class="btn btn-ghost btn-sm" onclick="S.addSet.clear();renderAddNodes()">Clear</button>
+        <button class="btn btn-primary" id="batchLinkBtn" onclick="linkBatch()">Add ${count} to Plan</button>
+      </div>`;
+    $('app').parentElement.appendChild(bar);
+    adjustPagePadding(true);
+  } else if (count > 0 && existing) {
+    existing.querySelector('.action-bar-count').textContent = count + ' node' + (count > 1 ? 's' : '') + ' selected';
+    const btn = existing.querySelector('#batchLinkBtn');
+    if (btn) btn.textContent = 'Add ' + count + ' to Plan';
+  }
+}
+
+function adjustPagePadding(hasBar) {
+  const page = $('app').querySelector('.page');
+  if (page) page.style.paddingBottom = hasBar ? '80px' : '';
+}
+
+// ─── Your Nodes Page ─────────────────────────────────────────────────────────
+async function loadYourNodes() {
+  showLoading('Loading your plans...');
+  await _ensurePlansLoaded('your-nodes');
+  if (S.page === 'your-nodes' && S.mgrPlanId) {
+    // Dedicated fetch with inPlanOnly — don't share with Add Nodes pagination
+    try {
+      const r = await fetch(`/api/all-nodes?page=1&limit=500&planId=${S.mgrPlanId}&inPlanOnly=true`);
+      const d = await r.json();
+      S._yourNodes = d;
+    } catch (e) {
+      toast('Failed to load plan nodes', 'error');
+    }
+  }
+  if (S.page === 'your-nodes') renderYourNodes();
+}
+
+function renderYourNodes() {
+  const d = S._yourNodes;
+  const hasData = d && d.nodes;
+  const plans = S.myPlans || [];
+
+  const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadYourNodes()");
+
+  // All nodes from dedicated inPlanOnly fetch are plan nodes
+  const planNodes = hasData ? d.nodes : [];
+  const planNodesCount = hasData ? (d.planNodesCount || planNodes.length) : 0;
+
+  // Compute stats
+  const currentPlan = plans.find(p => String(p.planId) === String(S.mgrPlanId));
+  const totalSubs = currentPlan ? (currentPlan.totalSubscriptions || 0) : 0;
+  const monthlyCostUdvpn = planNodes.reduce((sum, n) => sum + (n.hrPriceUdvpn || 0) * 720, 0);
+  const monthlyCostDvpn = monthlyCostUdvpn / 1e6;
+  const monthlyCostUsd = S.dvpnPrice ? monthlyCostDvpn * S.dvpnPrice : null;
+
+  // Stats cards
+  const statsHtml = S.mgrPlanId ? `
+    <div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+      <div class="stat-card-enhanced">
+        <div class="stat-icon blue">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div class="stat-label">Subscribers</div>
+        <div class="stat-value">${fmt(totalSubs)}</div>
+        <div class="stat-sub">total users</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon green">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div class="stat-label">Nodes in Plan</div>
+        <div class="stat-value">${fmt(planNodesCount)}</div>
+        <div class="stat-sub">available nodes</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon yellow">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div class="stat-label">Est. Monthly Cost</div>
+        <div class="stat-value" style="font-size:18px">${monthlyCostDvpn >= 1 ? fmt(Math.round(monthlyCostDvpn)) : monthlyCostDvpn.toFixed(2)}</div>
+        <div class="stat-sub">P2P / 30 days</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon red">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        </div>
+        <div class="stat-label">Est. Monthly USD</div>
+        <div class="stat-value" style="font-size:18px">${monthlyCostUsd !== null ? fmtUsd(monthlyCostUsd) : '--'}</div>
+        <div class="stat-sub">${S.dvpnPrice ? 'at $' + S.dvpnPrice.toFixed(6) + '/P2P' : 'price unavailable'}</div>
+      </div>
+    </div>` : '';
+
+  let contentHtml = '';
+  if (!S.mgrPlanId) {
+    if (plans.length === 0 && !S.myPlansLoading) {
+      contentHtml = `<div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        <div>No plans found. <a href="#" onclick="navigate('create');return false" style="color:var(--accent)">Create one first</a>.</div>
+      </div>`;
+    } else if (!S.myPlansLoading) {
+      contentHtml = `<div class="empty-state" style="padding:30px">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><path d="M3 3h7l2 2h9v14H3z"/></svg>
+        <div style="margin-top:8px;color:var(--text-dim)">Select a plan above to view its nodes</div>
+      </div>`;
+    }
+  } else if (!hasData) {
+    contentHtml = '<div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading plan nodes...</div></div>';
+  } else if (planNodes.length === 0) {
+    contentHtml = `<div class="empty-state" style="padding:50px">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      <div style="margin-top:12px;color:var(--text-dim)">No nodes in this plan yet</div>
+      <button class="btn btn-primary" style="margin-top:16px" onclick="navigate('add-nodes')">Add Nodes</button>
+    </div>`;
+  } else {
+    const isList = S.viewMode === 'list';
+    const now = new Date();
+    const cardsHtml = planNodes.map((n) => {
+      const selected = S.removeSet.has(n.address);
+      const speed = n.speedMbps ? n.speedMbps.toFixed(1) + ' Mbps' : '--';
+      const speedColor = !n.speedMbps ? 'var(--text-muted)' : n.speedMbps >= 15 ? 'var(--green)' : n.speedMbps >= 5 ? 'var(--yellow)' : 'var(--red)';
+      const flag = countryFlag(n.country);
+      const usdHr = dvpnToUsdHr(n.hrPriceUdvpn);
+
+      // Lease expiry
+      let leaseText = '--';
+      let leaseColor = 'var(--text-muted)';
+      if (n.leaseExpiresAt) {
+        const exp = new Date(n.leaseExpiresAt);
+        const msLeft = exp - now;
+        if (msLeft <= 0) {
+          leaseText = 'EXPIRED';
+          leaseColor = 'var(--red)';
+        } else {
+          const hrs = Math.floor(msLeft / 3600000);
+          const mins = Math.floor((msLeft % 3600000) / 60000);
+          if (hrs >= 24) {
+            const days = Math.floor(hrs / 24);
+            leaseText = days + 'd ' + (hrs % 24) + 'h';
+            leaseColor = days <= 1 ? 'var(--yellow)' : 'var(--green)';
+          } else {
+            leaseText = hrs + 'h ' + mins + 'm';
+            leaseColor = hrs <= 2 ? 'var(--red)' : hrs <= 12 ? 'var(--yellow)' : 'var(--green)';
+          }
+        }
+      }
+
+      if (isList) {
+        return `<div class="node-list-row ${selected ? 'selected' : ''}" onclick="toggleRemoveCard('${n.address}')" id="rcard_${n.address.slice(-12)}">
+          <span class="node-list-flag">${flag}</span>
+          <div class="node-list-info">
+            <span class="node-list-addr">${shortAddr(n.address)}</span>
+            ${n.moniker ? `<span class="node-list-moniker">${n.moniker}</span>` : ''}
+          </div>
+          <span>${n.country || '??'}</span>
+          <span>${protocolBadge(n.protocol)}</span>
+          <div class="node-list-price">
+            <span>${fmtDvpn(n.hrPriceUdvpn)} P2P</span>
+            ${usdHr !== null ? `<span class="node-list-usd">${fmtUsd(usdHr)}/hr</span>` : ''}
+          </div>
+          <span style="color:${leaseColor};font-weight:600;font-size:11px" title="${n.leaseExpiresAt || ''}">${leaseText}</span>
+          <span class="node-card-select ${selected ? 'sel-active' : 'sel-empty'}" style="font-size:10px">${selected ? 'Remove' : '\u00A0'}</span>
+        </div>`;
+      }
+
+      return `<div class="node-card ${selected ? 'selected' : ''}" onclick="toggleRemoveCard('${n.address}')" id="rcard_${n.address.slice(-12)}">
+        <button class="node-card-remove" onclick="event.stopPropagation();toggleRemoveCard('${n.address}')" title="Select for removal">&times;</button>
+        <div class="node-card-top">
+          <span class="node-card-select ${selected ? 'sel-active' : 'sel-empty'}">${selected ? 'Remove' : '\u00A0'}</span>
+          ${n.moniker ? `<span class="node-card-moniker" title="${n.moniker}">${n.moniker}</span>` : ''}
+        </div>
+        <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)}</div>
+        <div class="node-card-meta">
+          ${protocolBadge(n.protocol)}
+          <span>${flag} ${n.country || 'Unknown'}</span>
+          ${n.city ? `<span style="color:var(--text-muted)">/ ${n.city}</span>` : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:4px 8px;background:var(--bg);border-radius:6px;font-size:11px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${leaseColor}" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span style="color:var(--text-dim)">Lease:</span>
+          <span style="color:${leaseColor};font-weight:600">${leaseText}</span>
+        </div>
+        <div class="node-card-bottom">
+          <div class="node-card-price">
+            ${fmtDvpn(n.hrPriceUdvpn)} <span style="color:var(--text-muted);font-size:10px">P2P/hr</span>
+            ${usdHr !== null ? `<div style="font-size:10px;color:var(--text-dim);margin-top:1px">${fmtUsd(usdHr)}/hr</div>` : ''}
+          </div>
+          <div class="node-card-speed" style="color:${speedColor}">${speed}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const expiringSoon = planNodes.filter(n => {
+      if (!n.leaseExpiresAt) return false;
+      const ms = new Date(n.leaseExpiresAt) - now;
+      return ms > 0 && ms < 3600000; // < 1 hour
+    }).length;
+    const expired = planNodes.filter(n => n.leaseExpiresAt && new Date(n.leaseExpiresAt) <= now).length;
+
+    const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>Protocol</span><span>Price/hr</span><span>Lease</span><span>Action</span></div>` : '';
+    const containerClass = isList ? 'node-list-view' : 'node-cards-grid';
+    const leaseWarning = (expiringSoon + expired) > 0
+      ? `<div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;font-size:12px;color:var(--red);margin-bottom:14px;display:flex;align-items:center;gap:8px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <strong>${expired > 0 ? expired + ' lease(s) expired' : ''}${expired > 0 && expiringSoon > 0 ? ', ' : ''}${expiringSoon > 0 ? expiringSoon + ' expiring within 1 hour' : ''}</strong> — renew leases to keep nodes in your plan
+        </div>` : '';
+    contentHtml = `
+      ${leaseWarning}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:14px;font-weight:600;color:var(--text)">Plan Nodes <span style="color:var(--text-muted);font-weight:400;font-size:12px">(${planNodes.length})</span></span>
+          ${viewToggleHtml()}
+        </div>
+        <div style="font-size:12px;color:var(--text-dim)">Click nodes to select for removal</div>
+      </div>
+      ${listHeader}
+      <div class="${containerClass}" id="yourNodesGrid">${cardsHtml}</div>`;
+
+    // If there are more pages of plan nodes, show note
+    if (hasData && d.totalPages > 1) {
+      contentHtml += `<div style="text-align:center;padding:16px;font-size:12px;color:var(--text-muted)">
+        Showing plan nodes from page ${S.mgrPage} of ${d.totalPages}. All ${planNodesCount} nodes are in this plan.
+      </div>`;
+    }
+  }
+
+  // Floating action bar for removals
+  const remCount = S.removeSet.size;
+  const removeBarHtml = remCount > 0 ? `
+    <div class="action-bar" id="removeActionBar">
+      <div class="action-bar-count">${remCount} node${remCount > 1 ? 's' : ''} selected for removal</div>
+      <div class="action-bar-right">
+        <button class="btn btn-ghost btn-sm" onclick="S.removeSet.clear();renderYourNodes()">Clear</button>
+        <button class="btn btn-red" id="batchUnlinkBtn" onclick="unlinkBatch()">Remove ${remCount} from Plan</button>
+      </div>
+    </div>` : '';
+
+  $('app').innerHTML = `<div class="page" style="${remCount > 0 ? 'padding-bottom:80px' : ''}">
+    ${planPicker}
+    ${statsHtml}
+    ${contentHtml}
+  </div>${removeBarHtml}`;
+}
+
+// Toggle a node card on the Your Nodes page — surgical DOM update
+function toggleRemoveCard(addr) {
+  if (S.removeSet.has(addr)) S.removeSet.delete(addr); else S.removeSet.add(addr);
+  const card = document.getElementById('rcard_' + addr.slice(-12));
+  if (card) {
+    const selected = S.removeSet.has(addr);
+    card.classList.toggle('selected', selected);
+    const badge = card.querySelector('.node-card-select');
+    if (badge) {
+      badge.className = 'node-card-select ' + (selected ? 'sel-active' : 'sel-empty');
+      badge.textContent = selected ? 'Remove' : '\u00A0';
+    }
+  }
+  refreshRemoveActionBar();
+}
+
+// Update the floating remove action bar without full re-render
+function refreshRemoveActionBar() {
+  const count = S.removeSet.size;
+  const existing = document.getElementById('removeActionBar');
+  if (count === 0 && existing) { existing.remove(); adjustPagePadding(false); return; }
+  if (count > 0 && !existing) {
+    const bar = document.createElement('div');
+    bar.className = 'action-bar';
+    bar.id = 'removeActionBar';
+    bar.innerHTML = `<div class="action-bar-count">${count} node${count > 1 ? 's' : ''} selected for removal</div>
+      <div class="action-bar-right">
+        <button class="btn btn-ghost btn-sm" onclick="S.removeSet.clear();renderYourNodes()">Clear</button>
+        <button class="btn btn-red" id="batchUnlinkBtn" onclick="unlinkBatch()">Remove ${count} from Plan</button>
+      </div>`;
+    $('app').parentElement.appendChild(bar);
+    adjustPagePadding(true);
+  } else if (count > 0 && existing) {
+    existing.querySelector('.action-bar-count').textContent = count + ' node' + (count > 1 ? 's' : '') + ' selected for removal';
+    const btn = existing.querySelector('#batchUnlinkBtn');
+    if (btn) btn.textContent = 'Remove ' + count + ' from Plan';
+  }
+}
+
+// ─── Legacy compat wrappers for toggleSel / toggleAll / refreshSubmitBtn ─────
+function toggleSel(set, addr) {
+  if (set === 'add') toggleAddCard(addr);
+  else toggleRemoveCard(addr);
+}
+
+function toggleAll(set) {
+  const d = S.mgrNodes;
+  if (!d || !d.nodes) return;
+  const s = set === 'add' ? S.addSet : S.removeSet;
+  const list = set === 'add' ? d.nodes.filter(n => !n.inPlan) : d.nodes.filter(n => n.inPlan);
+  const allChecked = list.length > 0 && list.every(n => s.has(n.address));
+  if (allChecked) list.forEach(n => s.delete(n.address));
+  else list.forEach(n => s.add(n.address));
+  if (set === 'add') renderAddNodes(); else renderYourNodes();
+}
+
+function refreshSubmitBtn(set) {
+  if (set === 'add') refreshAddActionBar();
+  else refreshRemoveActionBar();
+}
+
+function updateLeaseDisplay() {
+  const slider = document.getElementById('globalLeaseSlider');
+  if (!slider) return;
+  S.leaseHours = parseInt(slider.value);
+  const el = document.getElementById('leaseDisplay');
+  if (!el) return;
+  el.textContent = getLeaseLabel();
+  refreshAddActionBar();
+}
+
+// Submit all selected adds in ONE batch transaction
+async function linkBatch() {
+  const addrs = [...S.addSet];
+  if (addrs.length === 0) return toast('No nodes selected', 'error');
+  if (!S.mgrPlanId) return toast('No plan selected', 'error');
+
+  const btn = document.getElementById('batchLinkBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Adding ' + addrs.length + '...'; }
+
+  try {
+    const r = await fetch('/api/plan-manager/batch-link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId: parseInt(S.mgrPlanId), nodeAddresses: addrs, leaseHours: S.leaseHours }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const count = d.linked || addrs.length;
+      toast(d.alreadyLinked ? 'Nodes already in plan' : count + ' nodes linked in 1 TX!', d.alreadyLinked ? 'info' : 'success');
+      if (S.mgrNodes && S.mgrNodes.nodes) {
+        for (const addr of addrs) {
+          const node = S.mgrNodes.nodes.find(n => n.address === addr);
+          if (node) node.inPlan = true;
+        }
+        S.mgrNodes.planNodesCount = (S.mgrNodes.planNodesCount || 0) + count;
+      }
+      S.addSet.clear();
+      if (S.page === 'add-nodes') renderAddNodes();
+      if (S.page === 'your-nodes') renderYourNodes();
+    } else {
+      toast(friendlyError(d.error || d.rawLog), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+    }
+  } catch (e) {
+    toast(friendlyError(e.message), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+  }
+}
+
+// Submit all selected removes in ONE batch transaction
+async function unlinkBatch() {
+  const addrs = [...S.removeSet];
+  if (addrs.length === 0) return toast('No nodes selected', 'error');
+  if (!S.mgrPlanId) return toast('No plan selected', 'error');
+
+  const btn = document.getElementById('batchUnlinkBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Removing ' + addrs.length + '...'; }
+
+  try {
+    const r = await fetch('/api/plan-manager/batch-unlink', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId: parseInt(S.mgrPlanId), nodeAddresses: addrs }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast((d.unlinked || addrs.length) + ' nodes removed in 1 TX', 'success');
+      if (S.mgrNodes && S.mgrNodes.nodes) {
+        for (const addr of addrs) {
+          const node = S.mgrNodes.nodes.find(n => n.address === addr);
+          if (node) node.inPlan = false;
+        }
+        S.mgrNodes.planNodesCount = Math.max(0, (S.mgrNodes.planNodesCount || 0) - addrs.length);
+      }
+      S.removeSet.clear();
+      if (S.page === 'add-nodes') renderAddNodes();
+      if (S.page === 'your-nodes') renderYourNodes();
+    } else {
+      toast(friendlyError(d.error || d.rawLog), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+    }
+  } catch (e) {
+    toast(friendlyError(e.message), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+  }
+}
+
+// ─── Pricing Page ─────────────────────────────────────────────────────────────
+const DENOM_NAMES = {
+  'udvpn': { symbol: 'P2P', name: 'Sentinel P2P', icon: '🔵' },
+  'ibc/A8C2D23A1E6F95DA4E48BA349667E322BD7A6C996D8A4AAE8BA72E190F3D1477': { symbol: 'ATOM', name: 'Cosmos Hub', icon: '⚛️' },
+  'ibc/ED07A3391A112B175915CD8FAF43A2DA8E4790EDE12566649D0C2F97716B8518': { symbol: 'OSMO', name: 'Osmosis', icon: '🧪' },
+  'ibc/B1C0DDB14F25279A2026BC8794E12B259F8BDA546A3C5132CCAEE4431CE36783': { symbol: 'USDC', name: 'USD Coin (IBC)', icon: '💵' },
+  'ibc/31FEE1A2A9F9C01113F90BD0BBCCE8FD6BBB8585FAF109A2101827DD1D5B95B8': { symbol: 'WETH', name: 'Wrapped ETH (IBC)', icon: '💎' },
+};
+function denomDisplay(d) {
+  const known = DENOM_NAMES[d];
+  if (known) return known;
+  return { symbol: d.startsWith('ibc/') ? 'IBC/' + d.slice(4, 10) : d, name: d, icon: '🪙' };
+}
+
+function setTriggerTab(tab) {
+  S._triggerTab = tab;
+  const payBtn = $('trigTabPayment');
+  const freeBtn = $('trigTabFreeAuth');
+  const content = $('triggerTabContent');
+  if (!content) return;
+
+  if (payBtn) {
+    payBtn.style.borderBottomColor = tab === 'payment' ? 'var(--accent)' : 'transparent';
+    payBtn.style.color = tab === 'payment' ? 'var(--accent)' : 'var(--text-muted)';
+  }
+  if (freeBtn) {
+    freeBtn.style.borderBottomColor = tab === 'freeauth' ? 'var(--accent)' : 'transparent';
+    freeBtn.style.color = tab === 'freeauth' ? 'var(--accent)' : 'var(--text-muted)';
+  }
+
+  if (tab === 'payment') {
+    content.innerHTML = `
+      <div class="card-body">
+        <div style="margin-bottom:16px">
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">Connect your payment system to trigger on-chain subscriptions</div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.6">
+            When a user completes payment through your external system (Stripe, PayPal, crypto gateway),
+            your backend calls the Plan Manager API to subscribe them on-chain. The provider wallet pays the subscription TX gas.
+          </div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">API Endpoint</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <span style="background:var(--accent);color:#fff;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600">POST</span>
+            <code class="copyable" onclick="copyToClipboard('http://localhost:3003/api/subscribe-user', this)" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);cursor:pointer;flex:1">http://localhost:3003/api/subscribe-user</code>
+          </div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Request Body</div>
+          <pre style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);overflow-x:auto;margin:0">{
+  "userAddress": "sent1...",    // Subscriber's wallet address
+  "planId": ${S.mgrPlanId || 42},              // Your plan ID
+  "grantFee": true,             // Also issue fee grant (optional)
+  "spendLimitP2p": 10           // Fee grant spend limit (optional)
+}</pre>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Integration Flow</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">User pays</strong> via your website/app (Stripe checkout, crypto payment, etc.)</div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">Your webhook</strong> receives payment confirmation with user's <code style="color:var(--accent)">sent1...</code> address</div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">POST to this API</strong> — Plan Manager broadcasts <code style="color:var(--accent)">MsgStartSubscriptionRequest</code> on-chain (provider pays gas)</div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:#10b981;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">4</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">User is subscribed</strong> + fee grant issued (if enabled). They can start VPN sessions immediately.</div>
+            </div>
+          </div>
+        </div>
+        <div style="background:rgba(217,119,6,0.06);border:1px solid rgba(217,119,6,0.15);border-radius:8px;padding:12px;font-size:12px;color:var(--yellow)">
+          <strong>Security:</strong> This endpoint should only be accessible from your backend. Add API key authentication before exposing to the internet.
+        </div>
+      </div>`;
+  } else {
+    content.innerHTML = `
+      <div class="card-body">
+        <div style="margin-bottom:16px">
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">Authorize users by wallet address for free access</div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.6">
+            Add users directly by their <code style="color:var(--accent)">sent1...</code> public key. The provider pays the subscription cost
+            and issues a fee grant so the user never needs to hold P2P tokens. Ideal for beta testers, team members, or free-tier users.
+          </div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Add User by Address</div>
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div style="flex:1;min-width:300px">
+              <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">Wallet Address</label>
+              <input type="text" id="freeAuthAddr" placeholder="sent1..." style="width:100%;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;font-family:'JetBrains Mono',monospace;outline:none">
+            </div>
+            <div style="display:flex;gap:8px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding-bottom:2px">
+                <input type="checkbox" id="freeAuthGrant" checked style="accent-color:var(--accent)">
+                <span style="font-size:12px;color:var(--text-dim)">+ Fee Grant</span>
+              </label>
+              <button class="btn btn-primary" onclick="authorizeUser()" id="freeAuthBtn" style="padding:10px 20px">Authorize</button>
+            </div>
+          </div>
+          <div id="freeAuthStatus" style="min-height:18px;margin-top:8px;font-size:12px"></div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Bulk Add (one address per line)</div>
+          <textarea id="freeAuthBulk" placeholder="sent1abc...&#10;sent1def...&#10;sent1ghi..." style="width:100%;min-height:80px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;font-family:'JetBrains Mono',monospace;outline:none;resize:vertical"></textarea>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+            <span id="freeAuthBulkCount" style="font-size:11px;color:var(--text-muted)">0 addresses</span>
+            <button class="btn btn-primary" onclick="authorizeBulk()" id="freeAuthBulkBtn" style="padding:8px 16px;font-size:12px">Authorize All</button>
+          </div>
+          <div id="freeAuthBulkStatus" style="min-height:18px;margin-top:8px;font-size:12px"></div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">What Happens</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">On-chain subscription</strong> — <code style="color:var(--accent)">MsgStartSubscriptionRequest</code> broadcast from the user's address (provider signs via Authz or user pre-subscribes)</div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">Fee grant issued</strong> — <code style="color:var(--accent)">MsgGrantAllowance</code> so user's session TXs are gas-free (provider pays)</div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span style="background:#10b981;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span>
+              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">User connects</strong> — their app sees the subscription + fee grant and can start VPN sessions with zero P2P balance</div>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:8px">
+          <strong style="color:var(--accent)">Tip:</strong> Combine with the Fee Grants page Auto-Add toggle to ensure all authorized users automatically receive fee grants on every page load.
+        </div>
+      </div>`;
+
+    // Update bulk count on input
+    const bulkEl = $('freeAuthBulk');
+    if (bulkEl) {
+      bulkEl.addEventListener('input', () => {
+        const lines = bulkEl.value.trim().split('\\n').filter(l => l.trim().startsWith('sent'));
+        const ct = $('freeAuthBulkCount');
+        if (ct) ct.textContent = lines.length + ' address' + (lines.length !== 1 ? 'es' : '');
+      });
+    }
+  }
+}
+
+async function authorizeUser() {
+  const addr = $('freeAuthAddr')?.value?.trim();
+  const grantFee = $('freeAuthGrant')?.checked;
+  const status = $('freeAuthStatus');
+  const btn = $('freeAuthBtn');
+  if (!addr || !addr.startsWith('sent1')) {
+    if (status) status.innerHTML = '<span style="color:var(--red)">Enter a valid sent1... address</span>';
+    return;
+  }
+  if (!S.mgrPlanId) {
+    if (status) status.innerHTML = '<span style="color:var(--red)">Select a plan first</span>';
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Broadcasting...'; }
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Issuing fee grant...</span>';
+  try {
+    // Issue fee grant (the main authorization action)
+    if (grantFee) {
+      const r = await fetch('/api/feegrant/grant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grantee: addr, spendLimitDvpn: 10, expirationDays: 30 }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+    }
+    if (status) status.innerHTML = '<span style="color:#10b981">Authorized! Fee grant issued. User can now use the plan.</span>';
+    if ($('freeAuthAddr')) $('freeAuthAddr').value = '';
+  } catch (e) {
+    if (status) status.innerHTML = '<span style="color:var(--red)">Failed: ' + e.message + '</span>';
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Authorize'; }
+}
+
+async function authorizeBulk() {
+  const text = $('freeAuthBulk')?.value?.trim();
+  const status = $('freeAuthBulkStatus');
+  const btn = $('freeAuthBulkBtn');
+  if (!text) return;
+  const addrs = text.split('\n').map(l => l.trim()).filter(l => l.startsWith('sent1'));
+  if (addrs.length === 0) {
+    if (status) status.innerHTML = '<span style="color:var(--red)">No valid sent1... addresses found</span>';
+    return;
+  }
+  if (!S.mgrPlanId) {
+    if (status) status.innerHTML = '<span style="color:var(--red)">Select a plan first</span>';
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Broadcasting...'; }
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Granting ' + addrs.length + ' addresses...</span>';
+  let granted = 0, errors = 0;
+  // Batch 5 at a time
+  for (let i = 0; i < addrs.length; i += 5) {
+    const batch = addrs.slice(i, i + 5);
+    if (status) status.innerHTML = '<span style="color:var(--text-muted)">Batch ' + (Math.floor(i/5)+1) + '/' + Math.ceil(addrs.length/5) + '...</span>';
+    for (const addr of batch) {
+      try {
+        const r = await fetch('/api/feegrant/grant', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ grantee: addr, spendLimitDvpn: 10, expirationDays: 30 }),
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        granted++;
+      } catch { errors++; }
+    }
+  }
+  if (status) status.innerHTML = '<span style="color:#10b981">' + granted + ' authorized</span>' + (errors ? '<span style="color:var(--red)"> | ' + errors + ' failed</span>' : '');
+  if (btn) { btn.disabled = false; btn.textContent = 'Authorize All'; }
+}
+
+async function loadPricing() {
+  showLoading('Loading plans...');
+  await _ensurePlansLoaded('pricing');
+  if (S.page === 'pricing') renderPricing();
+}
+
+async function renderPricing() {
+  const plans = S.myPlans || [];
+  const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadPricing()");
+
+  if (!S.mgrPlanId) {
+    $('app').innerHTML = `<div class="page">${planPicker}
+      ${plans.length === 0 && !S.myPlansLoading
+        ? '<div class="empty-state"><div>No plans found. <a href="#" onclick="navigate(\'create\');return false" style="color:var(--accent)">Create one first</a>.</div></div>'
+        : '<div class="empty-state" style="padding:30px"><div style="color:var(--text-dim)">Select a plan above to view pricing</div></div>'}
+    </div>`;
+    return;
+  }
+
+  $('app').innerHTML = `<div class="page">${planPicker}
+    <div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading plan details...</div></div>
+  </div>`;
+
+  try {
+    const [planData, paramsData] = await Promise.all([
+      fetch('/api/plans/' + S.mgrPlanId).then(r => r.json()),
+      fetch('/api/params').then(r => r.json()),
+    ]);
+    if (S.page !== 'pricing') return;
+
+    const currentPlan = plans.find(p => String(p.planId) === String(S.mgrPlanId));
+    const price = planData.price || {};
+    const priceDvpn = price.dvpnAmount || (price.denom === 'udvpn' ? parseInt(price.quoteValue || 0) / 1e6 : 0);
+    const priceUsd = S.dvpnPrice ? priceDvpn * S.dvpnPrice : null;
+    const durationDays = planData.durationDays || '--';
+    const totalSubs = planData.totalSubscriptions || 0;
+    const totalNodes = planData.totalNodes || 0;
+
+    // Accepted denoms from chain params
+    const nodeParams = paramsData.node || {};
+    const denomSet = new Set();
+    for (const p of (nodeParams.min_hourly_prices || [])) denomSet.add(p.denom);
+    for (const p of (nodeParams.min_gigabyte_prices || [])) denomSet.add(p.denom);
+    const acceptedDenoms = [...denomSet];
+
+    // Plan pricing card
+    const pricingHtml = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Plan #${S.mgrPlanId} — On-Chain Pricing</div>
+            <span class="badge ${currentPlan?.activeSubs > 0 ? 'badge-green' : 'badge-dim'}">${currentPlan?.activeSubs > 0 ? 'Active' : 'No active subs'}</span>
+          </div>
+          <div class="card-body">
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Subscription Price</div>
+                <div style="font-size:28px;font-weight:700;color:var(--text)">${priceDvpn >= 1 ? fmt(Math.round(priceDvpn)) : priceDvpn.toFixed(6)} <span style="font-size:14px;font-weight:400;color:var(--text-dim)">P2P</span></div>
+                ${priceUsd !== null ? `<div style="font-size:14px;color:var(--accent);margin-top:2px">${fmtUsd(priceUsd)}</div>` : ''}
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Duration</div>
+                  <div style="font-size:16px;font-weight:600;color:var(--text)">${durationDays} days</div>
+                </div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Payment Denom</div>
+                  <div style="font-size:16px;font-weight:600;color:var(--text)">${denomDisplay(price.denom || 'udvpn').symbol}</div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Nodes</div>
+                  <div style="font-size:16px;font-weight:600;color:var(--text)">${fmt(totalNodes)}</div>
+                </div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
+                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Subscribers</div>
+                  <div style="font-size:16px;font-weight:600;color:var(--text)">${fmt(totalSubs)}</div>
+                </div>
+              </div>
+              <div style="background:var(--yellow-dim);border:1px solid rgba(217,119,6,0.15);border-radius:8px;padding:12px;font-size:12px;color:var(--yellow)">
+                <strong>Note:</strong> Plan pricing is immutable after creation on Sentinel v3. To change pricing, create a new plan from the <a href="#" onclick="navigate('create');return false" style="color:var(--accent)">Create Plan</a> page.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Accepted Currencies</div>
+            <span class="badge badge-blue">${acceptedDenoms.length} denoms</span>
+          </div>
+          <div class="card-body">
+            <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">Currencies accepted on the Sentinel chain for node payments and subscriptions:</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              ${acceptedDenoms.map(d => {
+                const info = denomDisplay(d);
+                const isActive = d === (price.denom || 'udvpn');
+                return `<div style="display:flex;align-items:center;gap:12px;padding:12px;background:${isActive ? 'var(--accent-glow)' : 'var(--bg)'};border:1px solid ${isActive ? 'var(--accent)' : 'var(--border)'};border-radius:10px;transition:all 0.2s">
+                  <span style="font-size:20px">${info.icon}</span>
+                  <div style="flex:1">
+                    <div style="font-size:13px;font-weight:600;color:var(--text)">${info.symbol}</div>
+                    <div style="font-size:11px;color:var(--text-dim)">${info.name}</div>
+                  </div>
+                  ${isActive ? '<span class="badge badge-green" style="font-size:9px">Plan Denom</span>' : ''}
+                  <div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d}</div>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" style="flex-direction:column;align-items:stretch;gap:0">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div class="card-title">Authorization Triggers</div>
+          </div>
+          <div style="display:flex;gap:0;border-bottom:2px solid var(--border)">
+            <button id="trigTabPayment" onclick="setTriggerTab('payment')" style="flex:1;padding:10px 16px;background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;color:var(--accent);font-weight:600;font-size:13px;cursor:pointer;transition:all 0.2s">
+              External Payment Trigger
+            </button>
+            <button id="trigTabFreeAuth" onclick="setTriggerTab('freeauth')" style="flex:1;padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-muted);font-weight:500;font-size:13px;cursor:pointer;transition:all 0.2s">
+              Free App Usage Authorization
+            </button>
+          </div>
+        </div>
+        <div id="triggerTabContent">
+          <!-- Populated by setTriggerTab() -->
+        </div>
+      </div>`;
+
+    // Render trigger tab content after DOM insert
+    setTimeout(() => setTriggerTab(S._triggerTab || 'payment'), 0);
+
+    $('app').innerHTML = `<div class="page">${planPicker}${pricingHtml}</div>`;
+  } catch (e) {
+    if (S.page !== 'pricing') return;
+    $('app').innerHTML = `<div class="page">${planPicker}<div class="empty-state" style="color:var(--red)">Failed to load pricing: ${e.message}</div></div>`;
+  }
+}
+
+// ─── Subscribers Page ─────────────────────────────────────────────────────────
+async function loadSubscribers() {
+  showLoading('Loading plans...');
+  await _ensurePlansLoaded('subscribers');
+  if (S.page === 'subscribers') renderSubscribers();
+}
+
+async function renderSubscribers() {
+  const plans = S.myPlans || [];
+  const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadSubscribers()");
+
+  if (!S.mgrPlanId) {
+    $('app').innerHTML = `<div class="page">${planPicker}
+      ${plans.length === 0 && !S.myPlansLoading
+        ? '<div class="empty-state"><div>No plans found. <a href="#" onclick="navigate(\'create\');return false" style="color:var(--accent)">Create one first</a>.</div></div>'
+        : '<div class="empty-state" style="padding:30px"><div style="color:var(--text-dim)">Select a plan above to view subscribers</div></div>'}
+    </div>`;
+    return;
+  }
+
+  $('app').innerHTML = `<div class="page">${planPicker}
+    <div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading subscribers...</div></div>
+  </div>`;
+
+  try {
+    const r = await fetch('/api/plans/' + S.mgrPlanId + '/subscriptions?limit=200');
+    if (S.page !== 'subscribers') return;
+    const d = await r.json();
+    const ownAddr = S.wallet?.address;
+    const subs = (d.subscriptions || []).filter(s => s.acc_address !== ownAddr);
+    const total = subs.length;
+    const now = new Date();
+
+    const currentPlan = plans.find(p => String(p.planId) === String(S.mgrPlanId));
+
+    // Stats
+    let activeCt = 0, inactiveCt = 0;
+    const wallets = new Set();
+    for (const s of subs) {
+      wallets.add(s.acc_address);
+      if (s.status === 'active' && new Date(s.inactive_at) > now) activeCt++;
+      else inactiveCt++;
+    }
+
+    // Pricing & revenue
+    const subPriceDvpn = currentPlan?.price?.dvpnAmount || (subs[0]?.price ? parseInt(subs[0].price.quote_value) / 1e6 : 0);
+    const subPriceUsd = S.dvpnPrice ? subPriceDvpn * S.dvpnPrice : null;
+    const durationDays = currentPlan?.durationDays || 30;
+    const monthlyRevDvpn = activeCt * subPriceDvpn * (30 / durationDays);
+    const monthlyRevUsd = S.dvpnPrice ? monthlyRevDvpn * S.dvpnPrice : null;
+
+    const statsHtml = `<div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+      <div class="stat-card-enhanced">
+        <div class="stat-icon green"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <div class="stat-label">Active Subscribers</div>
+        <div class="stat-value">${fmt(activeCt)}</div>
+        <div class="stat-sub">${fmt(total)} total &middot; ${fmt(wallets.size)} unique</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+        <div class="stat-label">Subscription Price</div>
+        <div class="stat-value" style="font-size:18px">${subPriceDvpn >= 1 ? fmt(Math.round(subPriceDvpn)) : subPriceDvpn.toFixed(3)} <span style="font-size:12px;font-weight:400">P2P</span></div>
+        <div class="stat-sub">${subPriceUsd !== null ? fmtUsd(subPriceUsd) : '--'} &middot; ${durationDays} days</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon yellow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
+        <div class="stat-label">Est. Monthly Revenue</div>
+        <div class="stat-value" style="font-size:18px">${monthlyRevDvpn >= 1 ? fmt(Math.round(monthlyRevDvpn)) : monthlyRevDvpn.toFixed(3)} <span style="font-size:12px;font-weight:400">P2P</span></div>
+        <div class="stat-sub">${monthlyRevUsd !== null ? fmtUsd(monthlyRevUsd) : '--'} / month</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon red"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+        <div class="stat-label">Inactive</div>
+        <div class="stat-value">${fmt(inactiveCt)}</div>
+        <div class="stat-sub">expired subscriptions</div>
+      </div>
+    </div>`;
+
+    let tableHtml = '';
+    if (subs.length === 0) {
+      tableHtml = `<div class="empty-state" style="padding:50px">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        <div style="margin-top:12px;color:var(--text-dim)">No subscribers yet</div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Share your Plan ID <strong style="color:var(--accent)">#${S.mgrPlanId}</strong> with users so they can subscribe</div>
+      </div>`;
+    } else {
+      const rows = subs.map(s => {
+        const expiry = s.inactive_at ? new Date(s.inactive_at) : null;
+        const isActive = s.status === 'active' && expiry && expiry > now;
+        const startDate = s.start_at ? new Date(s.start_at).toLocaleDateString() : '--';
+        const endDate = expiry ? expiry.toLocaleDateString() : '--';
+        const sPriceDvpn = s.price ? parseInt(s.price.quote_value) / 1e6 : 0;
+        const sPriceUsd = S.dvpnPrice ? sPriceDvpn * S.dvpnPrice : null;
+
+        // Time remaining calculation
+        let timeLeft = '--';
+        let timeColor = 'var(--text-muted)';
+        if (expiry) {
+          const msLeft = expiry - now;
+          if (msLeft <= 0) {
+            timeLeft = 'Expired';
+            timeColor = 'var(--red)';
+          } else {
+            const days = Math.floor(msLeft / 86400000);
+            const hours = Math.floor((msLeft % 86400000) / 3600000);
+            if (days > 7) {
+              timeLeft = days + 'd';
+              timeColor = 'var(--green)';
+            } else if (days > 0) {
+              timeLeft = days + 'd ' + hours + 'h';
+              timeColor = days <= 3 ? 'var(--yellow)' : 'var(--green)';
+            } else {
+              timeLeft = hours + 'h ' + Math.floor((msLeft % 3600000) / 60000) + 'm';
+              timeColor = 'var(--red)';
+            }
+          }
+        }
+
+        return `<tr>
+          <td><span class="copyable" title="${s.acc_address}" onclick="copyToClipboard('${s.acc_address}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(s.acc_address)}</span></td>
+          <td><span class="${isActive ? 'subs-badge-active' : 'subs-badge-inactive'}">${isActive ? 'Active' : 'Inactive'}</span></td>
+          <td style="font-weight:600;color:${timeColor};font-size:12px" title="${endDate}">${timeLeft}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${sPriceDvpn >= 1 ? fmt(Math.round(sPriceDvpn)) : sPriceDvpn.toFixed(3)} P2P${sPriceUsd !== null ? `<div style="font-size:10px;color:var(--text-dim)">${fmtUsd(sPriceUsd)}</div>` : ''}</td>
+          <td style="font-size:11px">${startDate}</td>
+          <td style="font-size:11px">${endDate}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${s.id || '--'}</td>
+        </tr>`;
+      }).join('');
+
+      tableHtml = `<div class="card">
+        <div class="card-header">
+          <div class="card-title">Subscription History</div>
+          <span class="badge badge-dim">${fmt(total)} total</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="subs-table">
+            <thead><tr>
+              <th>Wallet</th><th>Status</th><th>Time Left</th><th>Price Paid</th><th>Started</th><th>Expires</th><th>Sub ID</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    $('app').innerHTML = `<div class="page">
+      ${planPicker}
+      ${statsHtml}
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
+        <div style="font-size:12px;color:var(--text-dim)">
+          <strong style="color:var(--accent)">How subscriptions work:</strong> Users subscribe to your plan themselves using Plan ID <strong>#${S.mgrPlanId}</strong>.
+          They send a <code style="color:var(--accent)">MsgStartSubscriptionRequest</code> on chain, paying the plan price. You cannot add users on their behalf — this is a decentralized protocol.
+        </div>
+      </div>
+      ${tableHtml}
+    </div>`;
+  } catch (e) {
+    if (S.page !== 'subscribers') return;
+    $('app').innerHTML = `<div class="page">${planPicker}<div class="empty-state" style="color:var(--red)">Failed to load subscribers: ${e.message}</div></div>`;
+  }
+}
+
+// ─── Fee Grants (Fee Abstraction) ────────────────────────────────────────────
+
+async function loadFeeGrants() {
+  showLoading('Loading fee grants...');
+  await _ensurePlansLoaded('fee-grants');
+  if (S.page === 'fee-grants') renderFeeGrants();
+}
+
+async function renderFeeGrants() {
+  const plans = S.myPlans || [];
+  const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadFeeGrants()");
+
+  // Settings form (always visible)
+  const settingsHtml = `<div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <div class="card-title">Fee Grant Manager</div>
+    </div>
+    <div id="fgSummaryArea" style="padding:16px">
+      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:16px">
+        <div style="text-align:center;min-width:100px">
+          <div style="font-size:32px;font-weight:700;color:var(--text)" id="fgTotalSubs">--</div>
+          <div style="font-size:12px;color:var(--text-dim)">Total Subscribers</div>
+        </div>
+        <div style="font-size:24px;color:var(--text-muted)">|</div>
+        <div style="text-align:center;min-width:100px">
+          <div style="font-size:32px;font-weight:700;color:#10b981" id="fgGrantedCount">--</div>
+          <div style="font-size:12px;color:var(--text-dim)">Have Fee Grant</div>
+        </div>
+        <div style="font-size:24px;color:var(--text-muted)">|</div>
+        <div style="text-align:center;min-width:100px">
+          <div style="font-size:32px;font-weight:700;color:var(--red)" id="fgUngrantedCount">--</div>
+          <div style="font-size:12px;color:var(--text-dim)">Without Grant</div>
+        </div>
+        <div style="flex:1"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button class="btn btn-primary" onclick="streamGrantAll()" id="fgGrantAllBtn" ${!S.mgrPlanId ? 'disabled' : ''} style="padding:12px 24px;font-size:14px;font-weight:600">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            Grant All Unganted
+          </button>
+          <button class="btn btn-danger" onclick="revokeAllGrants()" id="fgRevokeAllBtn" style="font-size:11px;padding:6px 14px">Revoke All</button>
+        </div>
+      </div>
+      <div style="width:100%;height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:12px">
+        <div id="fgCoverageBar" style="height:100%;background:linear-gradient(90deg,#10b981,#059669);border-radius:4px;transition:width 0.5s;width:0%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:12px">
+        <span id="fgCoverageLabel">Coverage: --%</span>
+        <span id="fgAutoAddedLabel">Auto-added this session: ${_autoGrantSessionCount}</span>
+      </div>
+    </div>
+    <div style="padding:0 16px 16px;display:flex;gap:16px;flex-wrap:wrap;align-items:end;border-top:1px solid var(--border);padding-top:14px">
+      <div style="flex:1;min-width:140px">
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">Spend Limit (P2P)</label>
+        <input type="number" id="fgSpendLimit" value="10" min="0" step="1" placeholder="0 = unlimited"
+          style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;outline:none">
+      </div>
+      <div style="flex:1;min-width:140px">
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">Expiration (days)</label>
+        <input type="number" id="fgExpDays" value="30" min="0" step="1" placeholder="0 = never"
+          style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;outline:none">
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;padding-bottom:2px">
+        <div style="position:relative;width:40px;height:22px">
+          <input type="checkbox" id="fgAutoGrant" onchange="toggleAutoGrant(this.checked)" style="opacity:0;width:0;height:0;position:absolute">
+          <div id="fgAutoGrantTrack" style="position:absolute;inset:0;background:var(--border);border-radius:11px;transition:background 0.2s"></div>
+          <div id="fgAutoGrantThumb" style="position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Auto-Add</div>
+          <div style="font-size:11px;color:var(--text-muted)">Grant on page load</div>
+        </div>
+      </label>
+    </div>
+    <div id="fgProgressArea" class="hidden" style="padding:0 16px 16px">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.8" id="fgProgressLog"></div>
+    </div>
+    <div style="padding:0 16px 12px;font-size:12px;color:var(--text-dim)">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" style="vertical-align:-2px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <strong style="color:var(--accent)">Fee Abstraction:</strong> Granting fee allowances lets your subscribers send transactions (subscribe, start sessions) without holding P2P for gas fees — you cover their tx costs.
+    </div>
+  </div>`;
+
+  // Individual grant form
+  const singleGrantHtml = `<div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <div class="card-title">Grant Individual Address</div>
+    </div>
+    <div style="padding:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:300px">
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">Grantee Address</label>
+        <input type="text" id="fgSingleAddr" placeholder="sent1..."
+          style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:'JetBrains Mono',monospace;outline:none">
+      </div>
+      <button class="btn btn-primary" onclick="grantSingleAddr()" style="padding:10px 20px">Grant</button>
+    </div>
+  </div>`;
+
+  // Gas cost analytics card
+  const gasCostHtml = `<div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <div class="card-title">Subscriber Gas Costs (Your Spend)</div>
+      <div style="display:flex;gap:4px" id="fgGasPeriodBtns">
+        <button class="btn btn-ghost" onclick="setGasPeriod('day')" data-period="day" style="font-size:11px;padding:4px 10px">Daily</button>
+        <button class="btn btn-ghost" onclick="setGasPeriod('week')" data-period="week" style="font-size:11px;padding:4px 10px">Weekly</button>
+        <button class="btn btn-ghost" onclick="setGasPeriod('month')" data-period="month" style="font-size:11px;padding:4px 10px;background:var(--accent);color:#fff">Monthly</button>
+        <button class="btn btn-ghost" onclick="setGasPeriod('year')" data-period="year" style="font-size:11px;padding:4px 10px">Yearly</button>
+      </div>
+    </div>
+    <div id="fgGasCostArea" style="padding:16px">
+      <div class="loading-state" style="padding:30px"><div class="loading-spinner"></div><div class="loading-text">Loading gas costs...</div></div>
+    </div>
+  </div>`;
+
+  // Loading state for grants table
+  $('app').innerHTML = `<div class="page">
+    ${planPicker}
+    ${settingsHtml}
+    ${singleGrantHtml}
+    ${gasCostHtml}
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Active Fee Grants</div>
+        <button class="btn btn-ghost" onclick="loadFeeGrants()" style="font-size:12px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div id="fgTableArea">
+        <div class="loading-state" style="padding:40px"><div class="loading-spinner"></div><div class="loading-text">Loading grants...</div></div>
+      </div>
+    </div>
+  </div>`;
+
+  // Fetch grants with stale-while-revalidate caching
+  try {
+    const reRender = () => { if (S.page === 'fee-grants') { hideUpdating(); renderFeeGrants(); } };
+    const { data: d, stale } = await cachedFetch('/api/feegrant/grants', 60_000, reRender);
+    if (stale) showUpdating();
+    if (S.page !== 'fee-grants') return;
+    if (d.error) throw new Error(d.error);
+    const grants = d.allowances || [];
+
+    // Also fetch plan subscribers if plan selected, to show which grantees are subscribers
+    let subscriberAddrs = new Set();
+    if (S.mgrPlanId) {
+      try {
+        const sr = await fetch('/api/plans/' + S.mgrPlanId + '/subscriptions?limit=500');
+        const sd = await sr.json();
+        const now = new Date();
+        (sd.subscriptions || []).forEach(s => {
+          if (s.status === 'active' && new Date(s.inactive_at) > now) subscriberAddrs.add(s.acc_address);
+        });
+      } catch (err) {
+        console.error('Failed to fetch plan subscribers:', err.message);
+      }
+    }
+
+    // Stats
+    const totalGrants = grants.length;
+    const subsWithGrant = grants.filter(g => subscriberAddrs.has(g.grantee)).length;
+    const subsWithout = subscriberAddrs.size - subsWithGrant;
+    const withExpiry = grants.filter(g => g.expiration).length;
+
+    const coveragePct = subscriberAddrs.size > 0 ? Math.round((subsWithGrant / subscriberAddrs.size) * 100) : 0;
+    const nonSubGrants = totalGrants - subsWithGrant;
+
+    // Update top summary panel
+    const el = (id, val) => { const e = $(id); if (e) e.textContent = val; };
+    el('fgTotalSubs', subscriberAddrs.size);
+    el('fgGrantedCount', subsWithGrant);
+    el('fgUngrantedCount', Math.max(0, subsWithout));
+    el('fgCoverageLabel', `Coverage: ${coveragePct}% (${subsWithGrant}/${subscriberAddrs.size})`);
+    el('fgAutoAddedLabel', `Auto-added this session: ${_autoGrantSessionCount}`);
+    const bar = $('fgCoverageBar');
+    if (bar) bar.style.width = coveragePct + '%';
+
+    const statsHtml = `<div class="stats-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
+      <div class="stat-card-enhanced">
+        <div class="stat-icon blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+        <div class="stat-label">Total Grants</div>
+        <div class="stat-value">${totalGrants}</div>
+        <div class="stat-sub">${subsWithGrant} subscribers + ${nonSubGrants} other</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon green"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+        <div class="stat-label">Coverage</div>
+        <div class="stat-value">${coveragePct}%</div>
+        <div class="stat-sub">${subsWithGrant} of ${subscriberAddrs.size} subscribers</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon yellow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+        <div class="stat-label">Not Yet Granted</div>
+        <div class="stat-value">${Math.max(0, subsWithout)}</div>
+        <div class="stat-sub">subscribers pending</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div>
+        <div class="stat-label">Auto-Added</div>
+        <div class="stat-value">${_autoGrantSessionCount}</div>
+        <div class="stat-sub">this session</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon red"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+        <div class="stat-label">With Expiry</div>
+        <div class="stat-value">${withExpiry}</div>
+        <div class="stat-sub">${totalGrants - withExpiry} permanent</div>
+      </div>
+    </div>`;
+
+    let tableHtml;
+    if (grants.length === 0) {
+      tableHtml = `<div class="empty-state" style="padding:50px">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <div style="margin-top:12px;color:var(--text-dim)">No fee grants issued yet</div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Use the settings above to grant fee allowances to your subscribers</div>
+      </div>`;
+    } else {
+      const rows = grants.map(g => {
+        const isSub = subscriberAddrs.has(g.grantee);
+        const limitStr = g.spendLimit && g.spendLimit.length > 0
+          ? g.spendLimit.map(c => `${(parseInt(c.amount) / 1e6).toFixed(1)} ${c.denom === 'udvpn' ? 'P2P' : c.denom}`).join(', ')
+          : '<span style="color:var(--text-muted)">Unlimited</span>';
+        let expStr = '<span style="color:var(--text-muted)">Never</span>';
+        if (g.expiration) {
+          const expDate = new Date(g.expiration);
+          if (!isNaN(expDate.getTime())) {
+            const isExpired = expDate < new Date();
+            expStr = `<span style="color:${isExpired ? 'var(--red)' : 'var(--text)'}">${expDate.toLocaleDateString()}${isExpired ? ' (expired)' : ''}</span>`;
+          }
+        }
+        return `<tr>
+          <td><span class="copyable" title="${g.grantee}" onclick="copyToClipboard('${g.grantee}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(g.grantee)}</span>${isSub ? ' <span style="background:var(--accent-glow);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-family:system-ui">SUB</span>' : ''}</td>
+          <td><span class="subs-badge-${g.allowanceType === 'basic' ? 'active' : 'inactive'}" style="font-size:11px">${g.allowanceType}</span></td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${limitStr}</td>
+          <td style="font-size:12px">${expStr}</td>
+          <td style="text-align:right"><button class="btn btn-ghost" onclick="revokeSingleGrant('${g.grantee}')" style="font-size:11px;padding:4px 10px;color:var(--red)">Revoke</button></td>
+        </tr>`;
+      }).join('');
+
+      tableHtml = `${statsHtml}
+        <div style="overflow-x:auto">
+          <table class="subs-table" style="width:100%">
+            <thead><tr>
+              <th style="text-align:left">Grantee</th><th style="text-align:left">Type</th><th style="text-align:left">Spend Limit</th><th style="text-align:left">Expires</th><th style="text-align:right">Action</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    document.getElementById('fgTableArea').innerHTML = tableHtml;
+
+    // Initialize auto-grant toggle + load gas costs in parallel
+    initAutoGrant();
+    loadGasCosts();
+  } catch (e) {
+    if (S.page !== 'fee-grants') return;
+    document.getElementById('fgTableArea').innerHTML = `<div class="empty-state" style="padding:30px;color:var(--red)">Failed to load grants: ${e.message}</div>`;
+  }
+}
+
+// ─── Auto-Grant Toggle ──────────────────────────────────────────────────────
+let _autoGrantEnabled = false;
+let _autoGrantSessionCount = 0;
+
+async function initAutoGrant() {
+  try {
+    const r = await fetch('/api/feegrant/auto-grant');
+    const d = await r.json();
+    _autoGrantEnabled = d.enabled;
+    updateAutoGrantUI(d.enabled);
+    if (d.enabled && S.mgrPlanId) {
+      // Auto-grant: silently run grant-all for new subscribers
+      const spendLimit = parseFloat($('fgSpendLimit')?.value) || d.spendLimitDvpn || 10;
+      const expDays = parseInt($('fgExpDays')?.value) || d.expirationDays || 30;
+      const r2 = await fetch('/api/feegrant/grant-subscribers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: S.mgrPlanId, spendLimitDvpn: spendLimit, expirationDays: expDays }),
+      });
+      const d2 = await r2.json();
+      if (d2.granted > 0) {
+        _autoGrantSessionCount += d2.granted;
+        toast(`Auto-granted ${d2.granted} new subscriber${d2.granted > 1 ? 's' : ''} (${_autoGrantSessionCount} this session)`, 'success');
+        renderFeeGrants();
+      }
+    }
+  } catch (err) {
+    console.error('Auto-grant init failed:', err.message);
+  }
+}
+
+function updateAutoGrantUI(enabled) {
+  const track = $('fgAutoGrantTrack');
+  const thumb = $('fgAutoGrantThumb');
+  const cb = $('fgAutoGrant');
+  if (track) track.style.background = enabled ? 'var(--accent)' : 'var(--border)';
+  if (thumb) thumb.style.transform = enabled ? 'translateX(18px)' : 'translateX(0)';
+  if (cb) cb.checked = enabled;
+}
+
+async function toggleAutoGrant(enabled) {
+  updateAutoGrantUI(enabled);
+  _autoGrantEnabled = enabled;
+  try {
+    const spendLimit = parseFloat($('fgSpendLimit')?.value) || 10;
+    const expDays = parseInt($('fgExpDays')?.value) || 30;
+    await fetch('/api/feegrant/auto-grant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, spendLimitDvpn: spendLimit, expirationDays: expDays }),
+    });
+    toast(enabled ? 'Auto-add enabled — new subscribers will be granted automatically' : 'Auto-add disabled', 'success');
+    if (enabled && S.mgrPlanId) {
+      // Immediately grant any uncovered subscribers
+      grantAllSubscribers();
+    }
+  } catch (err) {
+    toast('Failed to update auto-grant setting: ' + err.message, 'error');
+  }
+}
+
+// ─── Gas Cost Analytics ─────────────────────────────────────────────────────
+let _gasCostData = null;
+let _gasCostPeriod = 'month';
+
+async function loadGasCosts() {
+  if (!S.mgrPlanId) {
+    const area = $('fgGasCostArea');
+    if (area) area.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center">Select a plan to view gas costs</div>';
+    return;
+  }
+  try {
+    const r = await fetch(`/api/feegrant/gas-costs?planId=${S.mgrPlanId}`);
+    _gasCostData = await r.json();
+    if (_gasCostData.error) throw new Error(_gasCostData.error);
+    renderGasCosts();
+  } catch (err) {
+    const area = $('fgGasCostArea');
+    if (area) area.innerHTML = `<div style="padding:20px;color:var(--red);text-align:center">Failed to load gas costs: ${err.message}</div>`;
+  }
+}
+
+function setGasPeriod(period) {
+  _gasCostPeriod = period;
+  // Update button styles
+  const btns = document.querySelectorAll('#fgGasPeriodBtns button');
+  btns.forEach(b => {
+    if (b.dataset.period === period) {
+      b.style.background = 'var(--accent)';
+      b.style.color = '#fff';
+    } else {
+      b.style.background = '';
+      b.style.color = '';
+    }
+  });
+  renderGasCosts();
+}
+
+function renderGasCosts() {
+  const area = $('fgGasCostArea');
+  if (!area || !_gasCostData) return;
+
+  const { totalUdvpn, txCount, byAddress, subscriberCount } = _gasCostData;
+  const totalP2p = totalUdvpn / 1e6;
+
+  // Extrapolate based on period
+  // Data is lifetime total; estimate rate from txCount and assume ~30 day window of recent data
+  const multipliers = { day: 1 / 30, week: 7 / 30, month: 1, year: 12 };
+  const periodLabels = { day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Yearly' };
+  const mult = multipliers[_gasCostPeriod] || 1;
+
+  const periodP2p = totalP2p * mult;
+  const periodTxs = Math.round(txCount * mult);
+
+  // Get P2P price for USD conversion
+  const dvpnPrice = S.wallet?.dvpnPrice || 0;
+  const periodUsd = periodP2p * dvpnPrice;
+
+  // Top spenders
+  const addrEntries = Object.entries(byAddress)
+    .map(([addr, data]) => ({ addr, p2p: (data.udvpn / 1e6) * mult, txs: Math.round(data.txCount * mult) }))
+    .sort((a, b) => b.p2p - a.p2p);
+
+  const topSpendersHtml = addrEntries.length > 0 ? `
+    <div style="margin-top:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px">Top Gas Consumers (${periodLabels[_gasCostPeriod]})</div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto">
+        ${addrEntries.slice(0, 10).map((e, i) => {
+          const pct = totalP2p > 0 ? ((e.p2p / (totalP2p * mult)) * 100).toFixed(1) : 0;
+          return `<div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:var(--bg);border-radius:6px;font-size:12px">
+            <span style="color:var(--text-muted);width:18px;text-align:right">${i + 1}.</span>
+            <span class="copyable" title="${e.addr}" onclick="copyToClipboard('${e.addr}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;color:var(--text)">${shortAddr(e.addr)}</span>
+            <span style="flex:1"></span>
+            <span style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-weight:600">${e.p2p.toFixed(2)} P2P</span>
+            <span style="color:var(--text-muted);font-size:11px">${e.txs} txs</span>
+            <div style="width:50px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+              <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:3px"></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  area.innerHTML = `
+    <div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:0">
+      <div class="stat-card-enhanced">
+        <div class="stat-icon blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+        <div class="stat-label">${periodLabels[_gasCostPeriod]} Gas Spend</div>
+        <div class="stat-value">${periodP2p.toFixed(2)} P2P</div>
+        ${dvpnPrice ? `<div class="stat-sub">$${periodUsd.toFixed(4)} USD</div>` : ''}
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon green"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+        <div class="stat-label">${periodLabels[_gasCostPeriod]} TXs</div>
+        <div class="stat-value">${periodTxs.toLocaleString()}</div>
+        <div class="stat-sub">fee-granted transactions</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon yellow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <div class="stat-label">Subscribers</div>
+        <div class="stat-value">${subscriberCount}</div>
+        <div class="stat-sub">${addrEntries.length} used grants</div>
+      </div>
+      <div class="stat-card-enhanced">
+        <div class="stat-icon red"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <div class="stat-label">Avg per Subscriber</div>
+        <div class="stat-value">${addrEntries.length > 0 ? (periodP2p / addrEntries.length).toFixed(2) : '0.00'} P2P</div>
+        <div class="stat-sub">${periodLabels[_gasCostPeriod].toLowerCase()} average</div>
+      </div>
+    </div>
+    ${topSpendersHtml}
+  `;
+}
+
+function streamGrantAll() {
+  if (!S.mgrPlanId) { toast('Select a plan first', 'error'); return; }
+  const spendLimit = parseFloat($('fgSpendLimit')?.value) || 0;
+  const expDays = parseInt($('fgExpDays')?.value) || 0;
+  const btn = $('fgGrantAllBtn');
+  const logArea = $('fgProgressArea');
+  const log = $('fgProgressLog');
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Broadcasting...'; }
+  if (logArea) logArea.classList.remove('hidden');
+  if (log) log.innerHTML = '';
+
+  const appendLog = (msg, color) => {
+    if (!log) return;
+    const ts = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.style.color = color || 'var(--text-dim)';
+    line.textContent = `[${ts}] ${msg}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  const params = new URLSearchParams({ planId: S.mgrPlanId, spendLimitDvpn: spendLimit, expirationDays: expDays });
+  const es = new EventSource(`/api/feegrant/grant-subscribers-stream?${params}`);
+
+  es.onmessage = (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      switch (d.type) {
+        case 'status':
+          appendLog(d.msg, 'var(--text-muted)');
+          break;
+        case 'batch_start':
+          appendLog(`Batch ${d.batch}/${d.total}: broadcasting ${d.count} grants... [${d.addresses}]`, 'var(--accent)');
+          if (btn) btn.textContent = `Broadcasting ${d.batch}/${d.total}...`;
+          break;
+        case 'batch_ok':
+          appendLog(`Batch ${d.batch}/${d.total}: OK (${d.elapsed}s) — ${d.totalGranted} granted so far — TX: ${d.txHash?.slice(0, 16)}...`, '#10b981');
+          _autoGrantSessionCount += d.granted;
+          break;
+        case 'batch_error':
+          appendLog(`Batch ${d.batch}/${d.total}: FAILED — ${d.error}`, 'var(--red)');
+          break;
+        case 'done':
+          appendLog(`Done: ${d.granted} granted, ${d.skipped} already had grants${d.errors ? ', ' + d.errors.length + ' errors' : ''}`, '#10b981');
+          toast(`Granted: ${d.granted}, skipped: ${d.skipped || 0}${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
+          es.close();
+          resetGrantBtn();
+          if (S.page === 'fee-grants') renderFeeGrants();
+          break;
+        case 'error':
+          appendLog(`Error: ${d.msg}`, 'var(--red)');
+          toast('Grant failed: ' + d.msg, 'error');
+          es.close();
+          resetGrantBtn();
+          break;
+      }
+    } catch (e) {
+      appendLog('Parse error: ' + e.message, 'var(--red)');
+    }
+  };
+
+  es.onerror = () => {
+    appendLog('Connection lost — stream ended', 'var(--red)');
+    es.close();
+    resetGrantBtn();
+  };
+
+  function resetGrantBtn() {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg> Grant All Ungranted';
+    }
+  }
+}
+
+// Legacy POST version (used by auto-grant on page load — fast, no streaming needed)
+async function grantAllSubscribers() {
+  if (!S.mgrPlanId) { toast('Select a plan first', 'error'); return; }
+  const spendLimit = parseFloat($('fgSpendLimit')?.value) || 0;
+  const expDays = parseInt($('fgExpDays')?.value) || 0;
+  try {
+    const r = await fetch('/api/feegrant/grant-subscribers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId: S.mgrPlanId, spendLimitDvpn: spendLimit, expirationDays: expDays }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    if (d.granted > 0) _autoGrantSessionCount += d.granted;
+    toast(`Granted: ${d.granted}, skipped: ${d.skipped || 0}${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
+    if (S.page === 'fee-grants') renderFeeGrants();
+  } catch (e) {
+    toast('Grant failed: ' + e.message, 'error');
+  }
+}
+
+async function grantSingleAddr() {
+  const addr = document.getElementById('fgSingleAddr')?.value?.trim();
+  if (!addr || !addr.startsWith('sent')) { toast('Enter a valid sent1... address', 'error'); return; }
+  const spendLimit = parseFloat(document.getElementById('fgSpendLimit')?.value) || 0;
+  const expDays = parseInt(document.getElementById('fgExpDays')?.value) || 0;
+  try {
+    const r = await fetch('/api/feegrant/grant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grantee: addr, spendLimitDvpn: spendLimit, expirationDays: expDays }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    toast(`Fee grant issued! TX: ${d.txHash?.slice(0, 12)}...`, 'success');
+    document.getElementById('fgSingleAddr').value = '';
+    delete _dataCache['/api/feegrant/grants']; // Invalidate cache after mutation
+    delete _dataCache['/api/wallet']; // Balance changed
+    if (S.page === 'fee-grants') renderFeeGrants();
+  } catch (e) {
+    toast('Grant failed: ' + e.message, 'error');
+  }
+}
+
+async function revokeSingleGrant(grantee) {
+  if (!confirm(`Revoke fee grant for ${shortAddr(grantee)}?`)) return;
+  try {
+    const r = await fetch('/api/feegrant/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grantee }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    toast(`Grant revoked! TX: ${d.txHash?.slice(0, 12)}...`, 'success');
+    delete _dataCache['/api/feegrant/grants'];
+    delete _dataCache['/api/wallet'];
+    if (S.page === 'fee-grants') renderFeeGrants();
+  } catch (e) {
+    toast('Revoke failed: ' + e.message, 'error');
+  }
+}
+
+async function revokeAllGrants() {
+  if (!confirm('Revoke ALL fee grants from your wallet? This cannot be undone.')) return;
+  const btn = document.getElementById('fgRevokeAllBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Revoking...'; }
+  try {
+    const r = await fetch('/api/feegrant/revoke-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    toast(`Revoked ${d.revoked} grants${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
+    delete _dataCache['/api/feegrant/grants'];
+    delete _dataCache['/api/wallet'];
+    if (S.page === 'fee-grants') renderFeeGrants();
+  } catch (e) {
+    toast('Revoke failed: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Revoke All'; }
+  }
+}
+
+// ─── Coming Soon placeholder ─────────────────────────────────────────────────
+function renderComingSoon(title, desc) {
+  $('app').innerHTML = `<div class="page">
+    <div class="empty-state" style="padding:120px 20px">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <div style="font-size:18px;font-weight:600;color:#fff;margin-top:8px">${title}</div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:4px">${desc}</div>
+      <div style="color:var(--text-muted);font-size:12px;margin-top:16px">Available from previous tabs — migrating to new layout</div>
+    </div>
+  </div>`;
+}
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+async function boot() {
+  updateThemeIcon();
+  try {
+    const r = await fetch('/api/wallet/status');
+    const d = await r.json();
+    if (!d.loaded) {
+      showImportOverlay();
+      return;
+    }
+    hideImportOverlay();
+    loadWallet();
+    renderDashboard();
+  } catch {
+    showImportOverlay();
+  }
+}
+boot();
+</script>
+</body>
+</html>
