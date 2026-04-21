@@ -60,7 +60,7 @@ Open http://localhost:3003.
 `blue-js-sdk` is pulled in via `npm install` — no sibling checkout needed.
 
 ### About npm audit warnings
-`npm install` will report ~9 vulnerabilities in transitive `@cosmjs/*` dependencies (the elliptic-curve crypto lib). These come from upstream cosmjs, are not introduced by this project, and cannot be patched here — they're tracked by the Cosmos SDK maintainers (see [cosmos/cosmjs#1708](https://github.com/cosmos/cosmjs/issues/1708)). Don't run `npm audit fix --force` — it will break the build.
+`npm install` will report 7 low-severity warnings — all from `elliptic` (GHSA-848j-6mx2-7j84), a timing side-channel in ECDSA that has no upstream fix and affects every Cosmos SDK JS client. The criticals (`protobufjs`, `@confio/ics23`) are already pinned to fixed versions via `package.json` `overrides`. Don't run `npm audit fix --force` — it will break the build by downgrading `blue-js-sdk`'s locked cosmjs versions.
 
 ---
 
