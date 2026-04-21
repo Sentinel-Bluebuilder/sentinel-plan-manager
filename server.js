@@ -1773,19 +1773,6 @@ app.get('/api/node-rankings', async (req, res) => {
   }
 });
 
-app.get('/api/sales', (req, res) => {
-  const path = join(__dirname, 'sellers.json');
-  if (!existsSync(path)) {
-    return res.status(404).json({ error: 'sellers.json not found. Run: node scan-sellers.cjs' });
-  }
-  try {
-    const data = JSON.parse(readFileSync(path, 'utf8'));
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: parseChainError(err.message) });
-  }
-});
-
 // ─── Routes: Health / RPC ─────────────────────────────────────────────────────
 
 // LCD primary endpoint (used for raw health check fetches)
