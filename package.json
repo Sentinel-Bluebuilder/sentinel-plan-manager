@@ -3,8 +3,12 @@
   "version": "1.0.0",
   "description": "Sentinel dVPN plan manager dashboard",
   "type": "module",
+  "bin": {
+    "plans": "./cli.js"
+  },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "cli": "node cli.js"
   },
   "dependencies": {
     "@cosmjs/encoding": "^0.38.1",

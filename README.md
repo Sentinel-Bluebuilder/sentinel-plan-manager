@@ -24,6 +24,14 @@ See [`MANIFESTO.md`](./MANIFESTO.md) for the full vision.
 
 ---
 
+## How Subscription Plans Work
+
+Plan Manager operates Sentinel v3 subscription plans — the chain-native model where an operator creates a plan (duration + data cap + price), links nodes, and subscribers consume bandwidth across those nodes without paying each node per session. Operators can fee-grant subscribers so end users hold zero P2P tokens.
+
+See [PLANS.md](./PLANS.md) for the full breakdown: plan lifecycle, plan-based vs P2P sessions, fee grants, operator economics, and when to use this dashboard vs the SDK.
+
+---
+
 ## Who It's For
 
 | You are… | You get… |
@@ -61,6 +69,81 @@ Open http://localhost:3003.
 
 ### About npm audit warnings
 `npm install` will report 7 low-severity warnings — all from `elliptic` (GHSA-848j-6mx2-7j84), a timing side-channel in ECDSA that has no upstream fix and affects every Cosmos SDK JS client. The criticals (`protobufjs`, `@confio/ics23`) are already pinned to fixed versions via `package.json` `overrides`. Don't run `npm audit fix --force` — it will break the build by downgrading `blue-js-sdk`'s locked cosmjs versions.
+
+---
+
+## CLI
+
+The Plan Manager includes a command-line interface (`cli.js`) that exposes every server endpoint as a subcommand. It is a thin HTTP client — it talks to a running server and requires no extra dependencies beyond Node 20+. AI agents can drive the full plan lifecycle (create plans, link nodes, issue fee grants, query state) from a shell or subprocess without touching the web UI.
+
+### Install
+
+```bash
+# Development (symlinks cli.js into your PATH):
+npm link
+
+# Global install:
+npm install -g .
+
+# Without installing — use npm script:
+npm run cli -- <args>
+
+# Windows (no install needed):
+plans.cmd <args>
+```
+
+### Common commands
+
+```bash
+# Server health
+plans health
+
+# Wallet
+plans wallet info
+plans wallet import "word1 word2 ... word12"
+plans wallet logout
+
+# Plans
+plans plan list
+plans plan mine
+plans plan get 42
+plans plan create --gb 10 --days 30 --price-udvpn 500000
+plans plan status 42 1          # 1=active, 2=inactive
+plans plan subscribers 42
+
+# Nodes
+plans node list --country US --protocol wireguard
+plans node list --limit 100 --page 2
+plans node progress
+plans node rankings
+
+# Linking nodes to a plan
+plans link 42 sentnode1abc...
+plans batch-link 42 sentnode1abc...,sentnode1def...
+
+# Fee grants
+plans feegrant list
+plans feegrant grant-subscribers 42 --spend-limit-dvpn 10 --expiration-days 30
+plans feegrant revoke-all
+
+# Health checks
+plans rpc-health
+plans rpc-providers
+```
+
+### AI agent usage
+
+Pass `--json` to any command to receive raw JSON on stdout (all errors go to stderr). Exit codes: 0 success, 1 client error, 2 server error, 3 server unreachable.
+
+```bash
+plans plan list --json
+plans feegrant gas-costs 42 --json
+plans status --json
+```
+
+Use `--base-url http://host:port` to target a remote server.
+
+For every command and flag, run `plans <group> --help`.
 
 ---
 
@@ -244,15 +327,6 @@ node server.js      # same, without npm
 - `camelCase` vars, `UPPER_SNAKE` constants, `kebab-case` files
 - Typed error classes with `.code`
 - Section markers: `// ─── Section Name ───`
-
-### Utility Scripts
-| Script | Purpose |
-|---|---|
-| `check-denoms.js` | Query active node pricing denoms + sample sessions. |
-| `check-sessions.cjs` | Filter sessions by wallet address. |
-| `find-sessions.cjs` | Paginate all sessions, find a wallet's sessions. |
-| `test-plan-connect.js` | Test plan-based VPN connection (WireGuard handshake). |
-| `link-plan42.mjs` | Example: batch-link a curated node set to plan 42. |
 
 ---
 
