@@ -1,6 +1,6 @@
 {
   "name": "sentinel-plan-manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sentinel dVPN plan manager — Express dashboard + CLI with RPC-first queries and LCD fallback",
   "type": "module",
   "bin": {
