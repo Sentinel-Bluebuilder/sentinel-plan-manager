@@ -1779,8 +1779,16 @@ async function registerProvider() {
     });
     const d = await r.json();
     if (d.ok) {
-      toast('Provider registered! TX: ' + d.txHash.slice(0, 16) + '...', 'success');
-      loadWallet();
+      const label = d.action === 'updated' ? 'Provider updated' : 'Provider registered';
+      toast(label + '! TX: ' + d.txHash.slice(0, 16) + '...', 'success');
+      if (d.activation?.ok) {
+        toast('Provider activated! TX: ' + d.activation.txHash.slice(0, 16) + '...', 'success');
+      } else if (d.activationError) {
+        toast('Registered, but activation failed: ' + friendlyError(d.activationError), 'error');
+      }
+      delete _dataCache['/api/wallet'];
+      await loadWallet();
+      if (S.page === 'create') renderCreate();
     } else {
       toast(friendlyError(d.error || d.rawLog || 'Registration failed'), 'error');
     }
