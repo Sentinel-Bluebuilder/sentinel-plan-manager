@@ -39,6 +39,11 @@ import {
   rpcQueryFeeGrantsIssued,
 } from './lib/chain.js';
 import { getAddr, getProvAddr, initWallet, clearWalletState, loadSavedWallet, requireWallet } from './lib/wallet.js';
+import {
+  initSession, isMultiUser, encryptMnemonic, decryptMnemonic,
+  sessionFromMnemonic, runWithSession, parseCookies,
+  buildSetCookie, buildClearCookie, COOKIE_NAME,
+} from './lib/session.js';
 
 registerCleanupHandlers();
 
@@ -47,27 +52,83 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // volume. Defaults to the project root — unchanged for local installs.
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+initSession(DATA_DIR);
+
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
+// ─── Per-Request Session Middleware ───────────────────────────────────────
+// Decrypts the httpOnly session cookie (if present) into a wallet and runs
+// the rest of the request chain inside that session's AsyncLocalStorage
+// context. Handlers call `getAddr()` / `getSigningClient()` as before;
+// those helpers automatically resolve to the per-request wallet.
+app.use(async (req, res, next) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[COOKIE_NAME];
+  if (!token) return next();
+  try {
+    const mnemonic = decryptMnemonic(token);
+    const session = await sessionFromMnemonic(mnemonic);
+    runWithSession(session, () => next());
+  } catch (err) {
+    // Tampered / stale / key-rotated cookie — clear it and continue.
+    console.warn('[session] Rejecting cookie:', err.message);
+    res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
+    next();
+  }
+});
+
 // ─── Plan ID Persistence ──────────────────────────────────────────────────────
+// Keyed by wallet address so multi-user deploys keep each operator's plan
+// list separate. Legacy flat-array files (single-user installs) are migrated
+// to the per-address map on first read.
 const MY_PLANS_FILE = join(DATA_DIR, 'my-plans.json');
 
-function loadMyPlanIds() {
+function readPlanStore() {
   try {
-    if (existsSync(MY_PLANS_FILE)) return JSON.parse(readFileSync(MY_PLANS_FILE, 'utf8'));
+    if (!existsSync(MY_PLANS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync(MY_PLANS_FILE, 'utf8'));
+    // Legacy shape: flat array. Stash it under the currently-loaded wallet
+    // so nothing is lost; if there's no wallet yet, park it under '_legacy'
+    // and the first wallet to load gets a merge.
+    if (Array.isArray(parsed)) {
+      const owner = getAddr() || '_legacy';
+      return { [owner]: parsed.map(Number) };
+    }
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     console.error('Failed to load my-plans.json:', err.message);
+    return {};
   }
-  return [];
+}
+
+function loadMyPlanIds() {
+  const store = readPlanStore();
+  const addr = getAddr();
+  if (!addr) return [];
+  const list = store[addr] || [];
+  // Opportunistically absorb any legacy-bucket plans the first time this
+  // wallet loads them.
+  if (store._legacy && store[addr] !== store._legacy) {
+    const merged = Array.from(new Set([...list, ...store._legacy]));
+    store[addr] = merged;
+    delete store._legacy;
+    try { writeFileSync(MY_PLANS_FILE, JSON.stringify(store), 'utf8'); } catch {}
+    return merged;
+  }
+  return list;
 }
 
 function saveMyPlanId(id) {
-  const ids = loadMyPlanIds();
-  if (!ids.includes(Number(id))) {
-    ids.push(Number(id));
-    writeFileSync(MY_PLANS_FILE, JSON.stringify(ids), 'utf8');
+  const addr = getAddr();
+  if (!addr) return;
+  const store = readPlanStore();
+  const list = store[addr] || [];
+  if (!list.includes(Number(id))) {
+    list.push(Number(id));
+    store[addr] = list;
+    writeFileSync(MY_PLANS_FILE, JSON.stringify(store), 'utf8');
   }
 }
 
@@ -571,19 +632,33 @@ async function batchLeaseNodes(addrs, hours = 24) {
 // ─── Routes: Wallet ──────────────────────────────────────────────────────────
 
 app.get('/api/wallet/status', (req, res) => {
-  res.json({ loaded: !!getAddr(), address: getAddr() || null });
+  res.json({ loaded: !!getAddr(), address: getAddr() || null, multiUser: isMultiUser() });
 });
 
 app.post('/api/wallet/import', async (req, res) => {
   try {
     const { mnemonic } = req.body;
     if (!mnemonic) return res.status(400).json({ error: 'mnemonic required' });
-    const words = mnemonic.trim().split(/\s+/);
+    const trimmed = mnemonic.trim();
+    const words = trimmed.split(/\s+/);
     if (words.length !== 12 && words.length !== 24) {
       return res.status(400).json({ error: 'Mnemonic must be 12 or 24 words' });
     }
-    await initWallet(mnemonic.trim());
-    res.json({ ok: true, address: getAddr(), provAddress: getProvAddr() });
+
+    // Derive the wallet now to validate the mnemonic before we ever store it
+    // in a cookie.
+    const session = await sessionFromMnemonic(trimmed);
+    const token = encryptMnemonic(trimmed);
+    res.setHeader('Set-Cookie', buildSetCookie(token, { secure: req.secure }));
+
+    // In single-user mode, also set the module-level wallet so the classic
+    // local-deploy UX (env MNEMONIC, one shared wallet) keeps working for
+    // clients that don't carry the cookie (e.g. the CLI on the same host).
+    if (!isMultiUser()) {
+      await initWallet(trimmed);
+    }
+
+    res.json({ ok: true, address: session.addr, provAddress: session.provAddr });
   } catch (err) {
     console.error('Wallet import error:', err.message);
     res.status(400).json({ error: 'Invalid mnemonic: ' + err.message });
@@ -591,6 +666,9 @@ app.post('/api/wallet/import', async (req, res) => {
 });
 
 app.post('/api/wallet/test-import', async (req, res) => {
+  if (isMultiUser()) {
+    return res.status(403).json({ error: 'Disabled in multi-user mode — paste your own mnemonic instead.' });
+  }
   try {
     const envPath = join(__dirname, '.env');
     if (!existsSync(envPath)) {
@@ -610,8 +688,14 @@ app.post('/api/wallet/test-import', async (req, res) => {
 });
 
 app.post('/api/wallet/logout', (req, res) => {
-  clearWalletState();
-  console.log('Wallet cleared');
+  res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
+  // Only wipe the module-level wallet in single-user mode — in multi-user
+  // mode there is no shared state to clear, and doing so would log out
+  // everyone who still has a valid cookie.
+  if (!isMultiUser()) {
+    clearWalletState();
+    console.log('Wallet cleared');
+  }
   res.json({ ok: true });
 });
 
@@ -642,6 +726,7 @@ app.get('/api/wallet', async (req, res) => {
       dvpnPriceUsd: dvpnPrice,
       balanceUsd: dvpnPrice ? parseFloat((parseInt(bal.amount) / 1e6 * dvpnPrice).toFixed(4)) : null,
       provider,
+      multiUser: isMultiUser(),
     });
   } catch (err) {
     res.status(500).json({ error: parseChainError(err.message) });
@@ -2241,7 +2326,9 @@ app.get('/health', (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const _savedMnemonic = loadSavedWallet();
-if (_savedMnemonic) {
+if (isMultiUser()) {
+  console.log('[wallet] MULTI_USER=true — skipping env/disk wallet bootstrap. Each visitor logs in with their own mnemonic.');
+} else if (_savedMnemonic) {
   initWallet(_savedMnemonic).then(() => {
     console.log(`Restored wallet: ${getAddr()}`);
   }).catch(err => {

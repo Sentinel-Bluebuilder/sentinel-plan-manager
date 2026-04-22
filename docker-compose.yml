@@ -6,10 +6,17 @@ services:
     ports:
       - "3003:3003"
     environment:
-      # Your 12/24-word mnemonic. Compose auto-loads a `.env` file in this
-      # directory (use `MNEMONIC=...` there) or pass it inline. Leave unset to
-      # create a wallet through the web UI on first boot.
+      # Single-user mode: set your 12/24-word mnemonic here (or in a sibling
+      # `.env` file). The server boots that one wallet and everyone sharing
+      # the server uses it.
       MNEMONIC: ${MNEMONIC:-}
+      # Multi-user mode: set MULTI_USER=true to skip the env-wallet bootstrap.
+      # Each visitor then logs in with their own mnemonic; the server stores
+      # it in an httpOnly AES-256-GCM encrypted cookie (key at /data/.session-key).
+      MULTI_USER: ${MULTI_USER:-}
+      # Optional: pin the cookie encryption key (64-char hex). If unset, one
+      # is auto-generated under /data/.session-key on first boot.
+      SESSION_KEY: ${SESSION_KEY:-}
       PORT: 3003
     volumes:
       # Single named volume for all persistent state. The app writes
