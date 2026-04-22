@@ -779,25 +779,52 @@ app.post('/api/plan/create', async (req, res) => {
     console.log(`Creating plan (v3): ${gigabytes}GB (${bytesStr} bytes), ${durationSeconds}s, quote=${priceQuoteValue} ${priceDenom || 'udvpn'}...`);
     const result = await safeBroadcast([msg]);
     const resp = txResponse(result);
-    if (resp.ok) {
-      console.log(`Plan created: tx=${resp.txHash}`);
-      let planId = null;
-      for (const event of (resp.events || [])) {
-        if (/plan/i.test(event.type)) {
-          for (const attr of event.attributes) {
-            const k = typeof attr.key === 'string' ? attr.key : Buffer.from(attr.key, 'base64').toString('utf8');
-            const v = typeof attr.value === 'string' ? attr.value : Buffer.from(attr.value, 'base64').toString('utf8');
-            if (k === 'plan_id' || k === 'id') planId = v.replace(/"/g, '');
-          }
+    if (!resp.ok) {
+      console.log(`Create plan FAIL: code=${resp.code} ${resp.rawLog}`);
+      return res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
+    }
+
+    console.log(`Plan created: tx=${resp.txHash}`);
+    let planId = null;
+    for (const event of (resp.events || [])) {
+      if (/plan/i.test(event.type)) {
+        for (const attr of event.attributes) {
+          const k = typeof attr.key === 'string' ? attr.key : Buffer.from(attr.key, 'base64').toString('utf8');
+          const v = typeof attr.value === 'string' ? attr.value : Buffer.from(attr.value, 'base64').toString('utf8');
+          if (k === 'plan_id' || k === 'id') planId = v.replace(/"/g, '');
         }
       }
-      resp.planId = planId;
-      if (planId) saveMyPlanId(planId);
-      res.json(resp);
-    } else {
-      console.log(`Create plan FAIL: code=${resp.code} ${resp.rawLog}`);
-      res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
+    resp.planId = planId;
+    if (planId) saveMyPlanId(planId);
+    cacheInvalidate('allPlans');
+
+    // Newly-created plans land on chain inactive; activate in a separate TX
+    // so subscriptions can be opened without a manual follow-up.
+    if (planId) {
+      try {
+        const statusMsg = {
+          typeUrl: C.MSG_UPDATE_PLAN_STATUS_TYPE,
+          value: { from: getProvAddr(), id: BigInt(planId), status: 1 },
+        };
+        console.log(`Activating plan ${planId} (status=1, separate TX)...`);
+        const statusResult = await safeBroadcast([statusMsg]);
+        const statusResp = txResponse(statusResult);
+        resp.activation = statusResp;
+        if (statusResp.ok) {
+          console.log(`Plan ${planId} activated: tx=${statusResp.txHash}`);
+          cacheInvalidate('allPlans');
+        } else {
+          console.log(`Plan ${planId} activation FAIL: code=${statusResp.code} ${statusResp.rawLog}`);
+          resp.activationError = parseChainError(statusResp.rawLog);
+        }
+      } catch (err) {
+        console.error('Plan activation error:', err.message);
+        resp.activationError = parseChainError(err.message);
+      }
+    }
+
+    res.json(resp);
   } catch (err) {
     res.status(500).json({ error: parseChainError(err.message) });
   }

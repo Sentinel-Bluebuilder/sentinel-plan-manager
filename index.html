@@ -1826,6 +1826,11 @@ async function createPlan() {
     if (d.ok) {
       const planMsg = d.planId ? `Plan #${d.planId} created!` : 'Plan created!';
       toast(planMsg + ' TX: ' + d.txHash.slice(0, 16) + '...', 'success');
+      if (d.activation?.ok) {
+        toast('Plan activated! TX: ' + d.activation.txHash.slice(0, 16) + '...', 'success');
+      } else if (d.activationError) {
+        toast('Created, but activation failed: ' + friendlyError(d.activationError), 'error');
+      }
       if (d.planId) {
         S.myPlans = null; // Force refresh on manage page
       }
