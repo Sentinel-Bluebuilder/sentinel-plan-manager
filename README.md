@@ -140,6 +140,9 @@ plans feegrant grant-subscribers <id> --spend-limit-dvpn 10 --expiration-days 30
 ### About npm audit warnings
 `npm install` will report 7 low-severity warnings — all from `elliptic` (GHSA-848j-6mx2-7j84), a timing side-channel in ECDSA that has no upstream fix and affects every Cosmos SDK JS client. The criticals (`protobufjs`, `@confio/ics23`) are already pinned to fixed versions via `package.json` `overrides`. Don't run `npm audit fix --force` — it will break the build by downgrading `blue-js-sdk`'s locked cosmjs versions.
 
+### About `.npmrc` (ignore-scripts)
+This project ships a `.npmrc` with `ignore-scripts=true`. That's intentional: `blue-js-sdk`'s postinstall downloads V2Ray binaries and (on macOS) tries to run `brew install wireguard-tools` — neither is needed here, and on slow/throttled networks it can make `npm install` hang for minutes. Skipping scripts drops install time from minutes to ~8 s. If you later add a dependency whose postinstall is actually required, remove the flag or run the specific script manually.
+
 ---
 
 ## CLI
