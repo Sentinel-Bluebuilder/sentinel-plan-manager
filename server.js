@@ -1362,13 +1362,41 @@ app.post('/api/provider/register', async (req, res) => {
     const result = await safeBroadcast([msg]);
     const resp = txResponse(result);
     resp.action = alreadyExists ? 'updated' : 'registered';
-    if (resp.ok) {
-      console.log(`Provider ${resp.action}: tx=${resp.txHash}`);
-      res.json(resp);
-    } else {
+    if (!resp.ok) {
       console.log(`Provider ${action} FAIL: code=${resp.code} ${resp.rawLog}`);
-      res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
+      return res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
+
+    console.log(`Provider ${resp.action}: tx=${resp.txHash}`);
+    cacheInvalidate(`provider:${getAddr()}`);
+
+    // Fresh registrations land on chain with status=inactive; plans cannot
+    // be created until the provider is active. Broadcast a follow-up
+    // MsgUpdateProviderStatus (status=1) as a separate TX.
+    if (!alreadyExists) {
+      try {
+        const statusMsg = {
+          typeUrl: C.MSG_UPDATE_PROVIDER_STATUS_TYPE,
+          value: { from: getProvAddr(), status: 1 },
+        };
+        console.log('Activating provider (status=1, separate TX)...');
+        const statusResult = await safeBroadcast([statusMsg]);
+        const statusResp = txResponse(statusResult);
+        resp.activation = statusResp;
+        if (statusResp.ok) {
+          console.log(`Provider activated: tx=${statusResp.txHash}`);
+          cacheInvalidate(`provider:${getAddr()}`);
+        } else {
+          console.log(`Provider activation FAIL: code=${statusResp.code} ${statusResp.rawLog}`);
+          resp.activationError = parseChainError(statusResp.rawLog);
+        }
+      } catch (err) {
+        console.error('Provider activation error:', err.message);
+        resp.activationError = parseChainError(err.message);
+      }
+    }
+
+    res.json(resp);
   } catch (err) {
     console.error('Provider register/update error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
@@ -1384,7 +1412,7 @@ app.post('/api/provider/status', async (req, res) => {
     await getSigningClient();
     const msg = {
       typeUrl: C.MSG_UPDATE_PROVIDER_STATUS_TYPE,
-      value: { from: getAddr(), status: parseInt(status) },
+      value: { from: getProvAddr(), status: parseInt(status) },
     };
 
     console.log(`Updating provider status to ${status} (v3)...`);
@@ -1392,6 +1420,7 @@ app.post('/api/provider/status', async (req, res) => {
     const resp = txResponse(result);
     if (resp.ok) {
       console.log(`Provider status updated: tx=${resp.txHash}`);
+      cacheInvalidate(`provider:${getAddr()}`);
       res.json(resp);
     } else {
       console.log(`Provider status FAIL: code=${resp.code} ${resp.rawLog}`);
