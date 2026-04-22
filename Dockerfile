@@ -4,7 +4,9 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 # Install production deps first for better layer caching.
-COPY package.json package-lock.json ./
+# .npmrc sets ignore-scripts=true — skips blue-js-sdk's V2Ray/WireGuard
+# postinstall which we don't need for the plan manager.
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev
 
 # ─── Runtime stage ───────────────────────────────────────────────────────────
