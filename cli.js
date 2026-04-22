@@ -210,7 +210,7 @@ plans plan create             POST /api/plan/create
   --days N         Duration in days (required)
   --price-udvpn N  Price per GB in udvpn (required)
   --private        Mark plan as private
-plans plan status <id> <n>   POST /api/plan/status (1=active, 2=inactive)
+plans plan status <id> <n>   POST /api/plan/status (1=active, 2=inactive_pending, 3=inactive)
 plans plan subscribe <id>    POST /api/plan/subscribe
   [--denom udvpn]
 plans plan start-session <subId> <nodeAddr>  POST /api/plan/start-session
@@ -436,7 +436,7 @@ async function cmdPlanCreate(f) {
 }
 
 async function cmdPlanStatus(id, status) {
-  if (!id || !status) { err('Usage: plans plan status <id> <status>  (1=active, 2=inactive)'); process.exit(1); }
+  if (!id || !status) { err('Usage: plans plan status <id> <status>  (1=active, 2=inactive_pending, 3=inactive)'); process.exit(1); }
   const d = await POST('/api/plan/status', { planId: parseInt(id), status: parseInt(status) });
   if (JSON_MODE) { printJson(d); return; }
   txLine(d);

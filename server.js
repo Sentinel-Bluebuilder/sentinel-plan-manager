@@ -24,7 +24,20 @@ import { PORT, LCD_ENDPOINTS, RPC_PROVIDERS, RPC_ENDPOINTS, NODE_CACHE_TTL } fro
 import * as C from './lib/constants.js';
 // Chain error parsing + plan-specific helpers (kept local — SDK's parseChainError lacks plan/lease patterns)
 import { parseChainError, isLeaseNotFound, isDuplicateNode, txResponse } from './lib/errors.js';
-import { lcd, getDvpnPrice, getSigningClient, resetSigningClient, safeBroadcast, getRpcClient, rpcQueryNode } from './lib/chain.js';
+import {
+  lcd,
+  getDvpnPrice,
+  getSigningClient,
+  resetSigningClient,
+  safeBroadcast,
+  getRpcClient,
+  rpcQueryNode,
+  rpcQueryNodes,
+  rpcQueryNodesForPlan,
+  rpcQuerySessionsForAccount,
+  rpcQuerySubscriptionsForPlan,
+  rpcQueryFeeGrantsIssued,
+} from './lib/chain.js';
 import { getAddr, getProvAddr, initWallet, clearWalletState, loadSavedWallet, requireWallet } from './lib/wallet.js';
 
 registerCleanupHandlers();
@@ -64,9 +77,16 @@ function loadNodeCacheFromDisk() {
     if (!existsSync(NODE_CACHE_FILE)) return;
     const d = JSON.parse(readFileSync(NODE_CACHE_FILE, 'utf8'));
     if (d.nodes && d.nodes.length) {
-      nodeCache.nodes = d.nodes;
-      nodeCache.ts = d.ts || 0;
-      console.log(`Loaded ${d.nodes.length} nodes from disk cache (age: ${Math.round((Date.now() - nodeCache.ts) / 1000)}s)`);
+      const ageMs = Date.now() - (d.ts || 0);
+      // Only seed cache if fresh (within TTL). Stale on-disk data is discarded —
+      // we'd rather scan fresh than serve stale counts as "on-chain truth".
+      if (ageMs < NODE_CACHE_TTL) {
+        nodeCache.nodes = d.nodes;
+        nodeCache.ts = d.ts || 0;
+        console.log(`Seeded node cache from disk: ${d.nodes.length} nodes (age ${Math.round(ageMs / 1000)}s, will refresh in background)`);
+      } else {
+        console.log(`Disk node cache is stale (age ${Math.round(ageMs / 1000)}s > TTL ${NODE_CACHE_TTL / 1000}s) — discarding, will rescan`);
+      }
     }
   } catch (err) {
     console.error('Failed to load node cache from disk:', err.message);
@@ -79,6 +99,8 @@ function saveNodeCacheToDisk(nodes) {
 }
 
 loadNodeCacheFromDisk();
+// Always kick a fresh scan on startup so the disk seed is replaced with on-chain truth ASAP.
+runNodeScan().catch(err => console.error('Initial node scan failed:', err.message));
 
 function nodeCacheToAllNodes(raw) {
   return raw.map(n => {
@@ -141,17 +163,31 @@ async function fetchAllNodes() {
 
 async function discoverPlanIds() {
   const ids = new Set();
+  // Fetch RPC client once outside the loop — reused for every probe.
+  let rpc = null;
+  try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
   for (let batch = 0; batch < 10; batch++) {
     const checks = [];
     for (let i = batch * 10 + 1; i <= (batch + 1) * 10; i++) {
-      checks.push(
-        lcd(`/sentinel/subscription/v3/plans/${i}/subscriptions?pagination.limit=1&pagination.count_total=true`)
+      checks.push((async (planId) => {
+        // RPC-first: if RPC returns a non-empty array the plan exists.
+        // Empty array is ambiguous (truly empty OR not-on-chain) — fall back to LCD count_total.
+        if (rpc) {
+          try {
+            const result = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 1 });
+            if (result && result.length > 0) { ids.add(planId); return; }
+          } catch (err) {
+            console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} — LCD fallback`);
+          }
+        }
+        // LCD fallback — count_total is authoritative for empty-vs-nonexistent distinction.
+        await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`)
           .then(d => {
             const total = parseInt(d.pagination?.total || '0');
-            if (total > 0) ids.add(i);
+            if (total > 0) ids.add(planId);
           })
-          .catch(() => {})
-      );
+          .catch(() => {});
+      })(i));
     }
     await Promise.all(checks);
   }
@@ -160,10 +196,23 @@ async function discoverPlanIds() {
 
 async function getUniqueWallets(planId) {
   const wallets = new Set();
+
+  // RPC-first: single protobuf call returns the full set (~912x faster than paginated LCD).
+  try {
+    const rpc = await getRpcClient();
+    if (rpc) {
+      const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+      for (const s of subs) wallets.add(s.acc_address);
+      return wallets.size;
+    }
+  } catch (err) {
+    console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} — LCD fallback`);
+  }
+
+  // LCD fallback
   let nextKey = undefined;
   let pages = 0;
   const MAX_PAGES = 20;
-
   do {
     const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
     const d = await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500${keyParam}`);
@@ -182,9 +231,26 @@ async function getPlanStats(planId) {
 }
 
 async function _getPlanStatsImpl(planId) {
+  // Fetch RPC client once for this call — shared by RPC-first paths below.
+  let rpc = null;
+  try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
+
   const [subsData, nodesData, latestSubs] = await Promise.all([
+    // count_total — LCD is the only way to get pagination.total; keep LCD.
     lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`),
-    lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=500`).catch(() => ({ nodes: [] })),
+    // Plan nodes — RPC-first, fall back to LCD.
+    (async () => {
+      if (rpc) {
+        try {
+          const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
+          if (nodes) return { nodes };
+        } catch (err) {
+          console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
+        }
+      }
+      return lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=500`).catch(() => ({ nodes: [] }));
+    })(),
+    // RPC doesn't expose reverse pagination — LCD only.
     lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=200&pagination.reverse=true`),
   ]);
 
@@ -243,8 +309,32 @@ async function _getPlanStatsImpl(planId) {
 
 async function getNodesForPlan(planId) {
   const nodes = [];
-  let nextKey = undefined;
 
+  // RPC-first
+  try {
+    const rpc = await getRpcClient();
+    if (rpc) {
+      const rpcNodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
+      for (const n of rpcNodes) {
+        const rawAddr = (n.remote_addrs || [])[0] || '';
+        nodes.push({
+          address: n.address,
+          remoteUrl: rawAddr ? (rawAddr.startsWith('http') ? rawAddr : `https://${rawAddr}`) : '',
+          gigabytePrices: n.gigabyte_prices,
+          hourlyPrices: n.hourly_prices,
+          status: n.status === 1 ? 'active' : 'inactive',
+          inactiveAt: null,
+          statusAt: null,
+        });
+      }
+      return nodes;
+    }
+  } catch (err) {
+    console.log(`[RPC] getNodesForPlan(${planId}) failed: ${err.message} — LCD fallback`);
+  }
+
+  // LCD fallback
+  let nextKey = undefined;
   do {
     const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
     const d = await lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=100${keyParam}`);
@@ -282,6 +372,28 @@ async function getProviders() {
 
 async function getAllNodeInfo() {
   const nodeMap = {};
+
+  // RPC-first: single call returns full list, no pagination needed.
+  try {
+    const rpc = await getRpcClient();
+    if (rpc) {
+      const nodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
+      for (const n of nodes) {
+        const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
+        const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
+        nodeMap[n.address] = {
+          hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
+          gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
+        };
+      }
+      console.log(`[RPC] getAllNodeInfo: ${Object.keys(nodeMap).length} nodes loaded`);
+      return nodeMap;
+    }
+  } catch (err) {
+    console.log(`[RPC] getAllNodeInfo failed (${err.message}), falling back to LCD`);
+  }
+
+  // LCD fallback: paginated scan.
   let nextKey = undefined;
   do {
     const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
@@ -305,6 +417,7 @@ async function scanSessions() {
   let pages = 0;
   let totalScanned = 0;
 
+  // No chain-wide RPC sessions query available — LCD is the only path
   do {
     const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
     const d = await lcd(`/sentinel/session/v3/sessions?pagination.limit=500${keyParam}`);
@@ -571,9 +684,38 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     const key = req.query.key || '';
     const keyParam = key ? `&pagination.key=${encodeURIComponent(key)}` : '';
     const cacheKey = `planSubs:${planId}:${limit}:${key}`;
-    const d = await cached(cacheKey, 60_000, () =>
-      lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=${limit}&pagination.reverse=true${keyParam}`)
-    );
+
+    // RPC-first only when no cursor key and limit ≤ 500 (full page, no pagination needed).
+    // RPC doesn't give next_key, so cursor-based pagination must use LCD.
+    let d;
+    if (!key && limit <= 500) {
+      try {
+        const rpc = await getRpcClient();
+        if (rpc) {
+          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+          if (rpcResult) {
+            // Normalize numeric status → string to match LCD shape ({status:'active'|'inactive_pending'|'inactive'}).
+            // Reverse ordering to match LCD pagination.reverse=true behavior (newest first).
+            const STATUS_MAP = { 1: 'active', 2: 'inactive_pending', 3: 'inactive' };
+            const subs = rpcResult
+              .map(s => ({ ...s, status: STATUS_MAP[s.status] ?? s.status }))
+              .sort((a, b) => Number(b.id) - Number(a.id))
+              .slice(0, limit);
+            d = { subscriptions: subs, pagination: { next_key: null, total: rpcResult.length.toString() } };
+          }
+        }
+      } catch (err) {
+        console.log(`[RPC] GET /api/plans/${planId}/subscriptions failed: ${err.message} — LCD fallback`);
+        d = null;
+      }
+    }
+
+    if (!d) {
+      d = await cached(cacheKey, 60_000, () =>
+        lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=${limit}&pagination.reverse=true${keyParam}`)
+      );
+    }
+
     if (getAddr() && d.subscriptions) {
       d.subscriptions = d.subscriptions.filter(s => s.acc_address !== getAddr());
     }
@@ -867,6 +1009,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
     let pages = 0;
 
     do {
+      // No chain-wide RPC sessions query — LCD only
       const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
       const d = await lcd(`/sentinel/session/v3/sessions?pagination.limit=500${keyParam}`);
       for (const s of d.sessions || []) {
@@ -1283,9 +1426,22 @@ app.get('/api/params', async (req, res) => {
 app.get('/api/feegrant/grants', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
   try {
-    const d = await cached(`feegrants:${getAddr()}`, 60_000, () =>
-      lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`)
-    );
+    const d = await cached(`feegrants:${getAddr()}`, 60_000, async () => {
+      // RPC-first: rpcQueryFeeGrantsIssued returns the array directly.
+      // SDK swallows protobuf decode errors and returns []; we can't distinguish
+      // "zero grants" from "decode failed". Fall through to LCD when empty so
+      // users see real data if any exists.
+      try {
+        const rpc = await getRpcClient();
+        if (rpc) {
+          const rpcResult = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+          if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
+        }
+      } catch (err) {
+        console.log(`[RPC] feegrant/grants failed: ${err.message} — LCD fallback`);
+      }
+      return lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
+    });
     const allowances = (d.allowances || []).map(a => {
       let spendLimit = null, expiration = null, allowanceType = 'unknown';
       const inner = a.allowance || {};
@@ -1385,10 +1541,26 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
 
   try {
     send('status', { msg: 'Fetching plan subscribers...' });
-    const subData = await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`);
-    const subs = subData.subscriptions || [];
+    let subs = [];
+    let subsFromRpc = false;
+    try {
+      const rpc = await getRpcClient();
+      if (rpc) {
+        subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+        subsFromRpc = true;
+        console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
+      }
+    } catch (err) {
+      console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
+    }
+    if (!subsFromRpc) {
+      const subData = await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`);
+      subs = subData.subscriptions || [];
+    }
     const now = new Date();
-    const activeSubs = subs.filter(s => s.status === 'active' && new Date(s.inactive_at) > now);
+    const STATUS_MAP = { 1: 'active', 2: 'inactive_pending', 3: 'inactive' };
+    const isActive = s => (s.status === 'active' || s.status === 1 || STATUS_MAP[s.status] === 'active');
+    const activeSubs = subs.filter(s => isActive(s) && new Date(s.inactive_at) > now);
     const uniqueAddrs = [...new Set(activeSubs.map(s => s.acc_address))].filter(a => a !== getAddr());
 
     send('status', { msg: `Found ${activeSubs.length} active subscribers (${uniqueAddrs.length} unique, excl. self)` });
@@ -1400,8 +1572,21 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
     }
 
     send('status', { msg: 'Checking existing grants...' });
-    const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
-    const existingGrantees = new Set((existingData.allowances || []).map(a => a.grantee));
+    let existingAllowances = [];
+    try {
+      const rpc = await getRpcClient();
+      if (rpc) {
+        existingAllowances = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+        console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowances.length}`);
+      }
+    } catch (err) {
+      console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
+    }
+    if (!existingAllowances.length) {
+      const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
+      existingAllowances = existingData.allowances || [];
+    }
+    const existingGrantees = new Set(existingAllowances.map(a => a.grantee));
     const needGrant = uniqueAddrs.filter(a => !existingGrantees.has(a));
     const skipped = uniqueAddrs.length - needGrant.length;
 
@@ -1495,11 +1680,27 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
 
     let t0 = Date.now();
     console.log('[FeeGrant] Step 1: Fetching plan subscriptions...');
-    const subData = await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`, 60000);
+    let subs = [];
+    let subsFromRpc = false;
+    try {
+      const rpc = await getRpcClient();
+      if (rpc) {
+        subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+        subsFromRpc = true;
+        console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
+      }
+    } catch (err) {
+      console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
+    }
+    if (!subsFromRpc) {
+      const subData = await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`, 60000);
+      subs = subData.subscriptions || [];
+    }
     console.log(`[FeeGrant] Step 1 done (${Date.now() - t0}ms)`);
-    const subs = subData.subscriptions || [];
     const now = new Date();
-    const activeSubs = subs.filter(s => s.status === 'active' && new Date(s.inactive_at) > now);
+    const STATUS_MAP = { 1: 'active', 2: 'inactive_pending', 3: 'inactive' };
+    const isActive = s => (s.status === 'active' || s.status === 1 || STATUS_MAP[s.status] === 'active');
+    const activeSubs = subs.filter(s => isActive(s) && new Date(s.inactive_at) > now);
     const uniqueAddrs = [...new Set(activeSubs.map(s => s.acc_address))].filter(a => a !== getAddr());
     console.log(`[FeeGrant] ${activeSubs.length} active subs, ${uniqueAddrs.length} unique (excl. self)`);
 
@@ -1507,9 +1708,24 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
 
     t0 = Date.now();
     console.log('[FeeGrant] Step 2: Checking existing grants...');
-    const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`, 60000);
+    // SDK rpcQueryFeeGrantsIssued silently returns [] on decode failure against Sentinel RPC;
+    // fall through to LCD when empty so we don't miss real grants.
+    let existingAllowancesPost = [];
+    try {
+      const rpc = await getRpcClient();
+      if (rpc) {
+        existingAllowancesPost = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+        console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowancesPost.length}`);
+      }
+    } catch (err) {
+      console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
+    }
+    if (!existingAllowancesPost.length) {
+      const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`, 60000);
+      existingAllowancesPost = existingData.allowances || [];
+    }
     console.log(`[FeeGrant] Step 2 done (${Date.now() - t0}ms)`);
-    const existingGrantees = new Set((existingData.allowances || []).map(a => a.grantee));
+    const existingGrantees = new Set(existingAllowancesPost.map(a => a.grantee));
 
     const needGrant = uniqueAddrs.filter(a => !existingGrantees.has(a));
     console.log(`[FeeGrant] ${existingGrantees.size} existing grants, ${needGrant.length} need granting`);
@@ -1600,8 +1816,21 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
 
   try {
-    const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
-    const grantees = (existingData.allowances || []).map(a => a.grantee);
+    let revokeAllowances = [];
+    try {
+      const rpc = await getRpcClient();
+      if (rpc) {
+        revokeAllowances = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+        console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${revokeAllowances.length}`);
+      }
+    } catch (err) {
+      console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
+    }
+    if (!revokeAllowances.length) {
+      const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
+      revokeAllowances = existingData.allowances || [];
+    }
+    const grantees = revokeAllowances.map(a => a.grantee);
 
     if (grantees.length === 0) return res.json({ ok: true, revoked: 0, message: 'No grants to revoke' });
 
@@ -1638,9 +1867,19 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
   if (!planId) return res.status(400).json({ error: 'planId required' });
 
   try {
-    const subData = await cached(`planSubs:${planId}:500:`, 60_000, () =>
-      lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`)
-    );
+    const subData = await cached(`planSubs:${planId}:500:`, 60_000, async () => {
+      // RPC-first: returns array directly; wrap to match LCD shape { subscriptions: [...] }.
+      try {
+        const rpc = await getRpcClient();
+        if (rpc) {
+          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+          if (rpcResult) return { subscriptions: rpcResult };
+        }
+      } catch (err) {
+        console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} — LCD fallback`);
+      }
+      return lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`);
+    });
     const subs = subData.subscriptions || [];
     const subscriberAddrs = [...new Set(subs.map(s => s.acc_address))].filter(a => a !== getAddr());
 
@@ -1849,6 +2088,7 @@ app.get('/api/rpcs', async (req, res) => {
     const totalSessions = parseInt(sessRes.pagination?.total || '0');
     const totalActiveNodes = parseInt(nodeRes.pagination?.total || '0');
 
+    // No chain-wide RPC sessions query — LCD only
     const sessPage = await lcd('/sentinel/session/v3/sessions?pagination.limit=500&pagination.reverse=true');
     const uniqueAccounts = new Set();
     for (const s of sessPage.sessions || []) {
