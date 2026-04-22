@@ -6,7 +6,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import {
   listNodes,
   registerCleanupHandlers,
@@ -43,12 +43,16 @@ import { getAddr, getProvAddr, initWallet, clearWalletState, loadSavedWallet, re
 registerCleanupHandlers();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// DATA_DIR lets deployments (Docker, etc.) redirect state files to a mounted
+// volume. Defaults to the project root — unchanged for local installs.
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
 // ─── Plan ID Persistence ──────────────────────────────────────────────────────
-const MY_PLANS_FILE = join(__dirname, 'my-plans.json');
+const MY_PLANS_FILE = join(DATA_DIR, 'my-plans.json');
 
 function loadMyPlanIds() {
   try {
@@ -68,7 +72,7 @@ function saveMyPlanId(id) {
 }
 
 // ─── Node Cache (SDK scan) ────────────────────────────────────────────────────
-const NODE_CACHE_FILE = join(__dirname, 'nodes-cache.json');
+const NODE_CACHE_FILE = join(DATA_DIR, 'nodes-cache.json');
 let nodeCache = { nodes: [], ts: 0, scanning: false };
 let scanProgress = { total: 0, probed: 0, online: 0 };
 
@@ -2246,19 +2250,22 @@ if (_savedMnemonic) {
   });
 } else {
   const envPath = join(__dirname, '.env');
-  const envMnemonic = existsSync(envPath)
+  const fromProcess = (process.env.MNEMONIC || '').trim();
+  const fromFile = existsSync(envPath)
     ? (readFileSync(envPath, 'utf8').match(/^MNEMONIC=(.+)$/m)?.[1] || '').trim()
     : '';
+  const envMnemonic = fromProcess || fromFile;
+  const source = fromProcess ? 'environment' : '.env';
   const isPlaceholder = /your twelve or twenty four/i.test(envMnemonic);
   if (envMnemonic && !isPlaceholder) {
     initWallet(envMnemonic).then(() => {
-      console.log(`[wallet] Loaded from .env: ${getAddr()}`);
+      console.log(`[wallet] Loaded from ${source}: ${getAddr()}`);
     }).catch(err => {
-      console.error(`[wallet] Failed to load from .env: ${err.message}`);
+      console.error(`[wallet] Failed to load from ${source}: ${err.message}`);
       clearWalletState();
     });
   } else {
-    console.warn('[wallet] No wallet loaded. Create one in the UI, or set MNEMONIC=... in .env (copy from .env.example). Chain writes (plans, links, grants) are disabled until a wallet is present.');
+    console.warn('[wallet] No wallet loaded. Create one in the UI, set MNEMONIC=... in .env (copy from .env.example), or pass MNEMONIC via the process environment. Chain writes (plans, links, grants) are disabled until a wallet is present.');
   }
 }
 

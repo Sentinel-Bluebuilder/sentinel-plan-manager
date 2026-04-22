@@ -70,6 +70,25 @@ npm start
 
 Open http://localhost:3003.
 
+### Option C — Docker
+
+```bash
+# one-liner
+docker build -t sentinel-plan-manager .
+docker run -d --name plan-manager \
+  -p 3003:3003 \
+  -e MNEMONIC="word1 word2 ... word24" \
+  -v plan-manager-data:/data \
+  --restart unless-stopped \
+  sentinel-plan-manager
+
+# or with compose (includes named volume + auto-restart)
+echo "MNEMONIC=word1 word2 ... word24" > .env
+docker compose up -d
+```
+
+State (`.wallet.json`, `my-plans.json`, `nodes-cache.json`) lives in the `/data` volume so it survives container recreations. Leave `MNEMONIC` unset to create a wallet from the UI on first boot instead.
+
 **Port in use?** `PORT=4000 npm start` — the server honours the `PORT` env var (default 3003).
 
 **Windows:** `start.bat` auto-elevates to Administrator, kills anything on :3003, and launches the server.

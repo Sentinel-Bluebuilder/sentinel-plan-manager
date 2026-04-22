@@ -237,6 +237,26 @@ body {
   margin-bottom: 4px;
 }
 
+.explorer-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.15);
+  transition: color 0.15s, border-color 0.15s;
+}
+.explorer-link:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.explorer-link-icon {
+  opacity: 0.5;
+  margin-left: 4px;
+  font-size: 0.85em;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.15s, color 0.15s;
+}
+.explorer-link-icon:hover { opacity: 1; color: var(--accent); }
+
 .wallet-bal {
   font-size: 14px;
   font-weight: 600;
@@ -1266,6 +1286,20 @@ const fmtUsd = (usd) => !usd ? '--' : usd < 0.01 ? '<$0.01' : '$' + usd.toFixed(
 const shortAddr = (a) => a ? a.slice(0, 12) + '...' + a.slice(-6) : '';
 const $ = (id) => document.getElementById(id);
 
+// ─── Explorer Links ──────────────────────────────────────────────────────────
+const EXPLORER_BASE = 'https://explorer.norselabs.io/sentinel';
+const explorerUrl = (type, value) => `${EXPLORER_BASE}/${type}/${value}`;
+/**
+ * Build an anchor opening the Norse Labs explorer in a new tab.
+ * type: 'wallet' | 'node' | 'plan' | 'provider'
+ * Extra classes/styles can be appended via `extra`.
+ */
+function explorerLink(type, value, label, extra = '') {
+  if (!value) return label || '';
+  const href = explorerUrl(type, value);
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="explorer-link" onclick="event.stopPropagation()"${extra ? ' ' + extra : ''}>${label}</a>`;
+}
+
 // ─── Country Flags ───────────────────────────────────────────────────────────
 const CC={US:'US',GB:'GB',DE:'DE',FR:'FR',NL:'NL',CA:'CA',AU:'AU',JP:'JP',SG:'SG',IN:'IN',BR:'BR',KR:'KR',HK:'HK',CH:'CH',SE:'SE',NO:'NO',FI:'FI',IE:'IE',AT:'AT',BE:'BE',DK:'DK',ES:'ES',IT:'IT',PL:'PL',CZ:'CZ',RO:'RO',BG:'BG',UA:'UA',RU:'RU',TR:'TR',ZA:'ZA',MX:'MX',AR:'AR',CL:'CL',CO:'CO',PE:'PE',PT:'PT',GR:'GR',HU:'HU',HR:'HR',RS:'RS',LT:'LT',LV:'LV',EE:'EE',SK:'SK',SI:'SI',LU:'LU',MT:'MT',CY:'CY',IS:'IS',ID:'ID',MY:'MY',TH:'TH',VN:'VN',PH:'PH',TW:'TW',NZ:'NZ',AL:'AL',BH:'BH',BO:'BO',EC:'EC',EG:'EG',GE:'GE',GT:'GT',JM:'JM',KZ:'KZ',KG:'KG',MD:'MD',MN:'MN',MA:'MA',PK:'PK',PR:'PR',UY:'UY',PA:'PA',CR:'CR',DO:'DO',SV:'SV',HN:'HN',NI:'NI',PY:'PY',UZ:'UZ',AZ:'AZ',AM:'AM',BA:'BA',ME:'ME',MK:'MK',NG:'NG',KE:'KE',GH:'GH',TN:'TN',LB:'LB',JO:'JO',AE:'AE',QA:'QA',KW:'KW',OM:'OM',SA:'SA',IL:'IL',BD:'BD',LK:'LK',MM:'MM',KH:'KH',LA:'LA',NP:'NP',CN:'CN','United States':'US','United Kingdom':'GB',Germany:'DE',France:'FR',Netherlands:'NL','The Netherlands':'NL',Canada:'CA',Australia:'AU',Japan:'JP',Singapore:'SG',India:'IN',Brazil:'BR','South Korea':'KR','Hong Kong':'HK',Switzerland:'CH',Sweden:'SE',Norway:'NO',Finland:'FI',Ireland:'IE',Austria:'AT',Belgium:'BE',Denmark:'DK',Spain:'ES',Italy:'IT',Poland:'PL','Czech Republic':'CZ',Czechia:'CZ',Romania:'RO',Bulgaria:'BG',Ukraine:'UA',Russia:'RU',Turkey:'TR','Türkiye':'TR','South Africa':'ZA',Mexico:'MX',Argentina:'AR',Chile:'CL',Colombia:'CO',Peru:'PE',Portugal:'PT',Greece:'GR',Hungary:'HU',Croatia:'HR',Serbia:'RS',Lithuania:'LT',Latvia:'LV',Estonia:'EE',Slovakia:'SK',Slovenia:'SI',Luxembourg:'LU',Malta:'MT',Cyprus:'CY',Iceland:'IS',Indonesia:'ID',Malaysia:'MY',Thailand:'TH',Vietnam:'VN',Philippines:'PH',Taiwan:'TW','New Zealand':'NZ',Albania:'AL',Bahrain:'BH',Bolivia:'BO',Ecuador:'EC',Egypt:'EG',Georgia:'GE',Guatemala:'GT',Jamaica:'JM',Kazakhstan:'KZ',Kyrgyzstan:'KG',Moldova:'MD',Mongolia:'MN',Morocco:'MA',Pakistan:'PK','Puerto Rico':'PR',Uruguay:'UY',Panama:'PA','Costa Rica':'CR','Dominican Republic':'DO','El Salvador':'SV',Honduras:'HN',Nicaragua:'NI',Paraguay:'PY',Uzbekistan:'UZ',Azerbaijan:'AZ',Armenia:'AM','Bosnia and Herzegovina':'BA',Montenegro:'ME','North Macedonia':'MK',Nigeria:'NG',Kenya:'KE',Ghana:'GH',Tunisia:'TN',Lebanon:'LB',Jordan:'JO','United Arab Emirates':'AE',Qatar:'QA',Kuwait:'KW',Oman:'OM','Saudi Arabia':'SA',Israel:'IL',Bangladesh:'BD','Sri Lanka':'LK',Myanmar:'MM',Cambodia:'KH',Laos:'LA',Nepal:'NP',China:'CN'};
 function countryFlag(c) {
@@ -1481,7 +1515,9 @@ async function loadWallet() {
       S.dvpnPrice = d.dvpnPriceUsd;
       walletAddress = d.address || '';
       ADDR_SHORT = walletAddress ? walletAddress.slice(0, 10) + '...' + walletAddress.slice(-6) : '?';
-      $('walletAddr').textContent = ADDR_SHORT;
+      $('walletAddr').innerHTML = walletAddress
+        ? explorerLink('wallet', walletAddress, ADDR_SHORT, 'title="' + walletAddress + ' — view on explorer"')
+        : ADDR_SHORT;
       $('walletBal').textContent = fmt(d.balanceDvpn) + ' P2P';
       $('walletUsd').textContent = d.balanceUsd ? fmtUsd(d.balanceUsd) : '';
     };
@@ -1650,7 +1686,7 @@ async function renderDashboard() {
             <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Chain</span><span>sentinelhub-2</span></div>
             <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Version</span><span>v12.0.0</span></div>
             <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Plan Msgs</span><span class="mono">sentinel.plan.v2</span></div>
-            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Wallet</span><span class="mono" style="font-size:11px">${ADDR_SHORT || '?'}</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Wallet</span><span class="mono" style="font-size:11px">${walletAddress ? explorerLink('wallet', walletAddress, ADDR_SHORT, 'title="View on explorer"') : (ADDR_SHORT || '?')}</span></div>
             <div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Gas Price</span><span>0.2 udvpn</span></div>
           </div>
         </div>
@@ -1668,7 +1704,7 @@ function renderCreate() {
       <div class="card">
         <div class="card-header">
           <div class="card-title">1. ${S.wallet?.provider ? 'Update Provider' : 'Register as Provider'}</div>
-          <span class="badge ${S.wallet?.provider ? 'badge-green' : 'badge-dim'}">${S.wallet?.provider ? S.wallet.provider.name : 'sentprov prefix'}</span>
+          <span class="badge ${S.wallet?.provider ? 'badge-green' : 'badge-dim'}">${S.wallet?.provider ? explorerLink('provider', S.wallet.provider.address, S.wallet.provider.name, 'title="View provider on explorer"') : 'sentprov prefix'}</span>
         </div>
         <div class="card-body">
           <p style="font-size:12px;color:var(--text-dim);margin-bottom:18px">${S.wallet?.provider
@@ -1855,7 +1891,7 @@ function buildPlanPicker(onRefresh) {
     ${plans.map(p => {
       const active = String(p.planId) === String(S.mgrPlanId);
       return `<button class="stat-card" onclick="selectPlan(${p.planId})" style="cursor:pointer;flex:0 0 auto;min-width:160px;border:1.5px solid ${active ? 'var(--accent)' : 'var(--border)'};background:${active ? 'var(--accent-glow)' : 'var(--bg-card)'};transition:all 0.2s">
-        <div class="stat-label">Plan #${p.planId}</div>
+        <div class="stat-label">Plan #${p.planId} ${explorerLink('plan', p.planId, '↗', 'class="explorer-link-icon" title="View plan on explorer"')}</div>
         <div style="display:flex;gap:12px;margin-top:6px;font-size:13px">
           <span style="color:var(--green)">${fmt(p.totalNodes)} nodes</span>
           <span style="color:var(--text-dim)">${fmt(p.totalSubscriptions)} subs</span>
@@ -2036,7 +2072,7 @@ function renderAddNodes() {
           return `<div class="node-list-row ${selClass}" ${onclick} id="acard_${n.address.slice(-12)}">
             <span class="node-list-flag">${flag}</span>
             <div class="node-list-info">
-              <span class="node-list-addr">${shortAddr(n.address)}</span>
+              <span class="node-list-addr">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</span>
               ${n.moniker ? `<span class="node-list-moniker">${n.moniker}</span>` : ''}
             </div>
             <span>${n.country || '??'}</span>
@@ -2055,7 +2091,7 @@ function renderAddNodes() {
             <span class="node-card-select ${selBadge}">${selText}</span>
             ${n.moniker ? `<span class="node-card-moniker" title="${n.moniker}">${n.moniker}</span>` : ''}
           </div>
-          <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)}</div>
+          <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</div>
           <div class="node-card-meta">
             ${protocolBadge(n.protocol)}
             <span>${flag} ${n.country || 'Unknown'}</span>
@@ -2279,7 +2315,7 @@ function renderYourNodes() {
         return `<div class="node-list-row ${selected ? 'selected' : ''}" onclick="toggleRemoveCard('${n.address}')" id="rcard_${n.address.slice(-12)}">
           <span class="node-list-flag">${flag}</span>
           <div class="node-list-info">
-            <span class="node-list-addr">${shortAddr(n.address)}</span>
+            <span class="node-list-addr">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</span>
             ${n.moniker ? `<span class="node-list-moniker">${n.moniker}</span>` : ''}
           </div>
           <span>${n.country || '??'}</span>
@@ -2299,7 +2335,7 @@ function renderYourNodes() {
           <span class="node-card-select ${selected ? 'sel-active' : 'sel-empty'}">${selected ? 'Remove' : '\u00A0'}</span>
           ${n.moniker ? `<span class="node-card-moniker" title="${n.moniker}">${n.moniker}</span>` : ''}
         </div>
-        <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)}</div>
+        <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</div>
         <div class="node-card-meta">
           ${protocolBadge(n.protocol)}
           <span>${flag} ${n.country || 'Unknown'}</span>
@@ -3000,7 +3036,7 @@ async function renderSubscribers() {
         }
 
         return `<tr>
-          <td><span class="copyable" title="${s.acc_address}" onclick="copyToClipboard('${s.acc_address}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(s.acc_address)}</span></td>
+          <td><span class="copyable" title="${s.acc_address}" onclick="copyToClipboard('${s.acc_address}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(s.acc_address)}</span> ${explorerLink('wallet', s.acc_address, '↗', 'class="explorer-link-icon" title="View wallet on explorer"')}</td>
           <td><span class="${isActive ? 'subs-badge-active' : 'subs-badge-inactive'}">${isActive ? 'Active' : 'Inactive'}</span></td>
           <td style="font-weight:600;color:${timeColor};font-size:12px" title="${endDate}">${timeLeft}</td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${sPriceDvpn >= 1 ? fmt(Math.round(sPriceDvpn)) : sPriceDvpn.toFixed(3)} P2P${sPriceUsd !== null ? `<div style="font-size:10px;color:var(--text-dim)">${fmtUsd(sPriceUsd)}</div>` : ''}</td>
@@ -3274,7 +3310,7 @@ async function renderFeeGrants() {
           }
         }
         return `<tr>
-          <td><span class="copyable" title="${g.grantee}" onclick="copyToClipboard('${g.grantee}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(g.grantee)}</span>${isSub ? ' <span style="background:var(--accent-glow);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-family:system-ui">SUB</span>' : ''}</td>
+          <td><span class="copyable" title="${g.grantee}" onclick="copyToClipboard('${g.grantee}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(g.grantee)}</span> ${explorerLink('wallet', g.grantee, '↗', 'class="explorer-link-icon" title="View wallet on explorer"')}${isSub ? ' <span style="background:var(--accent-glow);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-family:system-ui">SUB</span>' : ''}</td>
           <td><span class="subs-badge-${g.allowanceType === 'basic' ? 'active' : 'inactive'}" style="font-size:11px">${g.allowanceType}</span></td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${limitStr}</td>
           <td style="font-size:12px">${expStr}</td>
@@ -3435,7 +3471,7 @@ function renderGasCosts() {
           const pct = totalP2p > 0 ? ((e.p2p / (totalP2p * mult)) * 100).toFixed(1) : 0;
           return `<div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:var(--bg);border-radius:6px;font-size:12px">
             <span style="color:var(--text-muted);width:18px;text-align:right">${i + 1}.</span>
-            <span class="copyable" title="${e.addr}" onclick="copyToClipboard('${e.addr}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;color:var(--text)">${shortAddr(e.addr)}</span>
+            <span class="copyable" title="${e.addr}" onclick="copyToClipboard('${e.addr}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;color:var(--text)">${shortAddr(e.addr)}</span> ${explorerLink('wallet', e.addr, '↗', 'class="explorer-link-icon" title="View wallet on explorer"')}
             <span style="flex:1"></span>
             <span style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-weight:600">${e.p2p.toFixed(2)} P2P</span>
             <span style="color:var(--text-muted);font-size:11px">${e.txs} txs</span>
