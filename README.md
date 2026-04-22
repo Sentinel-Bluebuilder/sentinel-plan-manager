@@ -89,6 +89,28 @@ docker compose up -d
 
 State (`.wallet.json`, `my-plans.json`, `nodes-cache.json`) lives in the `/data` volume so it survives container recreations. Leave `MNEMONIC` unset to create a wallet from the UI on first boot instead.
 
+### Option D — Multi-user deploy (public domain)
+
+Want to deploy this to a domain and let anyone sign in with their own mnemonic? Set `MULTI_USER=true`:
+
+```bash
+docker run -d --name plan-manager \
+  -p 3003:3003 \
+  -e MULTI_USER=true \
+  -v plan-manager-data:/data \
+  --restart unless-stopped \
+  sentinel-plan-manager
+# or: MULTI_USER=true docker compose up -d
+```
+
+In multi-user mode the server:
+- **Skips** the `MNEMONIC` env / `.wallet.json` bootstrap — nobody inherits a default wallet.
+- Encrypts each user's mnemonic with **AES-256-GCM** and stores it in an **httpOnly, SameSite=Lax** cookie (`Secure` when served over HTTPS).
+- Derives each request's wallet from the cookie (via `AsyncLocalStorage`) — different users' transactions never share a signing client or a sequence queue.
+- Keeps `my-plans.json` keyed by wallet address so each operator sees only their own plans.
+
+The encryption key defaults to `/data/.session-key` (auto-generated, `chmod 600`). Pin it explicitly with `SESSION_KEY=<64-char hex>` if you want cookies to survive `docker volume rm` or want to rotate on demand. **Always serve multi-user deployments over HTTPS** — the cookie is httpOnly but the login request still sends the mnemonic in plaintext over the wire.
+
 **Port in use?** `PORT=4000 npm start` — the server honours the `PORT` env var (default 3003).
 
 **Windows:** `start.bat` auto-elevates to Administrator, kills anything on :3003, and launches the server.
