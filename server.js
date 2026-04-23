@@ -6,7 +6,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import {
   listNodes,
   registerCleanupHandlers,
@@ -56,7 +56,40 @@ initSession(DATA_DIR);
 
 const app = express();
 app.use(express.json());
-app.use(express.static(__dirname));
+
+// ─── Security Headers (FIX 4) ─────────────────────────────────────────────────
+// TODO: Move to nonce-based CSP to eliminate 'unsafe-inline' for script-src.
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; " +
+    "connect-src 'self' https://lcd.sentinel.co https://api.sentinel.quokkastake.io https://sentinel-api.polkachu.com https://sentinel.api.trivium.network:1317; " +
+    "object-src 'none'; " +
+    "base-uri 'self'; " +
+    "frame-ancestors 'none'"
+  );
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// ─── CSRF Protection (FIX 3) ─────────────────────────────────────────────────
+// Non-GET requests must present a matching Origin or X-Requested-With header.
+const ALLOWED_ORIGINS = ['http://localhost:3003', 'http://127.0.0.1:3003'];
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origin = req.headers['origin'];
+  const xrw = req.headers['x-requested-with'];
+  if (origin && ALLOWED_ORIGINS.includes(origin)) return next();
+  if (!origin && xrw === 'XMLHttpRequest') return next();
+  return res.status(403).json({ error: 'CSRF blocked' });
+});
+
+// ─── Static Files (FIX 1) — serves only public/ ──────────────────────────────
+app.use(express.static(join(__dirname, 'public')));
 
 // ─── Per-Request Session Middleware ───────────────────────────────────────
 // Decrypts the httpOnly session cookie (if present) into a wallet and runs
@@ -635,6 +668,23 @@ app.get('/api/wallet/status', (req, res) => {
   res.json({ loaded: !!getAddr(), address: getAddr() || null, multiUser: isMultiUser() });
 });
 
+app.post('/api/wallet/generate', async (req, res) => {
+  // FIX 5: Mnemonic is returned once so the user can write it down during the
+  // wallet-creation flow. This is intentional for a single-user local tool.
+  // Known gap: the mnemonic travels over localhost HTTP (no TLS). Mitigation:
+  // the server is bound to 127.0.0.1 only (FIX 2), so it is never reachable
+  // from other hosts. Future work: serve over HTTPS with a self-signed cert.
+  try {
+    const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
+    const wallet = await DirectSecp256k1HdWallet.generate(24, { prefix: 'sent' });
+    const [account] = await wallet.getAccounts();
+    res.json({ mnemonic: wallet.mnemonic, address: account.address });
+  } catch (err) {
+    console.error('Wallet generate error:', err.message);
+    res.status(500).json({ error: 'Failed to generate wallet: ' + err.message });
+  }
+});
+
 app.post('/api/wallet/import', async (req, res) => {
   try {
     const { mnemonic } = req.body;
@@ -1041,6 +1091,35 @@ app.post('/api/plan/start-session', async (req, res) => {
 
 app.get('/api/nodes/progress', (req, res) => {
   res.json({ scanning: nodeCache.scanning, ...scanProgress });
+});
+
+// Chain-active node count (status=1). Cached 60s — cheap RPC call, LCD fallback.
+let chainCountCache = { count: null, ts: 0 };
+const CHAIN_COUNT_TTL = 60_000;
+
+app.get('/api/nodes/chain-count', async (req, res) => {
+  const now = Date.now();
+  if (chainCountCache.count !== null && (now - chainCountCache.ts) < CHAIN_COUNT_TTL) {
+    return res.json({ count: chainCountCache.count, cached: true });
+  }
+  try {
+    const rpc = await getRpcClient();
+    if (rpc) {
+      const nodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
+      chainCountCache = { count: nodes.length, ts: now };
+      return res.json({ count: nodes.length, cached: false });
+    }
+  } catch (err) {
+    console.log(`[RPC] chain-count failed (${err.message}), falling back to LCD`);
+  }
+  try {
+    const r = await lcd('/sentinel/node/v3/nodes?status=1&pagination.limit=5000');
+    const count = (r.nodes || []).length;
+    chainCountCache = { count, ts: now };
+    res.json({ count, cached: false });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/all-nodes', async (req, res) => {
@@ -1619,10 +1698,25 @@ app.get('/api/feegrant/grants', async (req, res) => {
   }
 });
 
+// Bech32 charset for sent1... addresses (38 chars after prefix).
+const SENT_ADDR_RE = /^sent1[02-9ac-hj-np-z]{38}$/i;
+const MAX_GRANT_DVPN = 10; // hard cap per grant
+
 app.post('/api/feegrant/grant', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
   const { grantee, spendLimitDvpn, expirationDays } = req.body;
   if (!grantee) return res.status(400).json({ error: 'grantee address required' });
+  if (!SENT_ADDR_RE.test(grantee)) return res.status(400).json({ error: 'grantee must be a valid sent1... address' });
+  if (spendLimitDvpn !== undefined) {
+    if (typeof spendLimitDvpn !== 'number' || !isFinite(spendLimitDvpn) || spendLimitDvpn < 0 || spendLimitDvpn > MAX_GRANT_DVPN) {
+      return res.status(400).json({ error: `spendLimitDvpn must be a number between 0 and ${MAX_GRANT_DVPN}` });
+    }
+  }
+  if (expirationDays !== undefined) {
+    if (typeof expirationDays !== 'number' || !isFinite(expirationDays) || expirationDays < 0 || expirationDays > 365) {
+      return res.status(400).json({ error: 'expirationDays must be a number between 0 and 365' });
+    }
+  }
 
   try {
     const { MsgGrantAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
@@ -1657,6 +1751,7 @@ app.post('/api/feegrant/grant', async (req, res) => {
 
     const result = await safeBroadcast([msg], 'Fee grant');
     if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
+    cacheInvalidate(`feegrants:${getAddr()}`);
     res.json({ ok: true, txHash: result.transactionHash });
   } catch (e) {
     res.status(500).json({ error: parseChainError(e.message) });
@@ -1819,6 +1914,16 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
   const { planId, spendLimitDvpn, expirationDays } = req.body;
   if (!planId) return res.status(400).json({ error: 'planId required' });
+  if (spendLimitDvpn !== undefined) {
+    if (typeof spendLimitDvpn !== 'number' || !isFinite(spendLimitDvpn) || spendLimitDvpn < 0 || spendLimitDvpn > MAX_GRANT_DVPN) {
+      return res.status(400).json({ error: `spendLimitDvpn must be a number between 0 and ${MAX_GRANT_DVPN}` });
+    }
+  }
+  if (expirationDays !== undefined) {
+    if (typeof expirationDays !== 'number' || !isFinite(expirationDays) || expirationDays < 0 || expirationDays > 365) {
+      return res.status(400).json({ error: 'expirationDays must be a number between 0 and 365' });
+    }
+  }
 
   try {
     console.log(`[FeeGrant] grant-subscribers: plan=${planId}, limit=${spendLimitDvpn}, exp=${expirationDays}d`);
@@ -1951,7 +2056,80 @@ app.post('/api/feegrant/revoke', async (req, res) => {
     };
     const result = await safeBroadcast([msg], 'Revoke fee grant');
     if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
+    cacheInvalidate(`feegrants:${getAddr()}`);
     res.json({ ok: true, txHash: result.transactionHash });
+  } catch (e) {
+    // Chain auto-removes allowances when they expire or when the subscription ends.
+    // If the revoke target is already gone, treat as success so the UI can clear it.
+    const msg = String(e.message || '');
+    if (/fee-grant not found|not found.*grant/i.test(msg)) {
+      cacheInvalidate(`feegrants:${getAddr()}`);
+      return res.json({ ok: true, alreadyGone: true });
+    }
+    res.status(500).json({ error: parseChainError(msg) });
+  }
+});
+
+// Batch revoke a specific list of grantees (e.g. "stale cleanup" — grantees
+// no longer subscribed to any plan). Uses the same per-grantee fallback as
+// revoke-all so partial chain state doesn't abort the whole operation.
+app.post('/api/feegrant/revoke-list', async (req, res) => {
+  if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
+  const { grantees } = req.body || {};
+  if (!Array.isArray(grantees) || grantees.length === 0) {
+    return res.status(400).json({ error: 'grantees array required' });
+  }
+  const list = grantees.filter(g => typeof g === 'string' && g.startsWith('sent1'));
+  if (list.length === 0) return res.status(400).json({ error: 'no valid grantees in list' });
+
+  try {
+    const { MsgRevokeAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
+    const BATCH = 5;
+    let revoked = 0;
+    let alreadyGone = 0;
+    const errors = [];
+
+    for (let i = 0; i < list.length; i += BATCH) {
+      const batch = list.slice(i, i + BATCH);
+      const msgs = batch.map(grantee => ({
+        typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
+        value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
+      }));
+      try {
+        const result = await safeBroadcast(msgs, `Revoke batch ${Math.floor(i / BATCH) + 1}`);
+        if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
+        revoked += batch.length;
+      } catch (batchErr) {
+        console.log(`[revoke-list] batch ${Math.floor(i / BATCH) + 1} failed, retrying one-by-one: ${batchErr.message}`);
+        for (const grantee of batch) {
+          try {
+            const msg = {
+              typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
+              value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
+            };
+            const r = await safeBroadcast([msg], `Revoke ${grantee.slice(0, 14)}`);
+            if (r.code !== 0) throw new Error(r.rawLog || `TX failed code=${r.code}`);
+            revoked += 1;
+          } catch (one) {
+            const msg = String(one.message || '');
+            if (/fee-grant not found|not found.*grant/i.test(msg)) {
+              alreadyGone += 1;
+            } else {
+              errors.push(`${grantee.slice(0, 20)}…: ${parseChainError(msg)}`);
+            }
+          }
+        }
+      }
+    }
+
+    cacheInvalidate(`feegrants:${getAddr()}`);
+    res.json({
+      ok: true,
+      revoked,
+      alreadyGone,
+      total: list.length,
+      errors: errors.length ? errors : undefined,
+    });
   } catch (e) {
     res.status(500).json({ error: parseChainError(e.message) });
   }
@@ -1975,14 +2153,22 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
       const existingData = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
       revokeAllowances = existingData.allowances || [];
     }
-    const grantees = revokeAllowances.map(a => a.grantee);
+    const grantees = revokeAllowances.map(a => a.grantee).filter(Boolean);
 
-    if (grantees.length === 0) return res.json({ ok: true, revoked: 0, message: 'No grants to revoke' });
+    if (grantees.length === 0) {
+      cacheInvalidate(`feegrants:${getAddr()}`);
+      return res.json({ ok: true, revoked: 0, alreadyGone: 0, message: 'No grants to revoke' });
+    }
 
     const { MsgRevokeAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
     const BATCH = 5;
     let revoked = 0;
+    let alreadyGone = 0;
     const errors = [];
+
+    // Send as small batches, but if any batch fails (e.g. one grantee already
+    // gone aborts the whole TX), fall back to per-grantee retry so the other
+    // grantees in that batch still get revoked.
     for (let i = 0; i < grantees.length; i += BATCH) {
       const batch = grantees.slice(i, i + BATCH);
       const msgs = batch.map(grantee => ({
@@ -1993,12 +2179,38 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
         const result = await safeBroadcast(msgs, `Revoke batch ${Math.floor(i / BATCH) + 1}`);
         if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
         revoked += batch.length;
-      } catch (e) {
-        errors.push(`Batch ${Math.floor(i / BATCH) + 1}: ${parseChainError(e.message)}`);
+      } catch (batchErr) {
+        // Atomic batch failed — retry one grantee at a time so the rest go through.
+        console.log(`[revoke-all] batch ${Math.floor(i / BATCH) + 1} failed, retrying one-by-one: ${batchErr.message}`);
+        for (const grantee of batch) {
+          try {
+            const msg = {
+              typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
+              value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
+            };
+            const r = await safeBroadcast([msg], `Revoke ${grantee.slice(0, 14)}`);
+            if (r.code !== 0) throw new Error(r.rawLog || `TX failed code=${r.code}`);
+            revoked += 1;
+          } catch (one) {
+            const msg = String(one.message || '');
+            if (/fee-grant not found|not found.*grant/i.test(msg)) {
+              alreadyGone += 1;
+            } else {
+              errors.push(`${grantee.slice(0, 20)}…: ${parseChainError(msg)}`);
+            }
+          }
+        }
       }
     }
 
-    res.json({ ok: true, revoked, errors: errors.length ? errors : undefined });
+    cacheInvalidate(`feegrants:${getAddr()}`);
+    res.json({
+      ok: true,
+      revoked,
+      alreadyGone,
+      total: grantees.length,
+      errors: errors.length ? errors : undefined,
+    });
   } catch (e) {
     res.status(500).json({ error: parseChainError(e.message) });
   }
@@ -2323,6 +2535,13 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
+// SPA fallback — any non-API GET returns index.html so deep-link refreshes work.
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  if (req.path.startsWith('/api/') || req.path === '/health') return next();
+  res.sendFile(join(__dirname, 'public', 'index.html'));
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const _savedMnemonic = loadSavedWallet();
@@ -2356,7 +2575,19 @@ if (isMultiUser()) {
   }
 }
 
-const server = app.listen(PORT, () => {
+// ─── FIX 8: .env permissions warning ─────────────────────────────────────────
+// Non-fatal check: warn if .env has group/world read bits (Unix only; no-op on Windows).
+try {
+  const envPath = join(__dirname, '.env');
+  if (existsSync(envPath)) {
+    const mode = statSync(envPath).mode;
+    if (mode & 0o044) {
+      process.stderr.write('[security] WARNING: .env has group/world read permissions. Run: chmod 600 .env\n');
+    }
+  }
+} catch {}
+
+const server = app.listen(PORT, '127.0.0.1', () => {
   console.log(`Plan Manager running on http://localhost:${PORT}`);
 });
 

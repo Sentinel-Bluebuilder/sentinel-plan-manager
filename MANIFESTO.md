@@ -113,6 +113,45 @@ Each of these is one wallet, a few transactions, and an idea. The blockchain han
 - **Auto-lease** — nodes without active leases are automatically leased before linking. No manual step. No failed transactions.
 - **Fee grant lifecycle** — issue, track, revoke. Batch operations. Per-subscriber status. The full lifecycle works.
 - **39 RPC health checks** — the tool knows which chain endpoints are healthy before you make your first query.
+- **CLI parity** — every server endpoint is also a `plans <group> <cmd>` subcommand. AI agents drive the full lifecycle from a shell.
+
+---
+
+## Live Product — Operator Charter
+
+The Plan Manager is no longer an experiment. It is a **live product** that real operators depend on to run real bandwidth businesses on mainnet. Every commit touches someone's income. Every regression breaks someone's storefront.
+
+### Our Obligations as Maintainers
+
+1. **The master branch is production.** GitHub `master` is what operators deploy. No broken commits on master — ever. Use feature branches and PRs.
+2. **Every change follows the git flow.** Pull → branch → commit → push → PR → merge. No direct pushes to master. No force-pushes. No skipping hooks.
+3. **Chain-reading endpoints must reflect reality.** The homepage node count must match `rpcQueryNodes({status:1})` — not a cache subset, not a probe result. When the label says "on chain", the number is on chain.
+4. **Pricing, plan IDs, and subscriber state are immutable on the chain.** Our UI must never imply otherwise. If a field is immutable, say so in the UI; if action is irreversible, confirm before broadcast.
+5. **Fee grant operations cost the operator's gas.** Every batch grant/revoke button must show an estimate before the user clicks. No silent burns.
+6. **Token display is P2P.** Chain denom is `udvpn`. `formatP2P()` is the only function that user-facing code calls. Never show `udvpn` to an end user without conversion.
+7. **The CLI and the website are the same product.** Any endpoint added to the server must also be added to `cli.js`, with the same flags, same validation, same exit semantics. Documentation lives on both the Install CLI page and the CLI Commands page.
+8. **Live-chain verification beats unit tests.** Before claiming a feature works, run it against mainnet with a real wallet and real tokens. Record the TX hash in the commit message when relevant.
+9. **Suggestion → doc pipeline is non-negotiable.** When a consumer or user reports a gotcha, edge case, or failure pattern, it goes into this project's docs AND the SDK `suggestions/` folder. Knowledge does not die in chat logs.
+10. **Every session ends with a handoff save.** `memory/handoff-plans.md` is the continuity contract. Stale handoffs lose work.
+
+### What "Live" Means for Code Review
+
+- **Before merging a PR to master:** server parses (`node -c server.js`), client JS parses (in-browser or via `new Function()`), `plans health` + `plans wallet info` succeed against the running server, and the homepage renders without console errors.
+- **If a PR touches batch TX logic, fee grants, or pricing:** manual mainnet test is required, not optional. Link the TX hash in the PR.
+- **If a PR adds a new server endpoint:** the CLI subcommand ships in the same PR. Not a follow-up.
+- **If a PR changes the UI copy on any page:** read it out loud. If it sounds like marketing filler, rewrite it to say something concrete.
+
+### The Living Roadmap
+
+This project evolves with its operators. Priorities, in order:
+
+1. **Stability** — existing plan operators must never wake up to a broken dashboard.
+2. **Parity** — CLI must track every website feature. Website must surface every CLI capability.
+3. **Transparency** — every number shown has a documented source, a staleness indicator, and a refresh path.
+4. **Onboarding** — a new operator should go from `git clone` to "plan created, nodes linked, first subscriber onboarded" in under 30 minutes. If they can't, we owe them a doc fix.
+5. **Multi-operator mode** — the server already supports multi-user deployments; every new feature must work in that mode, not just single-user dev mode.
+
+The Plan Manager is a product now. Treat it like one.
 
 ---
 
