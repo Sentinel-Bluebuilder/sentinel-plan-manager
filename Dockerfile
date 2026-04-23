@@ -22,8 +22,9 @@ ENV NODE_ENV=production \
 
 COPY --from=build /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
-COPY server.js cli.js index.html ./
+COPY server.js cli.js ./
 COPY lib ./lib
+COPY public ./public
 
 # All persistent state (.wallet.json, my-plans.json, nodes-cache.json) is
 # written under DATA_DIR. Mount a volume here to keep it across restarts.
