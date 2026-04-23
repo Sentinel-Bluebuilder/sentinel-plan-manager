@@ -18,6 +18,7 @@ RUN apk add --no-cache tini
 
 ENV NODE_ENV=production \
     PORT=3003 \
+    HOST=0.0.0.0 \
     DATA_DIR=/data
 
 COPY --from=build /app/node_modules ./node_modules
