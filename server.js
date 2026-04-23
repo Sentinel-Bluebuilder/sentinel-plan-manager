@@ -77,13 +77,30 @@ app.use((req, res, next) => {
 });
 
 // ─── CSRF Protection (FIX 3) ─────────────────────────────────────────────────
-// Non-GET requests must present a matching Origin or X-Requested-With header.
-const ALLOWED_ORIGINS = ['http://localhost:3003', 'http://127.0.0.1:3003'];
+// Non-GET requests must be same-origin OR carry an allow-listed Origin OR
+// include X-Requested-With (impossible to set on a classic cross-site form).
+//
+// Same-origin is derived from the Host header so the server keeps working
+// regardless of the deploy URL (http://localhost:8000, https://my.domain, a
+// reverse proxy, etc.) without needing reconfiguration. For cross-origin
+// callers (embeds, third-party dashboards) set ALLOWED_ORIGINS as a
+// comma-separated list.
+const EXTRA_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
+function isSameOrigin(req) {
+  const origin = req.headers['origin'];
+  const host = req.headers['host'];
+  if (!origin || !host) return false;
+  try { return new URL(origin).host === host; } catch { return false; }
+}
+
 app.use((req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   const origin = req.headers['origin'];
   const xrw = req.headers['x-requested-with'];
-  if (origin && ALLOWED_ORIGINS.includes(origin)) return next();
+  if (isSameOrigin(req)) return next();
+  if (origin && EXTRA_ALLOWED_ORIGINS.includes(origin)) return next();
   if (!origin && xrw === 'XMLHttpRequest') return next();
   return res.status(403).json({ error: 'CSRF blocked' });
 });
@@ -2587,8 +2604,13 @@ try {
   }
 } catch {}
 
-const server = app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Plan Manager running on http://localhost:${PORT}`);
+// HOST defaults to 0.0.0.0 so Docker / VM / public deploys work out of the
+// box. Local-only hardening: set HOST=127.0.0.1 (or unset and run outside a
+// container) to restrict the listener to loopback.
+const HOST = process.env.HOST || '0.0.0.0';
+const server = app.listen(PORT, HOST, () => {
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  console.log(`Plan Manager running on http://${displayHost}:${PORT} (bound to ${HOST})`);
 });
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
