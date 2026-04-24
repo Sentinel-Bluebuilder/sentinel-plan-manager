@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan Manager — Design Tokens</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #060608;
+    --bg-card: rgba(16,16,20,0.72);
+    --bg-input: rgba(255,255,255,0.025);
+    --border: rgba(255,255,255,0.08);
+    --text: #f0f1f5;
+    --text-dim: #8a8a9a;
+    --text-muted: #55556a;
+    --accent: #1E88E5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    background: var(--bg);
+    color: var(--text);
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(30,136,229,0.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 100%, rgba(179,136,255,0.05), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(10,10,14,0.82);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar .label {
+    font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+  }
+  .topbar a {
+    color: var(--accent); text-decoration: none; font-size: 13px;
+    border: 1px solid var(--border); padding: 6px 12px; border-radius: 8px;
+  }
+  .topbar a:hover { border-color: var(--accent); }
+  main {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  h1, h2, h3 { color: var(--text); letter-spacing: -0.3px; }
+  h1 { font-size: 34px; margin: 0 0 8px; }
+  h2 { font-size: 22px; margin: 48px 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 28px 0 10px; color: var(--accent); }
+  p { color: var(--text-dim); }
+  strong { color: var(--text); }
+  code {
+    font-family: 'Noto Sans Mono', Consolas, monospace;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.88em;
+    color: var(--text);
+  }
+  pre {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  pre code { background: none; border: 0; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; color: var(--text-dim); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-input);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+  td { color: var(--text-dim); }
+  td code { font-size: 11px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 36px 0; }
+  blockquote {
+    margin: 16px 0; padding: 12px 18px;
+    border-left: 3px solid var(--accent);
+    background: rgba(30,136,229,0.06);
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="label">Plan Manager · Design Tokens Preview</div>
+    <a href="/dashboard">← Back to console</a>
+  </div>
+  <main id="content">Loading…</main>
+<script>
+fetch('/design-tokens.md')
+  .then(r => r.text())
+  .then(md => {
+    document.getElementById('content').innerHTML = marked.parse(md);
+    document.title = 'Plan Manager — Design Tokens';
+  })
+  .catch(err => {
+    document.getElementById('content').innerHTML =
+      '<p style="color:#ff1744">Failed to load design-tokens.md: ' + err.message + '</p>';
+  });
+</script>
+</body>
+</html>

@@ -170,6 +170,107 @@ html[data-theme="light"] body {
 }
 html[data-theme="light"] .import-logo-dark { display: none; }
 html:not([data-theme="light"]) .import-logo-light { display: none; }
+
+/* ─── Mobile gate ────────────────────────────────────────────────────────── */
+/* Hidden by default. Shown when the viewport is narrower than a usable
+   desktop layout OR when the primary input is coarse (phones, tablets). */
+.mobile-gate { display: none; }
+
+/* Shared rules for every trigger below. */
+.mobile-gate-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+  width: 100%;
+  max-width: 300px;
+  box-sizing: border-box;
+}
+.mobile-gate-logo {
+  height: 56px;
+  width: auto;
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: none;
+}
+html[data-theme="light"] .mobile-gate-logo-dark { display: none; }
+html:not([data-theme="light"]) .mobile-gate-logo-light { display: none; }
+.mobile-gate-title {
+  font-family: 'Europa', -apple-system, 'Segoe UI', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin: 4px 0 0;
+  line-height: 1.2;
+}
+.mobile-gate-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin: 0;
+  max-width: 260px;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+.mobile-gate-url {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 100%;
+  word-break: break-all;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  letter-spacing: 0.2px;
+}
+.mobile-gate-link {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-hover);
+  padding-bottom: 2px;
+  transition: color 0.15s ease;
+}
+.mobile-gate-link:hover { color: var(--text); }
+
+/* Trigger 1: narrow viewport (≤1024px catches phones + iPad portrait 820px).
+   Trigger 2: coarse-pointer devices without hover (touch phones/tablets even
+   if the browser reports a desktop-class width — e.g. iPad Pro landscape).
+   Either trigger activates the gate. */
+@media (max-width: 1024px), (hover: none) and (pointer: coarse) {
+  .mobile-gate {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    background: var(--bg);
+    color: var(--text);
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  /* Keep the underlying app in the DOM but hidden from view and a11y tree.
+     Screen readers skip it; keyboard focus can't escape the gate.
+     `overflow: hidden` on html/body prevents the un-optimised SPA from
+     contributing width and causing horizontal scroll on phones. */
+  html, body { overflow: hidden !important; }
+  body > :not(.mobile-gate) { visibility: hidden; }
+}
+
+/* Landscape phone / short viewports: shrink the stack so the whole card
+   fits without scrolling on devices like iPhone 13 rotated (812×375). */
+@media (max-height: 500px) and (max-width: 1024px) {
+  .mobile-gate { padding: 16px 20px; align-items: flex-start; }
+  .mobile-gate-inner { gap: 12px; max-width: 340px; }
+  .mobile-gate-logo { height: 40px; }
+  .mobile-gate-title { font-size: 22px; }
+  .mobile-gate-body { font-size: 13px; max-width: 320px; }
+}
 .import-wordmark-sub {
   font-size: 18px; font-weight: 300;
   color: var(--text-dim);
@@ -2359,6 +2460,21 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
 </head>
 <body class="boot-pending">
 
+<!-- MOBILE GATE — shown on viewports ≤768px; hidden on desktop/tablet landscape -->
+<div class="mobile-gate" id="mobileGate" aria-hidden="true">
+  <div class="mobile-gate-inner">
+    <img src="/logo.png" class="mobile-gate-logo mobile-gate-logo-light" alt="Sentinel" />
+    <img src="/logo-dark.png" class="mobile-gate-logo mobile-gate-logo-dark" alt="Sentinel" />
+    <h1 class="mobile-gate-title">View on Desktop</h1>
+    <p class="mobile-gate-body">
+      Plan Manager is desktop-only for now. Open this link on a computer to
+      create plans and manage nodes.
+    </p>
+    <div class="mobile-gate-url">planmanager.sentinel-p2p.com</div>
+    <a class="mobile-gate-link" href="https://sentinel.co">Back to sentinel.co</a>
+  </div>
+</div>
+
 <!-- IMPORT WALLET OVERLAY -->
 <div class="import-overlay hidden" id="importOverlay">
   <button class="theme-toggle import-theme-toggle" id="importThemeBtn" onclick="toggleTheme()" title="Toggle theme">
@@ -3139,19 +3255,19 @@ document.addEventListener('keydown', (e) => {
   navigate(el.dataset.page);
 });
 
-function renderPage() {
+async function renderPage() {
   switch (S.page) {
-    case 'dashboard': renderDashboard(); break;
-    case 'create': renderCreate(); break;
-    case 'add-nodes': loadAddNodes(); break;
-    case 'your-nodes': loadYourNodes(); break;
-    case 'pricing': loadPricing(); break;
-    case 'subscribers': loadSubscribers(); break;
-    case 'fee-grants': loadFeeGrants(); break;
-    case 'rankings': renderComingSoon('Node Rankings', 'Session scanning & node performance analytics'); break;
-    case 'rpcs': renderComingSoon('RPC Health', 'Endpoint monitoring & provider health checks'); break;
-    case 'cli-install': renderCliInstall(); break;
-    case 'cli-commands': renderCliCommands(); break;
+    case 'dashboard': return renderDashboard();
+    case 'create': return renderCreate();
+    case 'add-nodes': return loadAddNodes();
+    case 'your-nodes': return loadYourNodes();
+    case 'pricing': return loadPricing();
+    case 'subscribers': return loadSubscribers();
+    case 'fee-grants': return loadFeeGrants();
+    case 'rankings': return renderComingSoon('Node Rankings', 'Session scanning & node performance analytics');
+    case 'rpcs': return renderComingSoon('RPC Health', 'Endpoint monitoring & provider health checks');
+    case 'cli-install': return renderCliInstall();
+    case 'cli-commands': return renderCliCommands();
   }
 }
 
@@ -3624,7 +3740,13 @@ async function doLogout() {
 // Paints once from cached data; fresh values stream in via targeted DOM updates
 // (no full re-render → no flash). See S3 "First Paint is Final" rule.
 async function renderDashboard() {
-  if (!S.wallet) await loadWallet();
+  // Kick off wallet load in parallel but DO NOT block first paint on it.
+  // If S.wallet is already populated, we render immediately with real data.
+  // If not, we paint the skeleton now and re-render once the wallet arrives.
+  // This prevents the homepage from sitting on the "Connecting..." spinner
+  // when the wallet API is slow on first boot.
+  let walletPromise = null;
+  if (!S.wallet) walletPromise = loadWallet();
   if (S.page !== 'dashboard') return;
 
   // Warm cache for every other page. Fire-and-forget — never blocks.
@@ -3655,9 +3777,9 @@ async function renderDashboard() {
     <div class="callout callout-warn" style="margin-bottom:12px">
       <div class="callout-icon">!</div>
       <div>
-        <div class="callout-title">Register your provider identity to start selling plans</div>
+        <div class="callout-title">Register your provider identity to launch your dVPN business</div>
         <div class="callout-body">
-          A provider identity is your operator profile on the network. It takes a minute to set up and is a one-time step. Head to Create Plan to get registered.
+          Your provider identity is the on-chain operator profile that lets you ship your own branded dVPN app, set pricing in P2P, and earn from every subscription. One-time setup, takes a minute. Head to Create Plan to get registered.
         </div>
       </div>
     </div>` : ''}
@@ -3776,6 +3898,15 @@ async function renderDashboard() {
       _dataCache['/api/nodes/chain-count'] = { data: d, ts: Date.now() };
       const el = document.getElementById('statNodeCount');
       if (el) el.textContent = fmtExact(d.count);
+    }).catch(() => {});
+  }
+
+  // If we kicked off a background wallet load, re-render once it resolves so
+  // the real balance, provider state, and low-balance warning replace the
+  // skeleton. Skip if user navigated away in the meantime.
+  if (walletPromise) {
+    walletPromise.then(() => {
+      if (S.page === 'dashboard') renderDashboard();
     }).catch(() => {});
   }
 }
@@ -4078,23 +4209,27 @@ function getLeaseLabel() {
 
 // ─── Plan loading (shared by both pages) ─────────────────────────────────────
 let _myPlansAbort = null;
+let _lastMyPlansJson = '';
 async function _ensurePlansLoaded(forPage) {
   if (S.myPlans) {
-    if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId);
+    if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId, { suppressRender: true });
     return;
   }
   if (S.myPlansLoading) return;
   S.myPlansLoading = true;
   try {
     const onRefresh = (fresh) => {
+      const freshJson = JSON.stringify(fresh);
+      if (freshJson === _lastMyPlansJson) return;
+      _lastMyPlansJson = freshJson;
       S.myPlans = fresh.plans || [];
       if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId, { suppressRender: true });
-      // Re-render current page with fresh data
       const handler = { 'add-nodes': loadAddNodes, 'your-nodes': loadYourNodes, pricing: loadPricing, subscribers: loadSubscribers, 'fee-grants': loadFeeGrants };
       if (handler[S.page]) handler[S.page]();
     };
     const { data: d } = await cachedFetch('/api/my-plans', 120_000, onRefresh);
     if (S.page !== forPage) return;
+    _lastMyPlansJson = JSON.stringify(d);
     S.myPlans = d.plans || [];
   } catch (e) {
     S.myPlans = [];
@@ -4133,18 +4268,16 @@ function selectPlan(id, opts = {}) {
   S.mgrNodes = null;
   S.addSet.clear();
   S.removeSet.clear();
-  loadMgrNodes();
   if (opts.suppressRender) return;
+  loadMgrNodes();
   if (S.page === 'fee-grants') renderFeeGrants();
   if (S.page === 'subscribers') renderSubscribers();
   if (S.page === 'pricing') renderPricing();
 }
 
 let _mgrNodesAbort = null;
+let _mgrNodesInflightUrl = null;
 async function loadMgrNodes() {
-  // your-nodes page does NOT consume S.mgrNodes (it uses S._yourNodes from
-  // the dedicated inPlanOnly fetch). Skip entirely on that page to avoid
-  // spurious re-renders that cause a flicker loop.
   if (S.page === 'your-nodes') return;
   if (!S.mgrPlanId) {
     if (S.page === 'add-nodes') renderAddNodes();
@@ -4153,6 +4286,7 @@ async function loadMgrNodes() {
   const f = S.nodeFilters;
   const params = new URLSearchParams({ page: S.mgrPage, limit: 50, planId: S.mgrPlanId, search: f.search, country: f.country, protocol: f.protocol });
   const url = '/api/all-nodes?' + params.toString();
+  if (_mgrNodesInflightUrl === url) return;
   const cached = _dataCache[url];
 
   if (cached && cached.data) {
@@ -4181,6 +4315,7 @@ async function loadMgrNodes() {
   } else {
     showUpdating();
   }
+  _mgrNodesInflightUrl = url;
   try {
     if (_mgrNodesAbort) _mgrNodesAbort.abort();
     _mgrNodesAbort = new AbortController();
@@ -4191,10 +4326,11 @@ async function loadMgrNodes() {
     S.protocols = d.protocols || S.protocols;
     _dataCache[url] = { data: d, ts: Date.now() };
   } catch (e) {
-    if (e.name === 'AbortError') return;
+    if (e.name === 'AbortError') { _mgrNodesInflightUrl = null; return; }
     toast('Failed to load nodes', 'error');
   }
   _mgrNodesAbort = null;
+  _mgrNodesInflightUrl = null;
   hideUpdating();
   if (S.page === 'add-nodes') renderAddNodes();
 }
@@ -4206,10 +4342,10 @@ async function loadAddNodes() {
   if (!S.mgrNodes && !S.mgrPlanId) showLoading('Loading plans...');
   await _ensurePlansLoaded('add-nodes');
   if (S.page !== 'add-nodes') return;
-  // If we need to fetch nodes, let loadMgrNodes do the single spinner-then-data render.
-  // Otherwise render once from existing state.
   if (S.mgrPlanId && !S.mgrNodes) {
     loadMgrNodes();
+  } else if (!S.mgrPlanId) {
+    renderAddNodes();
   } else {
     renderAddNodes();
   }
@@ -4462,20 +4598,23 @@ function adjustPagePadding(hasBar) {
 }
 
 // ─── Your Nodes Page ─────────────────────────────────────────────────────────
+let _lastYourNodesJson = '';
 async function loadYourNodes() {
-  // Only show the full-page loader if we have nothing to paint. Otherwise
-  // keep the existing view and let the background revalidate repaint silently.
   if (!S._yourNodes) showLoading('Loading your plans...');
   await _ensurePlansLoaded('your-nodes');
   if (S.page !== 'your-nodes') return;
   if (S.mgrPlanId) {
     const url = `/api/all-nodes?page=1&limit=500&planId=${S.mgrPlanId}&inPlanOnly=true`;
     try {
-      const { data, stale } = await cachedFetch(url, 60_000, (fresh) => {
+      const { data } = await cachedFetch(url, 60_000, (fresh) => {
         if (S.page !== 'your-nodes') return;
+        const freshJson = JSON.stringify(fresh);
+        if (freshJson === _lastYourNodesJson) return;
+        _lastYourNodesJson = freshJson;
         S._yourNodes = fresh;
         renderYourNodes();
       });
+      _lastYourNodesJson = JSON.stringify(data);
       S._yourNodes = data;
     } catch (e) {
       toast('Failed to load plan nodes', 'error');
