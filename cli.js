@@ -111,13 +111,58 @@ function table(rows, cols) {
 }
 
 // ─── HTTP client ──────────────────────────────────────────────────────────────
+// Session cookie jar: the server's wallet endpoints set an httpOnly session
+// cookie (FIX 7). The CLI persists that cookie to a local file so subsequent
+// invocations stay logged in. File is keyed by base URL to support multi-env.
+
+import { existsSync as _existsSync, readFileSync as _readFileSync, writeFileSync as _writeFileSync, unlinkSync as _unlinkSync, mkdirSync as _mkdirSync } from 'node:fs';
+import { homedir as _homedir } from 'node:os';
+import { join as _join } from 'node:path';
+
+const COOKIE_DIR = _join(_homedir(), '.plans-cli');
+function cookieFile() {
+  const safe = BASE_URL.replace(/[^a-z0-9]/gi, '_');
+  return _join(COOKIE_DIR, `${safe}.cookie`);
+}
+
+function loadCookie() {
+  try {
+    const f = cookieFile();
+    if (!_existsSync(f)) return '';
+    return _readFileSync(f, 'utf8').trim();
+  } catch { return ''; }
+}
+
+function saveCookie(setCookie) {
+  if (!setCookie) return;
+  // setCookie can be a single string or an array; normalize and grab the cookie pair.
+  const list = Array.isArray(setCookie) ? setCookie : [setCookie];
+  for (const sc of list) {
+    const pair = sc.split(';')[0]; // "name=value"
+    if (!pair.includes('=')) continue;
+    try {
+      _mkdirSync(COOKIE_DIR, { recursive: true });
+      _writeFileSync(cookieFile(), pair, 'utf8');
+    } catch {}
+    return;
+  }
+}
+
+function clearCookie() {
+  try { _unlinkSync(cookieFile()); } catch {}
+}
 
 async function request(method, path, body) {
   const url = BASE_URL + path;
-  const opts = {
-    method,
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
   };
+  const jar = loadCookie();
+  if (jar) headers['Cookie'] = jar;
+
+  const opts = { method, headers };
   if (body !== undefined) opts.body = JSON.stringify(body);
 
   let res;
@@ -128,6 +173,10 @@ async function request(method, path, body) {
     err(`  (${e.message})`);
     process.exit(3);
   }
+
+  // Persist any Set-Cookie the server hands back (login, logout-clear, etc).
+  const setCookie = res.headers.getSetCookie ? res.headers.getSetCookie() : res.headers.get('set-cookie');
+  if (setCookie && setCookie.length) saveCookie(setCookie);
 
   let data;
   try {
@@ -168,19 +217,19 @@ Global flags:
 Command groups:
   health            Server health check
   status            Node scan progress + wallet loaded state
-  wallet            Wallet management (import, info, status, logout)
+  wallet            Wallet management (generate, import, info, status, send, logout)
   plan              Plan CRUD, status, subscribe, start-session
-  node              Node list, progress, sessions, rankings
-  link              Link / batch-link a node to a plan
-  unlink            Unlink / batch-unlink nodes from a plan
+  node              Node list, progress, chain-count, sessions, rankings
+  link              Link a node to a plan
+  unlink            Unlink a node from a plan
   batch-link        Link multiple nodes to a plan in one TX
   batch-unlink      Unlink multiple nodes from a plan in one TX
   lease             Start and end node leases
   provider          List and register providers
   params            Query chain params
-  feegrant          Fee grant management
-  rpc-health        39-endpoint LCD/RPC health check
-  rpc-providers     RPC provider status
+  feegrant          Fee grant management (incl. revoke-list)
+  rpc-health        Probe all LCD/RPC endpoints
+  rpc-providers     Tendermint RPC provider status
 
 Examples:
   plans health
@@ -188,6 +237,7 @@ Examples:
   plans plan list
   plans plan create --gb 10 --days 30 --price-udvpn 500000
   plans feegrant grant-subscribers 42
+  plans wallet send <addr> --amount 1.5 --memo "thanks"
 
 Run 'plans <group> --help' for per-group details.
 `;
@@ -196,8 +246,11 @@ const HELP = {
   wallet: `
 plans wallet status           GET /api/wallet/status — is a wallet loaded?
 plans wallet info             GET /api/wallet      — address, balance, provider
+plans wallet generate         POST /api/wallet/generate — new 24-word mnemonic (printed once)
 plans wallet import <mnemo>   POST /api/wallet/import
-plans wallet test-import      POST /api/wallet/test-import — load wallet from .env
+plans wallet send <to>        POST /api/wallet/send  — send P2P (DVPN) on-chain
+  --amount N        Amount in P2P (e.g. 1.5)
+  [--memo "text"]   Optional memo (max 256 chars)
 plans wallet logout           POST /api/wallet/logout
 `,
   plan: `
@@ -222,6 +275,7 @@ plans node list               GET /api/all-nodes
   [--country XX]    Filter by country code
   [--protocol wireguard|v2ray]
 plans node progress           GET /api/nodes/progress
+plans node chain-count        GET /api/nodes/chain-count — fast chain-side count of active nodes
 plans node sessions <addr>    GET /api/nodes/:addr/sessions
 plans node rankings           GET /api/node-rankings
 `,
@@ -267,6 +321,7 @@ plans feegrant grant-subscribers <planId> POST /api/feegrant/grant-subscribers
   [--spend-limit-dvpn N]
   [--expiration-days N]
 plans feegrant revoke <grantee>           POST /api/feegrant/revoke
+plans feegrant revoke-list <g1,g2,...>    POST /api/feegrant/revoke-list — batch revoke a list
 plans feegrant revoke-all                 POST /api/feegrant/revoke-all
 plans feegrant auto-grant get             GET /api/feegrant/auto-grant
 plans feegrant auto-grant set <true|false>  POST /api/feegrant/auto-grant
@@ -316,10 +371,37 @@ async function cmdWalletImport(mnemonic) {
   out(`OK  address: ${d.address}  provAddress: ${d.provAddress}`);
 }
 
-async function cmdWalletTestImport() {
-  const d = await POST('/api/wallet/test-import', {});
+async function cmdWalletGenerate() {
+  const d = await POST('/api/wallet/generate', {});
   if (JSON_MODE) { printJson(d); return; }
-  out(`OK  address: ${d.address}  provAddress: ${d.provAddress}`);
+  out(`OK  address: ${d.address}`);
+  out('');
+  out('Mnemonic (write this down — shown ONCE, server does not store it):');
+  out(`  ${d.mnemonic}`);
+  out('');
+  out('To use this wallet on the server: plans wallet import "<mnemonic>"');
+}
+
+async function cmdWalletSend(to, f) {
+  if (!to || !f.amount) {
+    err('Usage: plans wallet send <to> --amount N [--memo "text"]');
+    process.exit(1);
+  }
+  const amt = parseFloat(f.amount);
+  if (!isFinite(amt) || amt <= 0) {
+    err('--amount must be a positive number (P2P, e.g. 1.5)');
+    process.exit(1);
+  }
+  const body = { to, amountDvpn: amt };
+  if (f.memo) body.memo = String(f.memo);
+  const d = await POST('/api/wallet/send', body);
+  if (JSON_MODE) { printJson(d); return; }
+  if (d.ok) {
+    out(`OK  tx: ${d.txHash}  height: ${d.height || '--'}  gas: ${d.gasUsed || '--'}`);
+  } else {
+    out(`FAIL  ${d.error || 'send failed'}`);
+    process.exit(1);
+  }
 }
 
 async function cmdWalletInfo() {
@@ -338,6 +420,7 @@ async function cmdWalletInfo() {
 
 async function cmdWalletLogout() {
   const d = await POST('/api/wallet/logout', {});
+  clearCookie();
   if (JSON_MODE) { printJson(d); return; }
   out('OK  wallet cleared');
 }
@@ -487,6 +570,12 @@ async function cmdNodeProgress() {
   const d = await GET('/api/nodes/progress');
   if (JSON_MODE) { printJson(d); return; }
   out(`scanning: ${d.scanning}  total: ${d.total}  probed: ${d.probed}  online: ${d.online}`);
+}
+
+async function cmdNodeChainCount() {
+  const d = await GET('/api/nodes/chain-count');
+  if (JSON_MODE) { printJson(d); return; }
+  out(`active nodes on chain: ${d.count}${d.cached ? '  (cached)' : ''}`);
 }
 
 async function cmdNodeSessions(addr) {
@@ -724,7 +813,26 @@ async function cmdFeegrantRevoke(grantee) {
   if (!grantee) { err('Usage: plans feegrant revoke <grantee>'); process.exit(1); }
   const d = await POST('/api/feegrant/revoke', { grantee });
   if (JSON_MODE) { printJson(d); return; }
+  if (d.alreadyGone) { out('OK  already gone (expired or auto-revoked on chain)'); return; }
   out(`OK  txHash: ${d.txHash}`);
+}
+
+async function cmdFeegrantRevokeList(list) {
+  if (!list) {
+    err('Usage: plans feegrant revoke-list <grantee1,grantee2,...>');
+    process.exit(1);
+  }
+  const grantees = list.split(',').map(s => s.trim()).filter(Boolean);
+  if (grantees.length === 0) { err('No grantees provided'); process.exit(1); }
+  scanning(`revoking ${grantees.length} grantee(s)...`);
+  const d = await POST('/api/feegrant/revoke-list', { grantees });
+  if (JSON_MODE) { printJson(d); return; }
+  out(`OK  revoked: ${d.revoked ?? '--'}  alreadyGone: ${d.alreadyGone ?? '--'}`);
+  if (d.errors && d.errors.length) {
+    out(`Errors (${d.errors.length}):`);
+    for (const e of d.errors) out(`  - ${e}`);
+  }
+  if (d.message) out(d.message);
 }
 
 async function cmdFeegrantRevokeAll() {
@@ -837,7 +945,8 @@ async function main() {
       switch (sub) {
         case 'status':      await cmdWalletStatus(); break;
         case 'import':      await cmdWalletImport(rest[0] || flags.mnemonic); break;
-        case 'test-import': await cmdWalletTestImport(); break;
+        case 'generate':    await cmdWalletGenerate(); break;
+        case 'send':        await cmdWalletSend(rest[0], flags); break;
         case 'info':        await cmdWalletInfo(); break;
         case 'logout':      await cmdWalletLogout(); break;
         default:
@@ -870,10 +979,11 @@ async function main() {
     case 'node':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.node); break; }
       switch (sub) {
-        case 'list':      await cmdNodeList(flags); break;
-        case 'progress':  await cmdNodeProgress(); break;
-        case 'sessions':  await cmdNodeSessions(rest[0]); break;
-        case 'rankings':  await cmdNodeRankings(); break;
+        case 'list':         await cmdNodeList(flags); break;
+        case 'progress':     await cmdNodeProgress(); break;
+        case 'chain-count':  await cmdNodeChainCount(); break;
+        case 'sessions':     await cmdNodeSessions(rest[0]); break;
+        case 'rankings':     await cmdNodeRankings(); break;
         default:
           err(`Unknown node subcommand: ${sub}`);
           out(HELP.node);
@@ -939,6 +1049,7 @@ async function main() {
         case 'grant':              await cmdFeegrantGrant(rest[0], flags); break;
         case 'grant-subscribers':  await cmdFeegrantGrantSubscribers(rest[0], flags); break;
         case 'revoke':             await cmdFeegrantRevoke(rest[0]); break;
+        case 'revoke-list':        await cmdFeegrantRevokeList(rest[0]); break;
         case 'revoke-all':         await cmdFeegrantRevokeAll(); break;
         case 'auto-grant': {
           const ag = rest[0];
