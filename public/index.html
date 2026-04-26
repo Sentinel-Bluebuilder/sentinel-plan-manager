@@ -338,6 +338,45 @@ body.boot-pending::before {
   font-size: 14px; color: var(--text-dim);
   line-height: 1.6; max-width: 380px;
 }
+.import-steps-title {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 1.6px; text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+.import-steps {
+  list-style: none; padding: 0; margin: 4px 0 0;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.import-step {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 10px 0;
+  position: relative;
+}
+.import-step + .import-step::before {
+  content: ''; position: absolute;
+  left: 17px; top: -8px; width: 2px; height: 18px;
+  background: linear-gradient(180deg, transparent, var(--border));
+}
+.import-step-num {
+  flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: 16px; font-weight: 700;
+  letter-spacing: -0.2px;
+  box-shadow: 0 0 0 4px rgba(30,136,229,0.10), 0 4px 14px -4px rgba(30,136,229,0.5);
+}
+.import-step-body { min-width: 0; padding-top: 6px; }
+.import-step-head {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.1px; line-height: 1.3;
+}
+.import-step-sub {
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
+  margin-top: 3px;
+}
 .import-benefits {
   list-style: none; display: flex; flex-direction: column; gap: 12px;
   margin-top: 4px;
@@ -357,13 +396,14 @@ body.boot-pending::before {
 }
 .import-form {
   padding: 44px 40px;
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: 12px;
 }
 .import-form-title {
   font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: -0.2px;
+  margin-bottom: 6px;
 }
 .import-form-sub {
-  font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-bottom: 6px;
+  font-size: 12px; color: var(--text-dim); line-height: 1.65; margin: 0 0 18px;
 }
 .import-textarea {
   width: 100%; min-height: 110px; padding: 14px; resize: vertical;
@@ -374,7 +414,8 @@ body.boot-pending::before {
 }
 .import-textarea:focus { border-color: var(--accent); background: rgba(30,136,229,0.04); }
 .import-textarea::placeholder { color: var(--text-muted); }
-.import-error { color: var(--red); font-size: 12px; min-height: 18px; }
+.import-error { color: var(--red); font-size: 12px; min-height: 0; }
+.import-error:empty { display: none; }
 .import-btn {
   width: 100%; padding: 12px 18px; border: 1px solid var(--accent);
   border-radius: var(--radius-sm); cursor: pointer;
@@ -401,8 +442,8 @@ body.boot-pending::before {
 }
 .import-note {
   font-size: 11px; color: var(--text-muted); line-height: 1.6;
-  padding-top: 10px; border-top: 1px dashed var(--border);
-  margin-top: 6px;
+  padding-top: 14px; border-top: 1px dashed var(--border);
+  margin-top: auto;
 }
 .import-note strong { color: var(--text-dim); font-weight: 600; }
 
@@ -433,32 +474,59 @@ body.boot-pending::before {
   word-break: break-all;
 }
 .create-mnemonic {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-  padding: 16px;
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;
+  padding: 12px;
   background: var(--bg-input);
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
 }
 .create-mnemonic-word {
-  font-family: var(--font-mono); font-size: 13px; color: var(--text);
-  display: flex; align-items: baseline; gap: 6px;
-  padding: 6px 8px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  display: flex; align-items: baseline; gap: 5px;
+  padding: 5px 6px;
   background: var(--bg);
   border-radius: 4px;
 }
 .create-mnemonic-word .idx {
-  font-size: 10px; color: var(--text-muted); min-width: 16px;
+  font-size: 9px; color: var(--text-muted); min-width: 14px;
 }
 .create-confirm-label {
   display: flex; gap: 10px; align-items: flex-start;
-  padding: 12px;
+  padding: 10px 12px;
   background: rgba(255,145,0,0.06);
   border: 1px solid rgba(255,145,0,0.25);
   border-radius: var(--radius-sm);
-  font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  font-size: 11.5px; color: var(--text-dim); line-height: 1.45;
   cursor: pointer;
 }
 .create-confirm-label input { margin-top: 2px; flex-shrink: 0; }
+
+/* ─── Create-flow density ─────────────────────────────────────────────────
+   Step 2 of Create Account stacks address + 24 words + copy + confirm +
+   continue + cancel. On laptop-class heights the bottom button drifts off
+   screen. When .import-form has the data-mode="create-step2" attribute we
+   tighten spacing so everything lands above the fold. */
+.import-form[data-mode="create-step2"] { gap: 8px; padding: 28px 36px; }
+.import-form[data-mode="create-step2"] .import-form-title { font-size: 16px; margin-bottom: 2px; }
+.import-form[data-mode="create-step2"] .import-form-sub { font-size: 11.5px; line-height: 1.45; margin: 0 0 6px; }
+.import-form[data-mode="create-step2"] .import-tabs { margin-bottom: 2px; }
+.import-form[data-mode="create-step2"] .import-tab { padding: 9px 8px; font-size: 12px; }
+.import-form[data-mode="create-step2"] .import-divider { margin: 2px 0; font-size: 9px; }
+.import-form[data-mode="create-step2"] .import-btn { padding: 10px 16px; font-size: 13px; }
+.import-form[data-mode="create-step2"] .import-note { padding-top: 10px; font-size: 10.5px; }
+.import-form[data-mode="create-step2"] .create-address { padding: 8px 12px; font-size: 11.5px; }
+
+/* Compact masthead while create-step2 is showing — gives the form room. */
+.import-overlay[data-create-step="2"] { padding: 24px 24px; gap: 18px; }
+.import-overlay[data-create-step="2"] .import-logo-img { height: 56px; }
+.import-overlay[data-create-step="2"] .import-wordmark-sub { font-size: 14px; }
+
+/* On short viewports, drop the left hero column entirely so the form gets
+   the full width and never overflows. */
+@media (max-height: 820px) {
+  .import-overlay[data-create-step="2"] .import-hero { display: none; }
+  .import-overlay[data-create-step="2"] .import-box { grid-template-columns: 1fr; max-width: 640px; }
+}
 
 .wallet-logout-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -533,7 +601,7 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(10,1
 .sidebar-nav {
   padding: 14px 12px 20px;
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .sidebar-section {
@@ -583,6 +651,23 @@ html[data-theme="light"] .nav-item:hover { background: rgba(10,14,30,0.04); }
 .nav-item.active svg { opacity: 1; }
 
 .nav-item:active { transform: scale(0.98); }
+.nav-item-disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+.nav-item-disabled:hover { background: transparent; }
+
+.nav-badge {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  line-height: 1.4;
+}
+html[data-theme="light"] .nav-badge { background: rgba(10,14,30,0.05); }
 
 .sidebar-wallet {
   padding: 16px 16px 14px;
@@ -861,6 +946,50 @@ html[data-theme="light"] .topbar { background: rgba(246, 247, 251, 0.82); }
 }
 
 .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+.topbar-wallet-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(1,86,252,0.08);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.topbar-wallet-pill:hover {
+  background: rgba(1,86,252,0.14);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.topbar-wallet-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.topbar-wallet-pill svg { color: var(--accent); flex-shrink: 0; }
+.topbar-wallet-pill-addr { color: var(--text-dim); }
+.topbar-wallet-pill-bal { color: var(--text); font-weight: 600; }
+html[data-theme="light"] .topbar-wallet-pill { background: rgba(1,86,252,0.06); }
+
+.sidebar-wallet-clickable {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 4px;
+  margin: -4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.sidebar-wallet-clickable:hover {
+  background: rgba(1,86,252,0.06);
+}
+.sidebar-wallet-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .chain-badge {
   display: inline-flex;
@@ -1222,6 +1351,104 @@ html[data-theme="light"] .chain-badge { background: rgba(10,14,30,0.03); }
   color: var(--yellow);
   background: rgba(255,145,0,0.12);
   border: 1px solid rgba(255,145,0,0.4);
+}
+
+/* ─── Compact status strip (provider / low-balance) ─── */
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* ─── Security strip ─────────────────────────────────────────────────────
+   One-line trust marker on the homepage stating that seed phrases never
+   reach the server, with an inline link to the source-of-truth file
+   (lib/session.js) and the full repo. Sits between the hero and stats. */
+.security-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 16px;
+  margin: 0 0 14px;
+  background: rgba(0, 200, 83, 0.06);
+  border: 1px solid rgba(0, 200, 83, 0.28);
+  border-radius: var(--radius-sm);
+}
+.security-strip-icon {
+  flex-shrink: 0;
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--green);
+  background: rgba(0, 200, 83, 0.12);
+}
+.security-strip-body { flex: 1; min-width: 0; }
+.security-strip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.1px;
+  line-height: 1.3;
+}
+.security-strip-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin-top: 3px;
+}
+.security-strip-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.15s ease;
+}
+.security-strip-link:hover { border-bottom-color: var(--accent); }
+.status-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text-dim);
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  cursor: default;
+  font-family: inherit;
+  text-align: left;
+}
+button.status-chip { cursor: pointer; transition: border-color 0.15s, background-color 0.15s, transform 0.15s; }
+button.status-chip:hover { border-color: rgba(255,145,0,0.6); background: rgba(255,145,0,0.08); }
+.status-chip-warn { color: var(--text); border-color: rgba(255,145,0,0.45); background: rgba(255,145,0,0.08); }
+.status-chip-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: 0 0 0 2px rgba(255,145,0,0.18);
+  animation: lowBalPulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.status-chip-label strong { color: var(--yellow); font-weight: 700; }
+.status-chip-cta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--yellow);
+  padding-left: 8px;
+  border-left: 1px solid rgba(255,145,0,0.35);
+}
+.status-chip-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--yellow);
+  padding-left: 8px;
+  border-left: 1px solid rgba(255,145,0,0.35);
 }
 
 /* ─── Premium form helpers (Plan creation, etc.) ─── */
@@ -2013,9 +2240,9 @@ html[data-theme="light"] .badge-dim { background: rgba(10,14,30,0.04); }
 
 .node-list-header {
   display: grid;
-  grid-template-columns: 32px 1.5fr 80px 70px 120px 80px 70px;
+  grid-template-columns: 28px minmax(260px, 2fr) 140px 160px 70px 110px 80px 70px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 8px 14px;
   font-size: 10px;
   font-weight: 600;
@@ -2027,9 +2254,9 @@ html[data-theme="light"] .badge-dim { background: rgba(10,14,30,0.04); }
 
 .node-list-row {
   display: grid;
-  grid-template-columns: 32px 1.5fr 80px 70px 120px 80px 70px;
+  grid-template-columns: 28px minmax(260px, 2fr) 140px 160px 70px 110px 80px 70px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 12px 14px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
@@ -2065,13 +2292,14 @@ html[data-theme="light"] .badge-dim { background: rgba(10,14,30,0.04); }
   letter-spacing: 0.2px;
 }
 .node-list-moniker { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-list-city { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node-list-price { display: flex; flex-direction: column; gap: 1px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
 .node-list-usd { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 
 @media (max-width: 900px) {
-  .node-list-header, .node-list-row { grid-template-columns: 28px 1fr 60px 60px; }
-  .node-list-header > :nth-child(5), .node-list-header > :nth-child(6), .node-list-header > :nth-child(7),
-  .node-list-row > :nth-child(5), .node-list-row > :nth-child(6), .node-list-row > :nth-child(7) { display: none; }
+  .node-list-header, .node-list-row { grid-template-columns: 28px 1fr 60px 70px; }
+  .node-list-header > :nth-child(5), .node-list-header > :nth-child(6), .node-list-header > :nth-child(7), .node-list-header > :nth-child(8),
+  .node-list-row > :nth-child(5), .node-list-row > :nth-child(6), .node-list-row > :nth-child(7), .node-list-row > :nth-child(8) { display: none; }
 }
 
 /* ─── View Toggle ─── */
@@ -2317,6 +2545,925 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
 
 .empty-state svg { margin-bottom: 16px; opacity: 0.3; }
 
+/* ─── Wallet page (compact, fits without page scroll) ─── */
+.page-wallet { display: flex; flex-direction: column; gap: 14px; padding-bottom: 0 !important; }
+.page-wallet .page-hero { margin-bottom: 0 !important; }
+.wallet-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.wallet-stats .stat-card { padding: 14px 16px; }
+.wallet-grid {
+  display: grid;
+  grid-template-columns: 5fr 7fr;
+  gap: 14px;
+}
+.page-wallet .card-body { padding: 16px 18px !important; }
+.wallet-receive-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.wallet-qr {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  width: 168px;
+  height: 168px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wallet-addr-line {
+  font-size: 11px;
+  word-break: break-all;
+  text-align: center;
+  color: var(--text-muted);
+  max-width: 100%;
+  line-height: 1.4;
+}
+.wallet-send-body { display: flex; flex-direction: column; gap: 10px; }
+.wallet-addr-card .stat-label { margin-bottom: 6px; }
+.wallet-addr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wallet-addr-full {
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-all;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+.wallet-addr-copy {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.wallet-addr-copy:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.wallet-fee-strip {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ─── No-plan warning banner (Add Nodes read-only mode) ─── */
+.no-plan-warning {
+  display: flex; align-items: center; gap: 14px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--yellow);
+  border-radius: 10px;
+  background: rgba(255, 193, 7, 0.08);
+  color: var(--text);
+}
+.no-plan-warning-icon {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #1a1a1a;
+  font-weight: 700; font-size: 16px;
+  font-family: var(--font-display);
+}
+.no-plan-warning-body { flex: 1; min-width: 0; }
+.no-plan-warning-title { font-weight: 600; font-size: 14px; line-height: 1.3; }
+.no-plan-warning-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.no-plan-warning .btn { flex-shrink: 0; }
+
+.paid-nodes-banner {
+  display: flex; align-items: center; gap: 14px;
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  background: var(--green-dim);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.paid-nodes-banner:hover { background: rgba(46, 204, 113, 0.18); transform: translateY(-1px); }
+.paid-nodes-banner:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.paid-nodes-icon {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--green);
+  color: #0a1a12;
+  font-weight: 700; font-size: 14px;
+}
+.paid-nodes-body { flex: 1; min-width: 0; }
+.paid-nodes-title { font-weight: 600; font-size: 14px; line-height: 1.3; }
+.paid-nodes-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.paid-nodes-arrow { font-size: 18px; color: var(--green); flex-shrink: 0; }
+
+/* ─── Payment rail picker (On-Chain vs Fiat) ─── */
+.rail-cards {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+  margin-bottom: 28px;
+}
+.rail-card {
+  position: relative;
+  display: flex; flex-direction: column;
+  padding: 36px 36px 28px;
+  min-height: 380px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+  overflow: hidden;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.rail-card::before {
+  content: '';
+  position: absolute; inset: 0 0 auto 0; height: 4px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.rail-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.22);
+}
+.rail-card:hover::before { opacity: 1; }
+
+/* Marks: clean centered row of equal-height pills, no fixed min-height. */
+.rail-card-marks {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 24px;
+}
+.rail-card-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 56px; min-width: 56px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.rail-card-mark-light {
+  background: transparent;
+  border: none;
+  min-width: 72px;
+  padding: 0 14px;
+}
+html[data-theme="light"] .rail-card-mark-light { background: transparent; border: none; }
+.rail-img-mark { width: 40px; height: 40px; object-fit: contain; display: block; }
+
+.rail-card-heading { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; margin-bottom: 14px; }
+.rail-card-eyebrow {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.8px;
+}
+.rail-card-title {
+  font-size: 24px; font-weight: 700; line-height: 1.25;
+  color: var(--text);
+  margin: 0;
+}
+.rail-card-desc {
+  font-size: 14px; line-height: 1.65; color: var(--text-dim);
+  flex: 1;
+  margin-bottom: 18px;
+}
+.rail-card-cta {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--accent);
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 880px) {
+  .rail-cards { grid-template-columns: 1fr; }
+}
+
+/* ─── On-Chain Pricing — single-screen layout ─── */
+.onchain-pricing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 0;
+  align-items: start;
+}
+.onchain-pricing-card .card-header {
+  padding: 12px 16px;
+}
+.onchain-pricing-card .card-title { font-size: 14px; }
+.accepted-denoms-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 320px; overflow-y: auto;
+}
+.accepted-denom-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.badge-locked {
+  background: rgba(217, 119, 6, 0.15);
+  color: var(--yellow, #d97706);
+  border: 1px solid rgba(217, 119, 6, 0.4);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+html[data-theme="light"] .badge-locked {
+  background: rgba(217, 119, 6, 0.1);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.35);
+}
+.immutable-banner {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: linear-gradient(135deg, rgba(217,119,6,0.12), rgba(217,119,6,0.04));
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  border-left: 3px solid #d97706;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.immutable-banner-icon { font-size: 18px; line-height: 1; }
+.immutable-banner-body { flex: 1; min-width: 0; }
+.immutable-banner-title {
+  font-size: 12px; font-weight: 700; color: var(--text);
+  letter-spacing: 0.2px;
+  margin-bottom: 2px;
+}
+.immutable-banner-sub {
+  font-size: 11px; color: var(--text-dim); line-height: 1.45;
+}
+.immutable-banner-sub a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.immutable-banner-sub a:hover { text-decoration: underline; }
+@media (max-width: 980px) {
+  .onchain-pricing-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── External API Trigger — interactive builder ─── */
+.trig-intro {
+  background: linear-gradient(135deg, var(--accent-glow), transparent);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.trig-intro-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.trig-intro-sub { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
+.trig-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}
+@media (max-width: 1080px) {
+  .trig-grid { grid-template-columns: 1fr; }
+}
+
+.trig-builder, .trig-snippet {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex; flex-direction: column;
+}
+.trig-builder-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.trig-builder-step {
+  width: 24px; height: 24px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.trig-builder-title { font-size: 13px; font-weight: 700; color: var(--text); }
+
+.trig-field { display: flex; flex-direction: column; margin-bottom: 12px; }
+.trig-field label {
+  font-size: 11px; font-weight: 600; color: var(--text-dim);
+  margin-bottom: 5px;
+  display: flex; align-items: center; gap: 6px;
+}
+.trig-field-hint { font-weight: 400; color: var(--text-muted); }
+.trig-field input,
+.trig-field select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.trig-field input:focus,
+.trig-field select:focus { border-color: var(--accent); }
+
+.trig-field-row {
+  display: flex; gap: 12px; align-items: flex-end;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.trig-check {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-dim);
+  cursor: pointer;
+  padding: 8px 0;
+}
+.trig-check input { accent-color: var(--accent); }
+
+.trig-test-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px; font-weight: 600;
+  width: 100%;
+  margin-top: 4px;
+}
+.trig-test-btn-icon { font-size: 11px; }
+.trig-test-note {
+  font-size: 11px; color: var(--text-muted);
+  margin-top: 8px; line-height: 1.5;
+}
+.trig-test-note code {
+  font-size: 10px; color: var(--accent);
+  background: var(--bg-card);
+  padding: 1px 5px; border-radius: 4px;
+}
+.trig-test-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  line-height: 1.55;
+}
+.trig-test-result code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text);
+  word-break: break-all;
+}
+.trig-test-result-pending {
+  background: var(--accent-glow); border-color: var(--accent); color: var(--accent);
+}
+.trig-test-result-ok {
+  background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.4); color: var(--green, #10b981);
+}
+.trig-test-result-err {
+  background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.4); color: var(--red, #ef4444);
+}
+
+.trig-endpoint-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+}
+.trig-method {
+  background: var(--accent); color: #fff;
+  padding: 3px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+}
+.trig-endpoint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; color: var(--accent);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 6px;
+  flex: 1;
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: border-color 0.15s ease;
+}
+.trig-endpoint:hover { border-color: var(--accent); }
+
+.trig-lang-tabs {
+  display: flex; align-items: center; gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+.trig-lang-tab {
+  background: none; border: none;
+  padding: 8px 14px;
+  font-size: 12px; font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: inherit;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.trig-lang-tab:hover { color: var(--text); }
+.trig-lang-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.trig-snippet-copy {
+  margin-left: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.trig-snippet-copy:hover { border-color: var(--accent); color: var(--accent); }
+.trig-code {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding: 12px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre;
+  flex: 1;
+}
+
+.trig-flow {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.trig-flow-title {
+  font-size: 12px; font-weight: 700; color: var(--text);
+  margin-bottom: 12px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.trig-flow-steps {
+  display: flex; align-items: stretch; gap: 8px;
+  flex-wrap: wrap;
+}
+.trig-flow-step {
+  flex: 1; min-width: 130px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.trig-flow-step-success { border-color: var(--green, #10b981); background: rgba(16,185,129,0.06); }
+.trig-flow-num {
+  width: 22px; height: 22px;
+  background: var(--accent); color: #fff;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  margin-bottom: 4px;
+}
+.trig-flow-step-success .trig-flow-num { background: var(--green, #10b981); }
+.trig-flow-label { font-size: 12px; font-weight: 700; color: var(--text); }
+.trig-flow-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+.trig-flow-arrow {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+@media (max-width: 880px) {
+  .trig-flow-arrow { display: none; }
+}
+
+.trig-security {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  border-left: 3px solid #d97706;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.trig-security-icon { font-size: 18px; line-height: 1; flex-shrink: 0; }
+.trig-security strong { color: var(--text); }
+
+/* Fiat tile mark-row (when a single tile shows several brands). */
+.fiat-rail-mark-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ─── Focus mode (single rail selected) ─── */
+.rail-toggle-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.rail-toggle-back {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.rail-toggle-back:hover { border-color: var(--accent); color: var(--accent); }
+.rail-toggle-switch {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  position: relative;
+}
+.rail-toggle-option {
+  background: none; border: none; cursor: pointer; font-family: inherit;
+  padding: 8px 18px;
+  font-size: 13px; font-weight: 600;
+  color: var(--text-muted);
+  border-radius: 999px;
+  transition: color 0.18s ease, background 0.18s ease;
+  white-space: nowrap;
+}
+.rail-toggle-option.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(30,136,229,0.32);
+}
+.rail-toggle-option:not(.active):hover { color: var(--text); }
+
+.rail-focus-hero {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 16px;
+  padding: 32px 30px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  margin-bottom: 24px;
+}
+.rail-focus-marks { display: flex; align-items: center; justify-content: center; gap: 14px; flex-shrink: 0; }
+.rail-focus-marks .rail-card-mark,
+.rail-focus-marks .rail-card-mark-light { background: transparent; border: none; }
+.rail-focus-body { width: 100%; min-width: 0; }
+.rail-focus-eyebrow {
+  font-size: 11px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.7px;
+  margin-bottom: 6px;
+}
+.rail-focus-title { font-size: 26px; font-weight: 700; line-height: 1.2; margin-bottom: 8px; color: var(--text); }
+.rail-focus-desc { font-size: 14px; line-height: 1.65; color: var(--text-dim); max-width: 760px; margin: 0 auto; }
+
+.fiat-rail-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px; margin-bottom: 20px;
+}
+.fiat-rail-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px;
+}
+.fiat-rail-tile .fiat-rail-mark-row { justify-content: center; }
+.fiat-rail-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+}
+.fiat-rail-mark-light {
+  background: transparent;
+  border: none;
+  padding: 0 8px;
+  width: auto; min-width: 56px;
+}
+html[data-theme="light"] .fiat-rail-mark-light { background: transparent; border: none; }
+
+/* Theme-aware brand logos: keep brand color in light, switch to white in dark */
+.logo-visa { color: #1a1f71; }
+html[data-theme="dark"] .logo-visa,
+html:not([data-theme="light"]) .logo-visa { color: #ffffff; }
+.logo-paypal-pay { color: #003087; }
+.logo-paypal-pal { color: #009cde; }
+html[data-theme="dark"] .logo-paypal-pay,
+html:not([data-theme="light"]) .logo-paypal-pay { color: #6ea3ff; }
+.fiat-rail-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.fiat-rail-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+button.fiat-rail-tile {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+button.fiat-rail-tile:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+}
+.fiat-rail-cta {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+
+/* ─── Per-tile detail view (Sentinel-branded) ─── */
+.fiat-detail {
+  font-family: var(--font-display);
+  max-width: 920px;
+  margin: 0 auto;
+}
+.fiat-detail-back {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  margin-bottom: 22px;
+  transition: all .15s ease;
+}
+.fiat-detail-back:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.fiat-detail-hero {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 14px;
+  padding: 38px 32px 34px;
+  background:
+    radial-gradient(ellipse at top, var(--accent-glow), transparent 60%),
+    var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 22px;
+  box-shadow: var(--shadow-md);
+}
+.fiat-detail-marks {
+  display: flex; align-items: center; justify-content: center; gap: 18px;
+  margin-bottom: 4px;
+}
+.fiat-detail-marks .fiat-rail-mark,
+.fiat-detail-marks .fiat-rail-mark-light {
+  background: transparent; border: none;
+  width: 56px; height: 56px;
+  transform: scale(1.15);
+}
+.fiat-detail-marks .fiat-rail-mark-light { width: auto; min-width: 76px; }
+.fiat-detail-eyebrow {
+  font-family: var(--font-display);
+  font-size: 11px; font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2.2px;
+}
+.fiat-detail-title {
+  font-family: var(--font-display) !important;
+  font-size: 30px;
+  font-weight: 700 !important;
+  color: var(--text);
+  line-height: 1.15;
+  letter-spacing: -0.6px;
+}
+.fiat-detail-desc {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.65;
+  max-width: 640px;
+}
+
+.fiat-detail-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.fiat-detail-section-title {
+  font-family: var(--font-display) !important;
+  font-size: 11px;
+  font-weight: 700 !important;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  margin-bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.fiat-detail-section-title::before {
+  content: '';
+  display: inline-block;
+  width: 18px; height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.fiat-detail-section-sub {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.7;
+  margin-bottom: 16px;
+  max-width: 740px;
+}
+
+.fiat-detail-steps {
+  display: flex; flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.fiat-detail-step {
+  display: flex; gap: 14px; align-items: flex-start;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color .15s ease;
+}
+.fiat-detail-step:hover { border-color: var(--border-hover); }
+.fiat-detail-step-num {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-family: var(--font-display);
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.fiat-detail-step-body {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+.fiat-detail-step-body strong {
+  color: var(--text);
+  font-weight: 700;
+}
+.fiat-detail-step-body code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.fiat-detail-code {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  border-top: none;
+  padding: 16px 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text);
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre;
+}
+.fiat-detail-code-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+.fiat-detail-code-copy {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s ease;
+  letter-spacing: 0.3px;
+  text-transform: none;
+}
+.fiat-detail-code-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.fiat-detail-callout {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px 16px;
+  background: var(--accent-dim);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  margin-top: 14px;
+}
+.fiat-detail-callout-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.fiat-detail-callout-body {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+.fiat-detail-callout-body strong {
+  color: var(--text);
+  font-weight: 700;
+}
+.fiat-detail-callout-body code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.fiat-detail-subtabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  margin: 0 auto 18px;
+  width: fit-content;
+}
+.fiat-detail-subtab {
+  padding: 8px 22px;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .2s ease;
+  letter-spacing: 0.2px;
+}
+.fiat-detail-subtab:hover { color: var(--text); }
+.fiat-detail-subtab.active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: var(--shadow-accent);
+}
+
+/* Locked page state: nodes visible but not interactive. */
+.page-locked .node-card,
+.page-locked .node-list-row {
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+.page-locked .node-card:hover,
+.page-locked .node-list-row:hover {
+  border-color: var(--border) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 /* ─── Fee Grants layout ─── */
 .fg-summary {
   display: grid;
@@ -2493,16 +3640,41 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
         and connect any payment method — all from one console.
       </div>
 
-      <ul class="import-benefits">
-        <li><span class="import-bullet">1</span><span><strong>Create a plan</strong> — set your price and duration, pick the nodes, and share it with your users.</span></li>
-        <li><span class="import-bullet">2</span><span><strong>Accept any payment method</strong> — take card, fiat, or crypto through Stripe, PayPal, or your own checkout. Your users never have to touch a token.</span></li>
-        <li><span class="import-bullet">3</span><span><strong>Cover network fees</strong> — pick up the tab for your subscribers so they can connect with zero friction.</span></li>
-        <li><span class="import-bullet">4</span><span><strong>Scriptable for automation</strong> — everything in this console is also available as a CLI, so you can automate onboarding, bulk updates, and renewals from your own tools.</span></li>
-      </ul>
+      <div class="import-steps-title">Steps to create a subscription plan</div>
+      <ol class="import-steps">
+        <li class="import-step">
+          <div class="import-step-num">1</div>
+          <div class="import-step-body">
+            <div class="import-step-head">Register provider</div>
+            <div class="import-step-sub">Claim your on-chain operator identity.</div>
+          </div>
+        </li>
+        <li class="import-step">
+          <div class="import-step-num">2</div>
+          <div class="import-step-body">
+            <div class="import-step-head">Add dVPN nodes to the plan</div>
+            <div class="import-step-sub">Curate and link the nodes your subscribers will connect to.</div>
+          </div>
+        </li>
+        <li class="import-step">
+          <div class="import-step-num">3</div>
+          <div class="import-step-body">
+            <div class="import-step-head">Configure card / 3rd-party off-chain payments</div>
+            <div class="import-step-sub">Trigger subscriptions from Stripe, PayPal, or any checkout you already use.</div>
+          </div>
+        </li>
+        <li class="import-step">
+          <div class="import-step-num">4</div>
+          <div class="import-step-body">
+            <div class="import-step-head">On-chain fee-auth gasless transactions</div>
+            <div class="import-step-sub">Issue fee grants so subscribers connect without ever holding a token.</div>
+          </div>
+        </li>
+      </ol>
     </div>
 
     <!-- Form -->
-    <div class="import-form">
+    <div class="import-form" id="importForm">
       <div class="import-tabs">
         <button class="import-tab active" id="tabImport" onclick="switchImportTab('import')">Import Wallet</button>
         <button class="import-tab" id="tabCreate" onclick="switchImportTab('create')">Create Account</button>
@@ -2513,15 +3685,12 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
         <div class="import-form-title">Import your wallet</div>
         <div class="import-form-sub">
           Paste the 12 or 24 word mnemonic of the wallet that will own this plan.
-          The phrase is held in server memory only — never written to disk.
+          The phrase is encrypted with AES-256-GCM and stored in an httpOnly cookie scoped to your browser. It is never written to the server's disk and never shared between users.
         </div>
 
         <textarea class="import-textarea" id="importInput" placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12" spellcheck="false"></textarea>
         <div class="import-error" id="importError"></div>
         <button class="import-btn" id="importBtn" onclick="doImport()">Import wallet</button>
-
-        <div class="import-divider">OR</div>
-        <button class="import-btn secondary" id="testImportBtn" onclick="doTestImport()">Load test wallet from .env</button>
       </div>
 
       <!-- Create pane -->
@@ -2530,7 +3699,7 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
         <div id="createStep1">
           <div class="import-form-title">Create a new account</div>
           <div class="import-form-sub">
-            We'll generate a 24-word mnemonic in your browser session. <strong>Keys are never saved to disk.</strong> You must write the phrase down — if you lose it, the wallet and any funds are gone forever.
+            We'll generate a 24-word mnemonic for your account. The phrase is encrypted with AES-256-GCM and stored in an httpOnly cookie scoped to your browser — it is never written to the server's disk. <strong>Write the phrase down before you continue.</strong> If you lose it, the wallet and any funds are gone forever.
           </div>
           <button class="import-btn" id="generateBtn" onclick="doGenerateWallet()">Generate 24-word mnemonic</button>
           <div class="import-error" id="generateError"></div>
@@ -2594,7 +3763,7 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
         <span>Create Plan</span>
       </div>
 
-      <div class="sidebar-section">Nodes</div>
+      <div class="sidebar-section">dVPN Servers</div>
       <div class="nav-item" data-page="add-nodes" role="button" tabindex="0">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
         <span>Add Nodes</span>
@@ -2604,27 +3773,23 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
         <span>Your Nodes</span>
       </div>
 
+      <div class="sidebar-section">Operations</div>
       <div class="nav-item" data-page="pricing" role="button" tabindex="0">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        <span>Pricing</span>
+        <span>Payment</span>
       </div>
       <div class="nav-item" data-page="subscribers" role="button" tabindex="0">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Subscribers</span>
       </div>
+      <div class="nav-item nav-item-disabled" data-page="earnings" role="button" tabindex="-1" aria-disabled="true" title="Coming soon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Earnings</span>
+        <span class="nav-badge">Soon</span>
+      </div>
       <div class="nav-item" data-page="fee-grants" role="button" tabindex="0">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         <span>Fee Grants</span>
-      </div>
-
-      <div class="sidebar-section">Analytics</div>
-      <div class="nav-item" data-page="rankings" role="button" tabindex="0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        <span>Node Rankings</span>
-      </div>
-      <div class="nav-item" data-page="rpcs" role="button" tabindex="0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span>RPC Health</span>
       </div>
 
       <div class="sidebar-section">CLI</div>
@@ -2639,17 +3804,19 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
     </nav>
 
     <div class="sidebar-wallet" id="sidebarWallet">
-      <div class="wallet-status"><span class="wallet-status-dot"></span><span class="wallet-status-text">Wallet connected</span></div>
-      <div class="wallet-field">
-        <div class="wallet-field-label">Address</div>
-        <div class="wallet-addr" id="walletAddr">Loading...</div>
+      <div class="sidebar-wallet-clickable" data-page="wallet" role="button" tabindex="0" title="Open wallet">
+        <div class="wallet-status"><span class="wallet-status-dot"></span><span class="wallet-status-text">Wallet connected</span></div>
+        <div class="wallet-field">
+          <div class="wallet-field-label">Address</div>
+          <div class="wallet-addr" id="walletAddr">Loading...</div>
+        </div>
+        <div class="wallet-field">
+          <div class="wallet-field-label">Balance</div>
+          <div class="wallet-bal" id="walletBal">--</div>
+          <div class="wallet-bal-usd" id="walletUsd"></div>
+        </div>
       </div>
-      <div class="wallet-field">
-        <div class="wallet-field-label">Balance</div>
-        <div class="wallet-bal" id="walletBal">--</div>
-        <div class="wallet-bal-usd" id="walletUsd"></div>
-      </div>
-      <button class="wallet-logout-btn" onclick="doLogout()">Log out</button>
+      <button class="wallet-logout-btn" onclick="event.stopPropagation();doLogout()">Log out</button>
     </div>
   </aside>
 
@@ -2658,10 +3825,18 @@ html[data-theme="light"] .modal-actions { background: rgba(10,14,30,0.02); }
     <header class="topbar">
       <div class="topbar-title" id="pageTitle">Dashboard</div>
       <div class="topbar-right">
+        <div class="topbar-wallet-pill" id="topbarWalletPill" data-page="wallet" role="button" tabindex="0" title="Open wallet" style="display:none">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>
+          <span class="topbar-wallet-pill-addr" id="topbarWalletAddr">—</span>
+          <span class="topbar-wallet-pill-bal" id="topbarWalletBal">—</span>
+        </div>
         <div class="chain-badge">
           <div class="chain-dot"></div>
           <span>sentinelhub-2 &middot; v12</span>
         </div>
+        <a class="theme-toggle" id="ghBtn" href="https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager" target="_blank" rel="noopener" title="View on GitHub — open the official upstream repo" aria-label="View on GitHub">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.27-5.24-5.66 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.17.91-.25 1.89-.38 2.86-.38.97 0 1.95.13 2.86.38 2.19-1.48 3.15-1.17 3.15-1.17.62 1.58.23 2.75.11 3.04.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.36-5.25 5.65.41.35.78 1.05.78 2.12 0 1.53-.01 2.77-.01 3.14 0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+        </a>
         <button class="theme-toggle" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         </button>
@@ -2704,7 +3879,7 @@ const S = {
   // Create
   creating: false,
   // UI
-  viewMode: localStorage.getItem('planMgrView') || 'grid',
+  viewMode: localStorage.getItem('planMgrView') || 'list',
   theme: localStorage.getItem('planMgrTheme') || 'light',
 };
 
@@ -3173,18 +4348,18 @@ const pageTitles = {
   create: 'Create Plan',
   'add-nodes': 'Add Nodes',
   'your-nodes': 'Your Nodes',
-  pricing: 'Pricing',
+  pricing: 'Payment',
   subscribers: 'Subscribers',
   'fee-grants': 'Fee Grants',
-  rankings: 'Node Rankings',
-  rpcs: 'RPC Health',
+  earnings: 'Earnings',
+  wallet: 'Wallet',
   'cli-install': 'Install CLI',
   'cli-commands': 'CLI Commands',
 };
 
 const _validPages = new Set([
   'dashboard', 'create', 'add-nodes', 'your-nodes', 'pricing',
-  'subscribers', 'fee-grants', 'rankings', 'rpcs', 'cli-install', 'cli-commands',
+  'subscribers', 'earnings', 'fee-grants', 'wallet', 'cli-install', 'cli-commands',
 ]);
 
 function navigate(page, opts = {}) {
@@ -3240,8 +4415,13 @@ window.addEventListener('popstate', (e) => {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-page]');
   if (!el) return;
+  if (el.getAttribute('aria-disabled') === 'true') { e.preventDefault(); return; }
   // Let modifier-key clicks (open in new tab, etc.) pass through.
   if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button === 1) return;
+  // Don't hijack clicks on inner interactive elements (links, buttons, copy icons).
+  // The wallet pills wrap an explorer link + copy button — those must keep working.
+  const inner = e.target.closest('a, button, [data-no-nav]');
+  if (inner && el.contains(inner) && inner !== el) return;
   e.preventDefault();
   navigate(el.dataset.page);
 });
@@ -3264,71 +4444,49 @@ async function renderPage() {
     case 'pricing': return loadPricing();
     case 'subscribers': return loadSubscribers();
     case 'fee-grants': return loadFeeGrants();
-    case 'rankings': return renderComingSoon('Node Rankings', 'Session scanning & node performance analytics');
-    case 'rpcs': return renderComingSoon('RPC Health', 'Endpoint monitoring & provider health checks');
+    case 'earnings': return renderComingSoon('Earnings', 'Plan revenue, payouts, and on-chain settlement history');
+    case 'wallet': return loadWalletPage();
     case 'cli-install': return renderCliInstall();
     case 'cli-commands': return renderCliCommands();
   }
 }
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
-const GH_CLI_URL = 'https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager/blob/master/cli.js';
-const GH_README_URL = 'https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager#cli';
+// Single source of truth for the official upstream repo (where PRs land).
+// All in-app "GitHub" / "View source" links resolve from this.
+const OFFICIAL_REPO_URL = 'https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager';
+const GH_CLI_URL = `${OFFICIAL_REPO_URL}/blob/master/cli.js`;
+const GH_README_URL = `${OFFICIAL_REPO_URL}#cli`;
 
 function renderCliInstall() {
   $('app').innerHTML = `<div class="page" style="max-width:980px">
-    <div class="page-hero">
+    <div class="page-hero" style="margin-bottom:14px">
       <div class="page-hero-eyebrow">Plan Manager · CLI</div>
       <div class="page-hero-title">Install the <span class="mono-inline">plans</span> CLI</div>
-      <div class="page-hero-sub">Prefer the terminal? The CLI gives you the same controls as this console in scriptable form — useful for automation, scheduled jobs, or managing plans from a remote machine. Requires Node.js 20 or newer.</div>
+      <div class="page-hero-sub">Same controls as this console, scriptable. Needs Node.js 20+ and the server running on <code>http://localhost:3003</code>.</div>
     </div>
 
-    <div class="stat-card" style="margin-bottom:18px;padding:18px">
-      <div style="font-weight:600;color:var(--text);margin-bottom:10px">Prerequisites</div>
-      <div style="color:var(--text-dim);line-height:1.8;font-size:14px">
-        <div>• Node.js 20 or newer (<code>node --version</code>)</div>
-        <div>• This server running — default <code>http://localhost:3003</code> (see terminal output or <code>start.bat</code>)</div>
-        <div>• A wallet imported in the server (Import page) — the CLI uses the same wallet</div>
-      </div>
-    </div>
-
-    <div class="stat-card" style="margin-bottom:18px;padding:18px">
-      <div style="font-weight:600;color:var(--text);margin-bottom:10px">1. Install from source (current)</div>
-      <div style="color:var(--text-dim);margin-bottom:10px;font-size:14px">Clone the repo and link the <code>plans</code> binary globally:</div>
-<pre style="background:var(--bg);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:0;font-size:13px;line-height:1.6"><code>git clone https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager
-cd sentinel-plan-manager
-npm install
-npm link</code></pre>
-      <div style="color:var(--text-dim);margin-top:10px;font-size:13px">
-        <code>npm link</code> puts <code>plans</code> on your PATH. On Windows this creates <code>plans.cmd</code>; on macOS/Linux, a shim in your global npm bin.
-      </div>
-    </div>
-
-    <div class="stat-card" style="margin-bottom:18px;padding:18px">
-      <div style="font-weight:600;color:var(--text);margin-bottom:10px">2. Verify</div>
-<pre style="background:var(--bg);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:0;font-size:13px;line-height:1.6"><code>plans --help          <span style="color:var(--text-dim)"># prints command groups</span>
+    <div class="stat-card" style="margin-bottom:12px;padding:16px">
+      <div style="font-weight:600;color:var(--text);margin-bottom:8px">Install &amp; verify</div>
+<pre style="background:var(--bg);padding:10px 12px;border-radius:6px;overflow-x:auto;margin:0;font-size:13px;line-height:1.55"><code>git clone https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager
+cd sentinel-plan-manager &amp;&amp; npm install &amp;&amp; npm link
 plans health          <span style="color:var(--text-dim)"># → OK  uptime: 12.4s</span>
 plans wallet info     <span style="color:var(--text-dim)"># address, balance, provider</span></code></pre>
-      <div style="color:var(--text-dim);margin-top:10px;font-size:13px">
-        If <code>plans health</code> errors with "server unreachable", the server isn't running or is on a different port.
+      <div style="color:var(--text-dim);margin-top:8px;font-size:12.5px;line-height:1.5">
+        <code>npm link</code> puts <code>plans</code> on your PATH (<code>plans.cmd</code> on Windows). The CLI shares the wallet you imported in the server.
       </div>
     </div>
 
-    <div class="stat-card" style="margin-bottom:18px;padding:18px">
-      <div style="font-weight:600;color:var(--text);margin-bottom:10px">Running without install</div>
-      <div style="color:var(--text-dim);line-height:1.8;font-size:14px">
-        <div>• From the repo folder: <code>npm run cli -- &lt;args&gt;</code> (e.g. <code>npm run cli -- plan list</code>)</div>
-        <div>• Directly: <code>node cli.js &lt;args&gt;</code></div>
+    <div class="stat-card" style="margin-bottom:14px;padding:16px">
+      <div style="font-weight:600;color:var(--text);margin-bottom:8px">Tips</div>
+      <div style="color:var(--text-dim);line-height:1.7;font-size:13px">
+        <div>• Skip <code>npm link</code>: run <code>node cli.js &lt;args&gt;</code> from the repo folder.</div>
+        <div>• Remote server: <code>plans --base-url http://10.0.0.5:3003 plan list</code>.</div>
+        <div>• Machine-readable output for scripts/AI agents: append <code>--json</code>.</div>
       </div>
     </div>
 
-    <div class="stat-card" style="margin-bottom:18px;padding:18px">
-      <div style="font-weight:600;color:var(--text);margin-bottom:10px">Pointing at a remote server</div>
-      <div style="color:var(--text-dim);margin-bottom:10px;font-size:14px">The CLI talks to <code>http://localhost:3003</code> by default. Override per-command:</div>
-<pre style="background:var(--bg);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:0;font-size:13px;line-height:1.6"><code>plans --base-url http://10.0.0.5:3003 plan list</code></pre>
-    </div>
-
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
       <a href="${GH_CLI_URL}" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none">cli.js source on GitHub →</a>
       <a href="${GH_README_URL}" target="_blank" rel="noopener" class="btn btn-ghost" style="text-decoration:none">README CLI section →</a>
     </div>
@@ -3345,7 +4503,6 @@ function renderCliCommands() {
         ['plans wallet status', 'Is a wallet loaded? Prints address if yes'],
         ['plans wallet info', 'Address, P2P balance, USD value, provider registration'],
         ['plans wallet import "&lt;12/24 words&gt;"', 'Load a wallet from a mnemonic'],
-        ['plans wallet test-import', 'Load the wallet from <code>.env</code> (dev only)'],
         ['plans wallet logout', 'Clear the loaded wallet'],
       ],
     },
@@ -3495,6 +4652,19 @@ async function loadWallet() {
       }
       $('walletBal').textContent = fmtExact(d.balanceDvpn) + ' P2P';
       $('walletUsd').textContent = d.balanceUsd ? fmtUsd(d.balanceUsd) : '';
+      // Topbar wallet pill — clickable shortcut to the wallet page.
+      const pill = $('topbarWalletPill');
+      const pillAddr = $('topbarWalletAddr');
+      const pillBal = $('topbarWalletBal');
+      if (pill && pillAddr && pillBal) {
+        if (walletAddress) {
+          pillAddr.textContent = walletAddress.slice(0, 8) + '…' + walletAddress.slice(-4);
+          pillBal.textContent = fmtExact(d.balanceDvpn) + ' P2P';
+          pill.style.display = '';
+        } else {
+          pill.style.display = 'none';
+        }
+      }
     };
     const { data: d } = await cachedFetch('/api/wallet', 30_000, (fresh) => { updateUI(fresh); });
     updateUI(d);
@@ -3506,15 +4676,218 @@ async function loadWallet() {
   }
 }
 
+// ─── Wallet Page ─────────────────────────────────────────────────────────────
+const SEND_BECH32_RE = /^sent1[0-9a-z]{38,58}$/;
+const SEND_GAS_HINT = 0.002;
+
+async function loadWalletPage() {
+  // Refresh wallet data first so the page header shows the latest balance.
+  await loadWallet();
+  renderWalletPage();
+}
+
+function renderWalletPage() {
+  const w = S.wallet || {};
+  const addr = w.address || '';
+  const balDvpn = Number(w.balanceDvpn || 0);
+  const balUsd = w.balanceUsd ? fmtUsd(w.balanceUsd) : '';
+  const copyIconSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+  $('app').innerHTML = `<div class="page page-wallet" style="max-width:1100px">
+    <div class="page-hero">
+      <div class="page-hero-eyebrow">Plan Manager · Wallet</div>
+      <div class="page-hero-title">Wallet</div>
+      <div class="page-hero-sub">Receive deposits, withdraw $P2P, and review your wallet activity. Your mnemonic never leaves this device.</div>
+    </div>
+
+    <div class="wallet-stats">
+      <div class="stat-card">
+        <div class="stat-label">Available balance</div>
+        <div class="stat-value">${fmtExact(balDvpn)} <span style="font-size:13px;color:var(--text-dim);font-weight:500">P2P</span></div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${balUsd || '—'}</div>
+      </div>
+      <div class="stat-card wallet-addr-card">
+        <div class="stat-label">Address</div>
+        <div class="wallet-addr-row">
+          <span class="wallet-addr-full mono-inline">${escapeHtml(addr || '—')}</span>
+          ${addr ? `<button class="wallet-addr-copy" title="Copy address" onclick="copyToClipboard('${escapeAttr(addr)}', this)">${copyIconSvg}</button>` : ''}
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">sentinelhub-2</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Provider status</div>
+        <div class="stat-value" style="font-size:14px">${w.provider ? 'Registered' : 'Not registered'}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${w.provider?.name ? escapeHtml(w.provider.name) : '—'}</div>
+      </div>
+    </div>
+
+    <div class="wallet-grid">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Receive $P2P</div></div>
+        <div class="card-body wallet-receive-body">
+          <div id="walletQr" class="wallet-qr">
+            <div style="color:var(--text-dim);font-size:11px">Loading QR…</div>
+          </div>
+          <div class="mono-inline wallet-addr-line">${escapeHtml(addr || '—')}</div>
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${escapeAttr(addr)}', this)" ${addr ? '' : 'disabled'}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy address
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="card-title">Send $P2P</div></div>
+        <div class="card-body wallet-send-body">
+          <div>
+            <div class="field-label" style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Recipient address</div>
+            <input id="sendTo" type="text" placeholder="sent1…" class="input input-mono" style="font-size:12px" oninput="onSendInputChange()" />
+            <div id="sendToErr" style="font-size:11px;color:var(--red);margin-top:2px;min-height:14px"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <div class="field-label" style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Amount ($P2P)</div>
+              <input id="sendAmt" type="number" step="0.000001" min="0" placeholder="0.00" class="input" oninput="onSendInputChange()" />
+              <div id="sendAmtErr" style="font-size:11px;color:var(--red);margin-top:2px;min-height:14px"></div>
+            </div>
+            <div>
+              <div class="field-label" style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Memo (optional)</div>
+              <input id="sendMemo" type="text" maxlength="256" placeholder="" class="input" />
+              <div style="min-height:14px"></div>
+            </div>
+          </div>
+          <div class="wallet-fee-strip">
+            <div style="display:flex;justify-content:space-between;color:var(--text-muted)"><span>Estimated gas</span><span>~${SEND_GAS_HINT} P2P</span></div>
+            <div style="display:flex;justify-content:space-between;color:var(--text)"><span style="font-weight:500">Source balance</span><span style="font-weight:600">${fmtExact(balDvpn)} P2P</span></div>
+          </div>
+          <div id="sendResult" style="display:none"></div>
+          <button id="sendBtn" class="btn btn-primary" style="width:100%" onclick="doWalletSend()" disabled>Send transaction</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  // Load the QR SVG asynchronously.
+  if (addr) {
+    fetch('/api/wallet/qr')
+      .then(r => r.ok ? r.text() : null)
+      .then(svg => {
+        if (svg && S.page === 'wallet') {
+          const el = $('walletQr');
+          if (el) {
+            el.innerHTML = svg;
+            const svgEl = el.querySelector('svg');
+            if (svgEl) { svgEl.style.width = '100%'; svgEl.style.height = '100%'; }
+          }
+        }
+      })
+      .catch(() => {});
+  }
+
+  onSendInputChange();
+}
+
+function onSendInputChange() {
+  const toEl = $('sendTo');
+  const amtEl = $('sendAmt');
+  const btn = $('sendBtn');
+  if (!toEl || !amtEl || !btn) return;
+  const to = toEl.value.trim();
+  const amt = Number(amtEl.value);
+  const balance = Number(S.wallet?.balanceDvpn || 0);
+  const myAddr = S.wallet?.address || '';
+
+  let toErr = '';
+  if (to.length > 0) {
+    if (!to.startsWith('sent1')) toErr = 'Sentinel addresses start with "sent1".';
+    else if (!SEND_BECH32_RE.test(to)) toErr = 'Address looks malformed. Recheck the bech32 string.';
+    else if (to === myAddr) toErr = 'That\'s your own address. Pick a different recipient.';
+  }
+  let amtErr = '';
+  if (amtEl.value.trim().length > 0) {
+    if (!Number.isFinite(amt) || amt <= 0) amtErr = 'Amount must be greater than 0.';
+    else if (amt + SEND_GAS_HINT > balance) amtErr = `Insufficient balance. Need ${(amt + SEND_GAS_HINT).toFixed(6)} P2P including gas.`;
+  }
+
+  $('sendToErr').textContent = toErr;
+  $('sendAmtErr').textContent = amtErr;
+
+  const valid = SEND_BECH32_RE.test(to) && to !== myAddr && Number.isFinite(amt) && amt > 0 && amt + SEND_GAS_HINT <= balance;
+  btn.disabled = !valid;
+}
+
+async function doWalletSend() {
+  const to = $('sendTo').value.trim();
+  const amt = Number($('sendAmt').value);
+  const memo = ($('sendMemo').value || '').trim();
+  const resultEl = $('sendResult');
+  const btn = $('sendBtn');
+
+  const ok = await showConfirm({
+    title: 'Send $P2P',
+    body: `Send <strong>${amt} P2P</strong> to <span class="mono-inline" style="font-size:12px">${escapeHtml(to.slice(0, 12) + '…' + to.slice(-6))}</span>? This broadcasts a signed transaction to sentinelhub-2.`,
+    confirmText: 'Broadcast',
+    variant: 'info',
+  });
+  if (!ok) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Broadcasting…';
+  resultEl.style.display = 'none';
+  try {
+    const r = await fetch('/api/wallet/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ to, amountDvpn: amt, memo: memo || undefined }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      resultEl.style.display = '';
+      resultEl.innerHTML = `<div style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:var(--radius-md);padding:10px 12px;font-size:12px;color:var(--text)">
+        Sent · height ${d.height} · tx <span class="mono-inline">${escapeHtml((d.txHash || '').slice(0, 20))}…</span>
+      </div>`;
+      toast('Transaction broadcast: ' + (d.txHash || '').slice(0, 16) + '…', 'success');
+      $('sendAmt').value = '';
+      $('sendMemo').value = '';
+      // Refresh balances.
+      invalidateCache(/^\/api\/wallet/);
+      await loadWallet();
+    } else {
+      resultEl.style.display = '';
+      resultEl.innerHTML = `<div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:var(--radius-md);padding:10px 12px;font-size:12px;color:var(--text)">
+        ${d.errorCode ? `[${escapeHtml(d.errorCode)}] ` : ''}${escapeHtml(d.error || 'Broadcast failed')}
+      </div>`;
+      toast(d.error || 'Broadcast failed', 'error');
+    }
+  } catch (e) {
+    resultEl.style.display = '';
+    resultEl.innerHTML = `<div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:var(--radius-md);padding:10px 12px;font-size:12px;color:var(--text)">
+      Network error: ${escapeHtml(e.message)}
+    </div>`;
+    toast('Network error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send transaction';
+    onSendInputChange();
+  }
+}
+
 // ─── Import / Logout ─────────────────────────────────────────────────────────
 function showImportOverlay() {
   $('importOverlay').classList.remove('hidden');
-  // Hide the "Test Wallet (.env)" shortcut on multi-user deployments —
-  // the server disables it and everyone should paste their own mnemonic.
-  const testBtn = $('testImportBtn');
-  if (testBtn) testBtn.style.display = S.multiUser ? 'none' : '';
 }
 function hideImportOverlay() { $('importOverlay').classList.add('hidden'); }
+
+// Navigate to a page and wait for its first render to settle while the
+// import overlay is still covering #app. The caller hides the overlay
+// after this resolves, so the user sees one paint, not two.
+async function navigateUnderOverlay(page) {
+  S.page = null; // bypass the same-page short-circuit in navigate()
+  navigate(page);
+  // Yield two frames so renderPage() and any synchronous follow-up paint
+  // commit before we drop the overlay.
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
 
 async function doImport() {
   const input = $('importInput');
@@ -3538,13 +4911,17 @@ async function doImport() {
     });
     const d = await r.json();
     if (d.ok) {
-      hideImportOverlay();
       input.value = '';
       invalidateCache(/.*/);
       S.wallet = null;
       S.myPlans = null;
+      // Load wallet + render the destination page BEFORE the overlay drops.
+      // Hiding the overlay first would expose an empty #app for one frame
+      // (boot doesn't pre-render when the user is logged out), then the
+      // skeleton, then the real dashboard — three paints, two visible flashes.
       await loadWallet();
-      navigate('dashboard');
+      await navigateUnderOverlay('dashboard');
+      hideImportOverlay();
     } else {
       err.textContent = d.error || 'Import failed';
     }
@@ -3553,34 +4930,6 @@ async function doImport() {
   }
   btn.disabled = false;
   btn.textContent = 'Import Wallet';
-}
-
-async function doTestImport() {
-  const err = $('importError');
-  const btn = $('testImportBtn');
-  err.textContent = '';
-  btn.disabled = true;
-  btn.textContent = 'Loading...';
-  try {
-    const r = await fetch('/api/wallet/test-import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-    });
-    const d = await r.json();
-    if (d.ok) {
-      hideImportOverlay();
-      invalidateCache(/.*/);
-      S.wallet = null;
-      S.myPlans = null;
-      await loadWallet();
-      navigate('dashboard');
-    } else {
-      err.textContent = d.error || 'Test import failed';
-    }
-  } catch (e) {
-    err.textContent = 'Connection error: ' + e.message;
-  }
-  btn.disabled = false;
-  btn.textContent = 'Test Wallet (.env)';
 }
 
 // ─── Create Account ──────────────────────────────────────────────────────────
@@ -3602,6 +4951,8 @@ function switchImportTab(which) {
     tabImport.classList.add('active');
     paneCreate.style.display = 'none';
     paneImport.style.display = '';
+    const form = $('importForm'); if (form) form.removeAttribute('data-mode');
+    const overlay = $('importOverlay'); if (overlay) overlay.removeAttribute('data-create-step');
   }
 }
 
@@ -3626,6 +4977,9 @@ async function doGenerateWallet() {
       $('createStep2').style.display = '';
       $('backupConfirmed').checked = false;
       $('confirmBackupBtn').disabled = true;
+      // Compact-density mode for step 2 — see CSS rules keyed on these attrs.
+      const form = $('importForm'); if (form) form.setAttribute('data-mode', 'create-step2');
+      const overlay = $('importOverlay'); if (overlay) overlay.setAttribute('data-create-step', '2');
     } else {
       err.textContent = d.error || 'Generation failed';
     }
@@ -3666,12 +5020,29 @@ async function copyToClipboard(text, btnEl) {
 }
 
 function cancelCreate() {
+  resetCreatePane();
+}
+
+// Full reset of the create pane: clears the in-memory mnemonic, wipes the
+// rendered words, sends the user back to step 1, and re-enables the
+// "Generate" / "Continue" buttons. Used both by the explicit cancel button
+// and by post-success / logout cleanup so the next visit lands on a clean
+// view instead of a stuck "Loading wallet..." button.
+function resetCreatePane() {
   _generatedMnemonic = '';
   _generatedAddress = '';
-  $('createMnemonic').innerHTML = '';
-  $('createAddress').textContent = '';
-  $('createStep2').style.display = 'none';
-  $('createStep1').style.display = '';
+  const m = $('createMnemonic'); if (m) m.innerHTML = '';
+  const a = $('createAddress'); if (a) a.textContent = '';
+  const s2 = $('createStep2'); if (s2) s2.style.display = 'none';
+  const s1 = $('createStep1'); if (s1) s1.style.display = '';
+  const chk = $('backupConfirmed'); if (chk) chk.checked = false;
+  const confirm = $('confirmBackupBtn');
+  if (confirm) { confirm.disabled = true; confirm.textContent = 'Continue'; }
+  const gen = $('generateBtn');
+  if (gen) { gen.disabled = false; gen.textContent = 'Generate 24-word mnemonic'; }
+  const ge = $('generateError'); if (ge) ge.textContent = '';
+  const form = $('importForm'); if (form) form.removeAttribute('data-mode');
+  const overlay = $('importOverlay'); if (overlay) overlay.removeAttribute('data-create-step');
 }
 
 async function doConfirmBackup() {
@@ -3686,15 +5057,22 @@ async function doConfirmBackup() {
     });
     const d = await r.json();
     if (d.ok) {
-      _generatedMnemonic = '';
-      _generatedAddress = '';
-      $('createMnemonic').innerHTML = '';
-      hideImportOverlay();
       invalidateCache(/.*/);
       S.wallet = null;
       S.myPlans = null;
+      // Render the dashboard underneath the still-visible overlay so the
+      // user sees one clean cross-fade: overlay → real dashboard. Doing it
+      // the other way produces flashes (empty #app, then skeleton, then
+      // real data).
       await loadWallet();
-      navigate('dashboard');
+      await navigateUnderOverlay('dashboard');
+      hideImportOverlay();
+      // Reset the create pane AFTER the overlay drops. Doing it before
+      // would flip the visible Create pane back to Import while the user
+      // is still looking at it, producing a "lag on the Import Wallet
+      // page" flicker between success and dashboard render.
+      resetCreatePane();
+      switchImportTab('import');
       toast('Wallet created. Fund it with ~8 P2P to create your first plan.', 'info');
     } else {
       btn.disabled = false;
@@ -3733,6 +5111,14 @@ async function doLogout() {
   invalidateCache(/.*/);
   for (const k in _dataCache) delete _dataCache[k];
   _prefetchRan = false;
+  // Reset overlay state so the next signin lands on a clean Import tab,
+  // not a stuck step-2 "Loading wallet..." Create view from a prior account.
+  resetCreatePane();
+  switchImportTab('import');
+  const importInput = $('importInput'); if (importInput) importInput.value = '';
+  const importErr = $('importError'); if (importErr) importErr.textContent = '';
+  const importBtn = $('importBtn');
+  if (importBtn) { importBtn.disabled = false; importBtn.textContent = 'Import wallet'; }
   showImportOverlay();
 }
 
@@ -3763,7 +5149,11 @@ async function renderDashboard() {
   app.innerHTML = `<div class="page page-home">
 
     <!-- Hero -->
-    <div class="page-hero">
+    <div class="page-hero" style="position:relative">
+      <a href="${OFFICIAL_REPO_URL}" target="_blank" rel="noopener" title="View source on GitHub" aria-label="View source on GitHub" style="position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-dim);text-decoration:none;font-family:var(--font-mono);font-size:11px;letter-spacing:0.4px;text-transform:uppercase;transition:border-color 0.15s ease, color 0.15s ease;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.27-5.24-5.66 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.17.91-.25 1.89-.38 2.86-.38.97 0 1.95.13 2.86.38 2.19-1.48 3.15-1.17 3.15-1.17.62 1.58.23 2.75.11 3.04.74.8 1.18 1.82 1.18 3.07 0 4.4-2.69 5.36-5.25 5.65.41.35.78 1.05.78 2.12 0 1.53-.01 2.77-.01 3.14 0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+        <span>GitHub</span>
+      </a>
       <div class="page-hero-eyebrow">Plan Manager · Operator Console</div>
       <div class="page-hero-title">
         Choose Nodes · Create a Plan · Monetize Today
@@ -3773,35 +5163,31 @@ async function renderDashboard() {
       </div>
     </div>
 
-    ${!w.provider ? `
-    <div class="callout callout-warn" style="margin-bottom:12px">
-      <div class="callout-icon">!</div>
-      <div>
-        <div class="callout-title">Register your provider identity to launch your dVPN business</div>
-        <div class="callout-body">
-          Your provider identity is the on-chain operator profile that lets you ship your own branded dVPN app, set pricing in P2P, and earn from every subscription. One-time setup, takes a minute. Head to Create Plan to get registered.
-        </div>
+    <!-- Security note: seed phrases never touch the server. -->
+    <div class="security-strip" role="note">
+      <div class="security-strip-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
       </div>
-    </div>` : ''}
+      <div class="security-strip-body">
+        <div class="security-strip-title">Your seed phrase never leaves this device.</div>
+        <div class="security-strip-sub">Mnemonics are encrypted with AES-256-GCM and stored only in an httpOnly cookie scoped to your browser — never written to the server's disk, never shared between users. Verify the source yourself: <a href="${OFFICIAL_REPO_URL}/blob/master/lib/session.js" target="_blank" rel="noopener" class="security-strip-link">lib/session.js</a> · <a href="${OFFICIAL_REPO_URL}" target="_blank" rel="noopener" class="security-strip-link">full repo on GitHub →</a></div>
+      </div>
+    </div>
 
-    ${lowBal ? `
-    <div class="callout callout-warn low-bal-warn" style="margin-bottom:14px">
-      <div class="low-bal-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>
-          <line x1="12" y1="9" x2="12" y2="13"/>
-          <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-      </div>
-      <div class="low-bal-body">
-        <div class="low-bal-title">Low balance — top up before you continue</div>
-        <div class="low-bal-text">
-          You're holding <strong>${fmtExact(w.balanceDvpn || 0)} P2P</strong>. A proper first-time setup on-chain — registering your provider, creating a plan, linking nodes, and funding subscriber fee grants — typically needs at least <strong>8 P2P</strong>. Below that, transactions will start failing mid-flow and leave you with half-finished state.
-        </div>
-        <div class="low-bal-actions">
-          <span class="low-bal-pill">Recommended minimum: 8 P2P</span>
-        </div>
-      </div>
+    ${(!w.provider || lowBal) ? `
+    <div class="status-strip" role="status">
+      ${!w.provider ? `
+      <button class="status-chip status-chip-warn" data-page="create" title="Register your provider identity from the Create Plan page">
+        <span class="status-chip-dot"></span>
+        <span class="status-chip-label">Provider not registered</span>
+        <span class="status-chip-cta">Register →</span>
+      </button>` : ''}
+      ${lowBal ? `
+      <div class="status-chip status-chip-warn" title="Recommended minimum: 8 P2P for the full first-run flow">
+        <span class="status-chip-dot"></span>
+        <span class="status-chip-label">Low balance · <strong>${fmtExact(w.balanceDvpn || 0)} P2P</strong></span>
+        <span class="status-chip-meta">min 8 P2P</span>
+      </div>` : ''}
     </div>` : ''}
 
     <!-- Stat row -->
@@ -3840,7 +5226,7 @@ async function renderDashboard() {
           </button>
           <button class="btn btn-ghost" data-page="add-nodes" style="justify-content:flex-start">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-            Add nodes to a plan
+            Hosted Nodes
             <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;opacity:0.7">~1–2 P2P / node</span>
           </button>
           <button class="btn btn-ghost" data-page="your-nodes" style="justify-content:flex-start">
@@ -4269,7 +5655,8 @@ function selectPlan(id, opts = {}) {
   S.addSet.clear();
   S.removeSet.clear();
   if (opts.suppressRender) return;
-  loadMgrNodes();
+  if (S.page === 'your-nodes') loadYourNodes();
+  else loadMgrNodes();
   if (S.page === 'fee-grants') renderFeeGrants();
   if (S.page === 'subscribers') renderSubscribers();
   if (S.page === 'pricing') renderPricing();
@@ -4279,12 +5666,15 @@ let _mgrNodesAbort = null;
 let _mgrNodesInflightUrl = null;
 async function loadMgrNodes() {
   if (S.page === 'your-nodes') return;
-  if (!S.mgrPlanId) {
-    if (S.page === 'add-nodes') renderAddNodes();
+  // Allow node browsing on add-nodes even without a plan selected.
+  // your-nodes still requires a plan because it filters by plan membership.
+  if (!S.mgrPlanId && S.page !== 'add-nodes') {
     return;
   }
   const f = S.nodeFilters;
-  const params = new URLSearchParams({ page: S.mgrPage, limit: 50, planId: S.mgrPlanId, search: f.search, country: f.country, protocol: f.protocol });
+  const baseParams = { page: S.mgrPage, limit: 50, search: f.search, country: f.country, protocol: f.protocol };
+  if (S.mgrPlanId) baseParams.planId = S.mgrPlanId;
+  const params = new URLSearchParams(baseParams);
   const url = '/api/all-nodes?' + params.toString();
   if (_mgrNodesInflightUrl === url) return;
   const cached = _dataCache[url];
@@ -4342,10 +5732,10 @@ async function loadAddNodes() {
   if (!S.mgrNodes && !S.mgrPlanId) showLoading('Loading plans...');
   await _ensurePlansLoaded('add-nodes');
   if (S.page !== 'add-nodes') return;
-  if (S.mgrPlanId && !S.mgrNodes) {
+  // Always render nodes — with or without a plan. Without a plan, the UI
+  // shows the data read-only with a "create a plan first" warning.
+  if (!S.mgrNodes) {
     loadMgrNodes();
-  } else if (!S.mgrPlanId) {
-    renderAddNodes();
   } else {
     renderAddNodes();
   }
@@ -4377,8 +5767,9 @@ function renderAddNodes() {
       <div class="lease-dur-total" id="leaseDisplay">${S.leaseHours} hours total</div>
     </div>` : '';
 
-  // Filters
-  const filtersHtml = S.mgrPlanId ? `
+  // Filters — always rendered so users can browse the network without a plan.
+  // Counter shows plan-membership info only when a plan is selected.
+  const filtersHtml = `
     <div class="filters">
       <input class="input input-mono" placeholder="Search address..." value="${S.nodeFilters.search}" oninput="S.nodeFilters.search=this.value" onkeydown="if(event.key==='Enter'){S.mgrPage=1;loadMgrNodes()}">
       <select class="input" onchange="S.nodeFilters.country=this.value;S.mgrPage=1;loadMgrNodes()">
@@ -4396,26 +5787,51 @@ function renderAddNodes() {
       </select>
       <button class="btn btn-ghost btn-sm" onclick="S.nodeFilters={search:'',country:'',protocol:'',priceSort:''};S.mgrPage=1;loadMgrNodes()">Reset</button>
       ${viewToggleHtml()}
-      ${hasData ? `<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${fmt(d.total)} nodes &middot; ${fmt(d.planNodesCount)} in plan</span>` : ''}
+      ${hasData ? `<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${fmt(d.total)} nodes${S.mgrPlanId && d.planNodesCount > 0 ? ` &middot; ${fmt(d.planNodesCount)} paid hidden` : ''}</span>` : ''}
+    </div>`;
+
+  // No-plan warning: nodes still render but adding is locked. Distinguish
+  // "no plans exist yet" (offer create) from "have plans but none picked".
+  const noPlanWarningHtml = !S.mgrPlanId ? (
+    plans.length === 0 && !S.myPlansLoading
+      ? `<div class="no-plan-warning">
+          <span class="no-plan-warning-icon">!</span>
+          <div class="no-plan-warning-body">
+            <div class="no-plan-warning-title">Create a plan before adding nodes</div>
+            <div class="no-plan-warning-sub">You can browse the network below, but adding nodes requires a plan.</div>
+          </div>
+          <a class="btn btn-primary btn-sm" href="/create" data-page="create">Create Plan</a>
+        </div>`
+      : !S.myPlansLoading
+      ? `<div class="no-plan-warning">
+          <span class="no-plan-warning-icon">!</span>
+          <div class="no-plan-warning-body">
+            <div class="no-plan-warning-title">Select a plan to add nodes</div>
+            <div class="no-plan-warning-sub">Pick one from the picker above. Browsing is read-only until you do.</div>
+          </div>
+        </div>`
+      : ''
+  ) : '';
+
+  // Paid-nodes indicator: nodes already in this plan are hidden from the
+  // browse list. Surface a count + link to Your Nodes so the operator knows
+  // they exist and can jump straight there.
+  const paidCount = (S.mgrPlanId && hasData) ? (d.planNodesCount || 0) : 0;
+  const paidBannerHtml = paidCount > 0 ? `
+    <div class="paid-nodes-banner" data-page="your-nodes" role="button" tabindex="0" title="Open Your Nodes">
+      <span class="paid-nodes-icon">✓</span>
+      <div class="paid-nodes-body">
+        <div class="paid-nodes-title">View ${fmt(paidCount)} Paid Node${paidCount === 1 ? '' : 's'}</div>
+        <div class="paid-nodes-sub">Already in this plan — manage them in Your Nodes.</div>
+      </div>
+      <span class="paid-nodes-arrow">→</span>
     </div>` : '';
 
   let contentHtml = '';
-  if (!S.mgrPlanId) {
-    if (plans.length === 0 && !S.myPlansLoading) {
-      contentHtml = `<div class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-        <div>No plans found. <a href="/create" data-page="create" style="color:var(--accent)">Create one first</a>.</div>
-      </div>`;
-    } else if (!S.myPlansLoading) {
-      contentHtml = `<div class="empty-state" style="padding:30px">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><path d="M3 3h7l2 2h9v14H3z"/></svg>
-        <div style="margin-top:8px;color:var(--text-dim)">Select a plan above to browse and add nodes</div>
-      </div>`;
-    }
-  } else if (!hasData) {
+  if (!hasData) {
     contentHtml = '<div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading nodes...</div></div>';
   } else {
-    let nodes = d.nodes || [];
+    let nodes = (d.nodes || []).filter(n => !n.inPlan);
     if (S.nodeFilters.priceSort === 'asc' || S.nodeFilters.priceSort === 'desc') {
       const dir = S.nodeFilters.priceSort === 'asc' ? 1 : -1;
       nodes = [...nodes].sort((a, b) => {
@@ -4437,7 +5853,7 @@ function renderAddNodes() {
         const selClass = inPlan ? 'in-plan' : selected ? 'selected' : '';
         const selBadge = inPlan ? 'sel-inplan' : selected ? 'sel-active' : 'sel-empty';
         const selText = inPlan ? 'In Plan' : selected ? 'Selected' : '\u00A0';
-        const onclick = inPlan ? '' : `onclick="toggleAddCard('${n.address}')"`;
+        const onclick = (inPlan || !S.mgrPlanId) ? '' : `onclick="toggleAddCard('${n.address}')"`;
         const speed = n.speedMbps ? n.speedMbps.toFixed(1) + ' Mbps' : '--';
         const speedColor = !n.speedMbps ? 'var(--text-muted)' : n.speedMbps >= 15 ? 'var(--green)' : n.speedMbps >= 5 ? 'var(--yellow)' : 'var(--red)';
         const flag = countryFlag(n.country);
@@ -4451,6 +5867,7 @@ function renderAddNodes() {
               ${n.moniker ? `<span class="node-list-moniker">${escapeHtml(n.moniker)}</span>` : ''}
             </div>
             <span>${escapeHtml(n.country) || '??'}</span>
+            <span class="node-list-city" title="${escapeAttr(n.city || '')}">${n.city ? escapeHtml(n.city) : '<span style="color:var(--text-muted)">—</span>'}</span>
             <span>${protocolBadge(n.protocol)}</span>
             <div class="node-list-price">
               <span>${fmtDvpn(n.hrPriceUdvpn)} P2P</span>
@@ -4482,7 +5899,7 @@ function renderAddNodes() {
         </div>`;
       }).join('');
 
-      const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>Protocol</span><span>Price/hr</span><span>Speed</span><span>Status</span></div>` : '';
+      const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>City</span><span>Protocol</span><span>Price/hr</span><span>Speed</span><span>Status</span></div>` : '';
       const containerClass = isList ? 'node-list-view' : 'node-cards-grid';
       contentHtml = `
         ${listHeader}
@@ -4495,8 +5912,9 @@ function renderAddNodes() {
     }
   }
 
-  // Floating action bar
-  const addCount = S.addSet.size;
+  // Floating action bar — never appears without a plan; the warning banner
+  // already explains why adding is locked.
+  const addCount = S.mgrPlanId ? S.addSet.size : 0;
   const actionBarHtml = addCount > 0 ? `
     <div class="action-bar" id="addActionBar">
       <div class="action-bar-count">${addCount} node${addCount > 1 ? 's' : ''} selected</div>
@@ -4515,9 +5933,11 @@ function renderAddNodes() {
       <div class="page-hero-sub">Browse every live node on the Sentinel network and add the ones you want to offer your subscribers. Once a node is part of your plan, your subscribers can use it as part of their subscription — no extra payment needed.</div>
     </div>`;
 
-  $('app').innerHTML = `<div class="page" style="${addCount > 0 ? 'padding-bottom:80px' : ''}">
+  $('app').innerHTML = `<div class="page${!S.mgrPlanId ? ' page-locked' : ''}" style="${addCount > 0 ? 'padding-bottom:80px' : ''}">
     ${heroHtml}
     ${planPicker}
+    ${noPlanWarningHtml}
+    ${paidBannerHtml}
     ${leaseSliderHtml}
     ${filtersHtml}
     ${contentHtml}
@@ -4526,6 +5946,7 @@ function renderAddNodes() {
 
 // Toggle a node card on the Add Nodes page — surgical DOM update
 function toggleAddCard(addr) {
+  if (!S.mgrPlanId) { toast('Create or select a plan first', 'error'); return; }
   if (S.addSet.has(addr)) S.addSet.delete(addr); else S.addSet.add(addr);
   const card = document.getElementById('acard_' + addr.slice(-12));
   if (card) {
@@ -4740,6 +6161,7 @@ function renderYourNodes() {
             ${n.moniker ? `<span class="node-list-moniker">${escapeHtml(n.moniker)}</span>` : ''}
           </div>
           <span>${escapeHtml(n.country) || '??'}</span>
+          <span class="node-list-city" title="${escapeAttr(n.city || '')}">${n.city ? escapeHtml(n.city) : '<span style="color:var(--text-muted)">—</span>'}</span>
           <span>${protocolBadge(n.protocol)}</span>
           <div class="node-list-price">
             <span>${fmtDvpn(n.hrPriceUdvpn)} P2P</span>
@@ -4784,7 +6206,7 @@ function renderYourNodes() {
     }).length;
     const expired = planNodes.filter(n => n.leaseExpiresAt && new Date(n.leaseExpiresAt) <= now).length;
 
-    const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>Protocol</span><span>Price/hr</span><span>Lease</span><span>Action</span></div>` : '';
+    const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>City</span><span>Protocol</span><span>Price/hr</span><span>Lease</span><span>Action</span></div>` : '';
     const containerClass = isList ? 'node-list-view' : 'node-cards-grid';
     const leaseWarning = (expiringSoon + expired) > 0
       ? `<div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;font-size:12px;color:var(--red);margin-bottom:14px;display:flex;align-items:center;gap:8px">
@@ -5022,6 +6444,496 @@ function denomDisplay(d) {
   return { symbol: d.startsWith('ibc/') ? 'IBC/' + d.slice(4, 10) : d, name: d, icon: '🪙' };
 }
 
+function setRailTab(tab) {
+  S._railTab = tab || null;
+  S._fiatTile = null;
+  if (S.page === 'pricing') renderPricing();
+}
+
+function setFiatTile(tile) {
+  S._fiatTile = tile || null;
+  S._fiatSubTab = null;
+  if (S.page === 'pricing') renderPricing();
+}
+
+function setFiatSubTab(tab) {
+  S._fiatSubTab = tab;
+  if (S.page === 'pricing') renderPricing();
+}
+
+// Build the integration-detail page shown after the user clicks a fiat tile.
+// `tile` ∈ {'card','paypal','crypto','free'}. RAIL_LOGOS / origin / planId are
+// passed in so the same dynamic values used elsewhere on the page reach here.
+// All four returns are wrapped in <div class="fiat-detail"> so the branded
+// type / spacing / accents stay scoped to this surface.
+function buildFiatDetailHtml(tile, RAIL_LOGOS, origin, planId) {
+  const subUrl = origin + '/api/plan/subscribe';
+  const codeBlock = (label, body) => `
+    <div class="fiat-detail-code-head">
+      <span>${label}</span>
+      <button class="fiat-detail-code-copy" onclick="copyToClipboard(this.parentElement.nextElementSibling.textContent, this)">📋 Copy</button>
+    </div>
+    <pre class="fiat-detail-code">${escapeHtml(body)}</pre>`;
+
+  if (tile === 'card') {
+    const stripeCode =
+`import express from 'express';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const app = express();
+
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      req.headers['stripe-signature'],
+      process.env.STRIPE_WEBHOOK_SECRET,
+    );
+  } catch {
+    return res.status(400).send('Signature verification failed');
+  }
+
+  if (event.type === 'checkout.session.completed' || event.type === 'invoice.paid') {
+    const obj = event.data.object;
+    const walletAddress = obj.metadata?.walletAddress
+      ?? obj.subscription_details?.metadata?.walletAddress;
+    const planId = parseInt(obj.metadata?.planId, 10);
+
+    if (walletAddress && planId) {
+      await fetch('${subUrl}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId, denom: 'udvpn', renewalPolicy: 0, walletAddress }),
+      });
+    }
+  }
+
+  res.json({ received: true });
+});`;
+
+    return `
+      <div class="fiat-detail">
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
+        <div class="fiat-detail-hero">
+          <div class="fiat-detail-marks">
+            <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.stripe}</span>
+          </div>
+          <div class="fiat-detail-eyebrow">Stripe · Visa · Mastercard · Amex</div>
+          <div class="fiat-detail-title">Cards via Stripe</div>
+          <div class="fiat-detail-desc">Accept every major card through Stripe — Visa, Mastercard, Amex, Discover, JCB, Diners. Stripe confirms the payment, your webhook calls Plan Manager, and the subscription lands on-chain in the same flow. The customer never sees a wallet, a seed phrase, or a gas fee.</div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">The flow</div>
+          <div class="fiat-detail-steps">
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">1</div><div class="fiat-detail-step-body"><strong>Checkout.</strong> At payment time, attach the user's Sentinel wallet to <code>metadata.walletAddress</code> on the Stripe Session or Invoice.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">2</div><div class="fiat-detail-step-body"><strong>Webhook.</strong> Listen for <code>checkout.session.completed</code> on one-time charges, <code>invoice.paid</code> on recurring.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">3</div><div class="fiat-detail-step-body"><strong>Verify.</strong> <code>stripe.webhooks.constructEvent</code> against the raw body and the <code>Stripe-Signature</code> header. Track <code>event.id</code> so retries never double-charge a subscription.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">4</div><div class="fiat-detail-step-body"><strong>Subscribe.</strong> POST to <code>/api/plan/subscribe</code>. Plan Manager signs the TX with your loaded wallet, covers gas, returns success.</div></div>
+          </div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Reference handler</div>
+          <div class="fiat-detail-section-sub">Node + Express. Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code>, register the URL in your Stripe dashboard, ship.</div>
+          ${codeBlock('Stripe webhook · Node.js', stripeCode)}
+          <div class="fiat-detail-callout">
+            <span class="fiat-detail-callout-icon">⚠️</span>
+            <div class="fiat-detail-callout-body"><strong><code>express.raw()</code> is required.</strong> If a JSON parser touches the body before <code>constructEvent</code>, the signature check will always fail.</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  if (tile === 'paypal') {
+    const paypalCode =
+`import express from 'express';
+const app = express();
+app.use(express.json());
+
+async function getPayPalAccessToken() {
+  const auth = Buffer.from(process.env.PAYPAL_CLIENT_ID + ':' + process.env.PAYPAL_SECRET).toString('base64');
+  const res = await fetch('https://api-m.paypal.com/v1/oauth2/token', {
+    method: 'POST',
+    headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials',
+  });
+  return (await res.json()).access_token;
+}
+
+app.post('/webhooks/paypal', async (req, res) => {
+  const token = await getPayPalAccessToken();
+  const v = await fetch('https://api-m.paypal.com/v1/notifications/verify-webhook-signature', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      auth_algo:         req.headers['paypal-auth-algo'],
+      cert_url:          req.headers['paypal-cert-url'],
+      transmission_id:   req.headers['paypal-transmission-id'],
+      transmission_sig:  req.headers['paypal-transmission-sig'],
+      transmission_time: req.headers['paypal-transmission-time'],
+      webhook_id:        process.env.PAYPAL_WEBHOOK_ID,
+      webhook_event:     req.body,
+    }),
+  });
+  if ((await v.json()).verification_status !== 'SUCCESS') return res.status(400).send('bad sig');
+
+  const { event_type, resource } = req.body;
+  if (event_type === 'PAYMENT.CAPTURE.COMPLETED' || event_type === 'BILLING.SUBSCRIPTION.ACTIVATED') {
+    const walletAddress = resource.custom_id;
+    if (walletAddress) {
+      await fetch('${subUrl}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: ${planId}, denom: 'udvpn', renewalPolicy: 0, walletAddress }),
+      });
+    }
+  }
+
+  res.json({ received: true });
+});`;
+
+    return `
+      <div class="fiat-detail">
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
+        <div class="fiat-detail-hero">
+          <div class="fiat-detail-marks">
+            <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.paypal}</span>
+          </div>
+          <div class="fiat-detail-eyebrow">Orders · Subscriptions API v2</div>
+          <div class="fiat-detail-title">Checkout via PayPal</div>
+          <div class="fiat-detail-desc">PayPal Orders for single payments, PayPal Subscriptions for recurring. PayPal handles capture, your webhook verifies signature, Plan Manager activates the subscription on-chain.</div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">The flow</div>
+          <div class="fiat-detail-steps">
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">1</div><div class="fiat-detail-step-body"><strong>Checkout.</strong> Attach the user's Sentinel wallet to <code>custom_id</code> when creating the Order or Subscription.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">2</div><div class="fiat-detail-step-body"><strong>Webhook.</strong> Listen for <code>PAYMENT.CAPTURE.COMPLETED</code> on one-time, <code>BILLING.SUBSCRIPTION.ACTIVATED</code> on recurring.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">3</div><div class="fiat-detail-step-body"><strong>Verify.</strong> POST the five <code>paypal-*</code> transmission headers + your webhook ID + the body to <code>/v1/notifications/verify-webhook-signature</code>. Only act on <code>verification_status === 'SUCCESS'</code>.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">4</div><div class="fiat-detail-step-body"><strong>Subscribe.</strong> POST to <code>/api/plan/subscribe</code> with the wallet from <code>resource.custom_id</code>.</div></div>
+          </div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Reference handler</div>
+          <div class="fiat-detail-section-sub">Node + Express. Set <code>PAYPAL_CLIENT_ID</code>, <code>PAYPAL_SECRET</code>, <code>PAYPAL_WEBHOOK_ID</code>. While testing, swap to <code>api-m.sandbox.paypal.com</code>.</div>
+          ${codeBlock('PayPal webhook · Node.js', paypalCode)}
+          <div class="fiat-detail-callout">
+            <span class="fiat-detail-callout-icon">💡</span>
+            <div class="fiat-detail-callout-body"><strong><code>custom_id</code> is a single string.</strong> Need wallet + plan together? Pack as <code>walletAddress|planId</code> and split, or key the plan off <code>resource.plan_id</code> in your own DB.</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  if (tile === 'crypto') {
+    const sub = S._fiatSubTab || 'btc';
+    const btcPayCode =
+`import crypto from 'crypto';
+import express from 'express';
+
+const app = express();
+app.use(express.raw({ type: 'application/json' }));
+
+const WEBHOOK_SECRET = process.env.BTCPAY_WEBHOOK_SECRET;
+
+app.post('/btcpay/webhook', async (req, res) => {
+  const sig = req.headers['btcpay-sig']?.replace('sha256=', '');
+  const expected = crypto.createHmac('sha256', WEBHOOK_SECRET)
+    .update(req.body).digest('hex');
+
+  if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) {
+    return res.sendStatus(401);
+  }
+
+  const event = JSON.parse(req.body);
+  if (event.type !== 'InvoiceSettled') return res.sendStatus(200);
+
+  const walletAddress = event.metadata?.walletAddress;
+  await fetch('${subUrl}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planId: ${planId}, denom: 'udvpn', renewalPolicy: 0, walletAddress }),
+  });
+
+  res.sendStatus(200);
+});`;
+
+    const mempoolCode =
+`import fetch from 'node-fetch';
+
+const MEMPOOL = 'https://mempool.space/api';
+const DEPOSIT_ADDR = process.env.BTC_DEPOSIT_ADDR;
+const EXPECTED_SAT = parseInt(process.env.EXPECTED_SAT, 10); // e.g. 500000
+const CONFIRMATIONS = 3;
+const POLL_MS = 30_000;
+
+async function poll() {
+  const tipHeight = await fetch(MEMPOOL + '/blocks/tip/height').then(r => r.json());
+  const txs = await fetch(MEMPOOL + '/address/' + DEPOSIT_ADDR + '/txs').then(r => r.json());
+
+  const settled = txs.find(tx => {
+    if (!tx.status.confirmed) return false;
+    const confs = tipHeight - tx.status.block_height + 1;
+    if (confs < CONFIRMATIONS) return false;
+    const got = tx.vout
+      .filter(o => o.scriptpubkey_address === DEPOSIT_ADDR)
+      .reduce((s, o) => s + o.value, 0);
+    return got >= EXPECTED_SAT;
+  });
+
+  if (settled) {
+    await fetch('${subUrl}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId: ${planId}, denom: 'udvpn', renewalPolicy: 0 }),
+    });
+    clearInterval(timer);
+  }
+}
+
+const timer = setInterval(poll, POLL_MS);
+poll();`;
+
+    const ethCode =
+`import { ethers } from 'ethers';
+
+const provider = new ethers.JsonRpcProvider(process.env.YOUR_RPC_URL);
+const DEPOSIT_ADDR = process.env.ETH_DEPOSIT_ADDR.toLowerCase();
+const CONFIRMATIONS = 3;
+
+const USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // mainnet USDC
+const USDC_ABI = ['event Transfer(address indexed from, address indexed to, uint256 value)'];
+const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider);
+
+async function subscribe() {
+  await fetch('${subUrl}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planId: ${planId}, denom: 'udvpn', renewalPolicy: 0 }),
+  });
+}
+
+// USDC ERC-20 deposits
+const filter = usdc.filters.Transfer(null, DEPOSIT_ADDR);
+usdc.on(filter, async (from, to, value, event) => {
+  const receipt = await event.getTransaction().then(tx => tx.wait(CONFIRMATIONS));
+  if (receipt?.status === 1) await subscribe();
+});
+
+// Native ETH deposits
+provider.on('block', async (blockNumber) => {
+  const block = await provider.getBlock(blockNumber, true);
+  for (const tx of block.prefetchedTransactions ?? []) {
+    if (tx.to?.toLowerCase() === DEPOSIT_ADDR && tx.value > 0n) {
+      const receipt = await tx.wait(CONFIRMATIONS);
+      if (receipt?.status === 1) await subscribe();
+    }
+  }
+});`;
+
+    const solCode =
+`import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+
+const connection = new Connection('https://api.mainnet-beta.solana.com', 'finalized');
+const OWNER = new PublicKey(process.env.SOL_DEPOSIT_ADDR);
+const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+const USDC_ATA = getAssociatedTokenAddressSync(USDC_MINT, OWNER);
+
+async function subscribe() {
+  await fetch('${subUrl}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planId: ${planId}, denom: 'udvpn', renewalPolicy: 0 }),
+  });
+}
+
+// Native SOL deposits
+connection.onAccountChange(OWNER, async (info, ctx) => {
+  await subscribe();
+});
+
+// USDC SPL token deposits
+connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
+  if (err || !logs.some(l => l.includes('Transfer'))) return;
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
+  const result = await connection.confirmTransaction(
+    { signature, blockhash, lastValidBlockHeight }, 'finalized',
+  );
+  if (!result.value.err) await subscribe();
+}, 'finalized');`;
+
+    const subBtn = (id, label) =>
+      `<button class="fiat-detail-subtab ${sub === id ? 'active' : ''}" onclick="setFiatSubTab('${id}')">${label}</button>`;
+
+    let body = '';
+    if (sub === 'btc') {
+      body = `
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Path A · BTCPay Server</div>
+          <div class="fiat-detail-section-sub">Self-hosted, no API keys, no third party. Create a store, register a webhook, listen for <code>InvoiceSettled</code>. BTCPay HMAC-signs every body with your secret in the <code>BTCPAY-SIG</code> header — verify before acting.</div>
+          ${codeBlock('BTCPay webhook · Node.js', btcPayCode)}
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Path B · mempool.space</div>
+          <div class="fiat-detail-section-sub">Zero infrastructure. Public REST. Poll a deposit address every 30s; fire once <code>vout</code> credits the address with the expected sats and the tx has cleared <code>CONFIRMATIONS</code> blocks.</div>
+          ${codeBlock('mempool.space poller · Node.js', mempoolCode)}
+          <div class="fiat-detail-callout">
+            <span class="fiat-detail-callout-icon">⏱</span>
+            <div class="fiat-detail-callout-body"><strong>Finality.</strong> 3 confirmations ≈ 30 min. Drop to 1 for low-value plans, raise to 6 for high-value.</div>
+          </div>
+        </div>`;
+    } else if (sub === 'eth') {
+      body = `
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">ETH or USDC, one listener</div>
+          <div class="fiat-detail-section-sub"><code>ethers</code> v6 against any public JSON-RPC (Alchemy, Infura, or <code>ethereum-rpc.publicnode.com</code>). For USDC, filter the <code>Transfer</code> event on the contract by your deposit address. For native ETH, walk every new block. <code>tx.wait(N)</code> blocks until <code>N</code> confirmations land before triggering Plan Manager.</div>
+          ${codeBlock('ethers v6 · Node.js', ethCode)}
+          <div class="fiat-detail-callout">
+            <span class="fiat-detail-callout-icon">⏱</span>
+            <div class="fiat-detail-callout-body"><strong>Finality.</strong> 3 confirmations ≈ 36 sec. USDC mainnet contract: <code>0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48</code>.</div>
+          </div>
+        </div>`;
+    } else if (sub === 'sol') {
+      body = `
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">SOL or USDC, finalized commitment</div>
+          <div class="fiat-detail-section-sub"><code>@solana/web3.js</code> v1 against <code>api.mainnet-beta.solana.com</code> at <code>'finalized'</code> — 31 slots, supermajority vote, the strongest guarantee Solana offers. <code>onAccountChange</code> fires on every lamport delta. For USDC, derive the associated token account via <code>@solana/spl-token</code> and watch its logs.</div>
+          ${codeBlock('@solana/web3.js · Node.js', solCode)}
+          <div class="fiat-detail-callout">
+            <span class="fiat-detail-callout-icon">⏱</span>
+            <div class="fiat-detail-callout-body"><strong>Finality.</strong> <code>'finalized'</code> commitment ≈ 13 sec. USDC mainnet mint: <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code>.</div>
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="fiat-detail">
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
+        <div class="fiat-detail-hero">
+          <div class="fiat-detail-marks">
+            <span class="fiat-rail-mark">${RAIL_LOGOS.btc}</span>
+            <span class="fiat-rail-mark">${RAIL_LOGOS.eth}</span>
+            <span class="fiat-rail-mark">${RAIL_LOGOS.sol}</span>
+          </div>
+          <div class="fiat-detail-eyebrow">Bitcoin · Ethereum · Solana</div>
+          <div class="fiat-detail-title">Digital Currencies</div>
+          <div class="fiat-detail-desc">Accept payment on each chain, native. Listen for the deposit, wait for finality, fire one POST to subscribe on Sentinel. No swaps. No bridges. No custodial hops.</div>
+        </div>
+
+        <div class="fiat-detail-subtabs">
+          ${subBtn('btc', '₿ Bitcoin')}
+          ${subBtn('eth', 'Ξ Ethereum')}
+          ${subBtn('sol', '◎ Solana')}
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  if (tile === 'free') {
+    // Free tile is NOT about payments — it's about adding subscribers directly.
+    // Re-uses the existing authorizeUser() / authorizeBulk() handlers which
+    // operate on freeAuthAddr / freeAuthBulk inputs. Bulk-count listener is
+    // re-attached after render via setTimeout below.
+    setTimeout(() => {
+      const bulkEl = document.getElementById('freeAuthBulk');
+      if (bulkEl && !bulkEl._wired) {
+        bulkEl._wired = true;
+        bulkEl.addEventListener('input', () => {
+          const lines = bulkEl.value.trim().split('\n').filter(l => l.trim().startsWith('sent'));
+          const ct = document.getElementById('freeAuthBulkCount');
+          if (ct) ct.textContent = lines.length + ' address' + (lines.length !== 1 ? 'es' : '');
+        });
+      }
+      S._freeAuthLang = S._freeAuthLang || 'curl';
+      renderFreeAuthSnippet();
+    }, 0);
+
+    return `
+      <div class="fiat-detail">
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
+        <div class="fiat-detail-hero">
+          <div class="fiat-detail-marks">
+            <span class="fiat-rail-mark">${RAIL_LOGOS.free}</span>
+          </div>
+          <div class="fiat-detail-eyebrow">Direct subscriber authorization</div>
+          <div class="fiat-detail-title">Free Access</div>
+          <div class="fiat-detail-desc">No payment. No webhook. No API. Paste a Sentinel wallet, hit Authorize, the subscription lands on-chain. You cover the plan cost and the network fees so the user connects with zero balance.</div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Add a subscriber</div>
+          <div class="fiat-detail-section-sub">One wallet at a time. Keep <strong>+ Fee Grant</strong> on so the user has gas for their first session — without it, they need to fund the wallet themselves before connecting.</div>
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+            <div style="flex:1;min-width:300px">
+              <label style="font-family:var(--font-display);font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:6px">Wallet Address</label>
+              <input type="text" id="freeAuthAddr" placeholder="sent1..." style="width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:var(--font-mono);outline:none;transition:border-color .15s ease" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+            </div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-family:var(--font-display);font-size:13px;color:var(--text-dim)">
+                <input type="checkbox" id="freeAuthGrant" checked style="accent-color:var(--accent);width:16px;height:16px">
+                <span>+ Fee Grant</span>
+              </label>
+              <button class="btn btn-primary" onclick="authorizeUser()" id="freeAuthBtn" style="padding:11px 22px;font-family:var(--font-display);font-weight:600">Authorize</button>
+            </div>
+          </div>
+          <div id="freeAuthStatus" style="min-height:18px;margin-top:10px;font-size:12px;font-family:var(--font-display)"></div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Bulk add</div>
+          <div class="fiat-detail-section-sub">One address per line. Paste an export from your CRM, support tool, or referral DB. Plan Manager queues each subscribe TX so they broadcast cleanly without a sequence collision.</div>
+          <textarea id="freeAuthBulk" placeholder="sent1abc...&#10;sent1def...&#10;sent1ghi..." style="width:100%;min-height:120px;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:12.5px;font-family:var(--font-mono);outline:none;resize:vertical;line-height:1.6" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+            <span id="freeAuthBulkCount" style="font-family:var(--font-display);font-size:12px;color:var(--text-muted);font-weight:500">0 addresses</span>
+            <button class="btn btn-primary" onclick="authorizeBulk()" id="freeAuthBulkBtn" style="padding:9px 20px;font-family:var(--font-display);font-weight:600;font-size:12.5px">Authorize All</button>
+          </div>
+          <div id="freeAuthBulkStatus" style="min-height:18px;margin-top:10px;font-size:12px;font-family:var(--font-display)"></div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">Authorize from your backend</div>
+          <div class="fiat-detail-section-sub">Drop this into the handler that fires when a user finishes your trigger — watched an ad, completed signup, hit a referral milestone, redeemed a code. One POST adds their public key on-chain so they can connect with zero balance.</div>
+          <div class="trig-endpoint-row" style="margin-top:14px">
+            <span class="trig-method">POST</span>
+            <code class="trig-endpoint" onclick="copyToClipboard('${origin}/api/feegrant/grant', this)" title="Click to copy">${origin}/api/feegrant/grant</code>
+          </div>
+          <div class="trig-lang-tabs" role="tablist" style="margin-top:14px">
+            <button class="trig-lang-tab ${(S._freeAuthLang || 'curl') === 'curl' ? 'active' : ''}" data-lang="curl" onclick="setFreeAuthLang('curl')">curl</button>
+            <button class="trig-lang-tab ${S._freeAuthLang === 'node' ? 'active' : ''}" data-lang="node" onclick="setFreeAuthLang('node')">Node.js</button>
+            <button class="trig-lang-tab ${S._freeAuthLang === 'python' ? 'active' : ''}" data-lang="python" onclick="setFreeAuthLang('python')">Python</button>
+            <button class="trig-snippet-copy" onclick="copyFreeAuthSnippet(this)" title="Copy snippet">📋 Copy</button>
+          </div>
+          <pre class="trig-code" id="freeAuthSnippet"></pre>
+          <div class="fiat-detail-callout" style="margin-top:14px">
+            <span class="fiat-detail-callout-icon">🔑</span>
+            <div class="fiat-detail-callout-body"><strong>What this does.</strong> Issues a <code>MsgGrantAllowance</code> from your operator wallet to the user's public key. <code>spendLimitDvpn</code> caps how much P2P your wallet will pay in network fees on their behalf. <code>expirationDays</code> auto-revokes the grant — re-call after each trigger to extend it.</div>
+          </div>
+        </div>
+
+        <div class="fiat-detail-section">
+          <div class="fiat-detail-section-title">What lands on chain</div>
+          <div class="fiat-detail-steps">
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">1</div><div class="fiat-detail-step-body"><strong>Trigger fires.</strong> Your backend sees the ad-watch callback, signup webhook, referral event, or whatever gate you set.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">2</div><div class="fiat-detail-step-body"><strong>POST to <code>/api/feegrant/grant</code>.</strong> Plan Manager broadcasts a <code>MsgGrantAllowance</code> from your operator wallet to the user's public key.</div></div>
+            <div class="fiat-detail-step"><div class="fiat-detail-step-num">3</div><div class="fiat-detail-step-body"><strong>User connects.</strong> Their wallet uses your fee grant for gas, the on-chain allowance pays their session fees, and they connect without holding a token.</div></div>
+          </div>
+          <div class="fiat-detail-callout">
+            <span class="fiat-detail-callout-icon">💡</span>
+            <div class="fiat-detail-callout-body"><strong>Tip.</strong> Pair this with the <strong>Fee Grants</strong> page Auto-Add toggle so every authorized user automatically receives a fresh fee grant on each page load.</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  return '';
+}
+
 function setTriggerTab(tab) {
   S._triggerTab = tab;
   const payBtn = $('trigTabPayment');
@@ -5039,54 +6951,124 @@ function setTriggerTab(tab) {
   }
 
   if (tab === 'payment') {
+    const origin = window.location.origin;
+    const planId = S.mgrPlanId || 42;
     content.innerHTML = `
       <div class="card-body">
-        <div style="margin-bottom:16px">
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">Connect your payment system to subscribe users automatically</div>
-          <div style="font-size:12px;color:var(--text-dim);line-height:1.6">
-            When a user completes payment through your checkout (Stripe, PayPal, or any gateway),
-            your backend calls this endpoint to subscribe them. You cover all network fees — the user never has to hold a token.
+        <div class="trig-intro">
+          <div class="trig-intro-title">Webhook → on-chain subscription</div>
+          <div class="trig-intro-sub">
+            When your checkout (Stripe, PayPal, BTCPay, anything) confirms payment, your backend hits the
+            endpoint below. Plan Manager broadcasts the on-chain subscribe TX with your wallet — so the
+            paying user never needs P2P, never signs anything, never sees the chain.
           </div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
-          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">API Endpoint</div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-            <span style="background:var(--accent);color:#fff;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600">POST</span>
-            <code class="copyable" onclick="copyToClipboard('http://localhost:3003/api/subscribe-user', this)" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);cursor:pointer;flex:1">http://localhost:3003/api/subscribe-user</code>
+
+        <div class="trig-grid">
+          <div class="trig-builder">
+            <div class="trig-builder-head">
+              <span class="trig-builder-step">1</span>
+              <div class="trig-builder-title">Build the request</div>
+            </div>
+            <div class="trig-field">
+              <label>Plan ID <span class="trig-field-hint">(immutable, set at create)</span></label>
+              <input type="number" id="trigPlanId" value="${planId}" oninput="renderTrigSnippet()">
+            </div>
+            <div class="trig-field">
+              <label>Denom <span class="trig-field-hint">(payment denom — must match plan)</span></label>
+              <select id="trigDenom" onchange="renderTrigSnippet()">
+                <option value="udvpn" selected>udvpn (P2P)</option>
+                <option value="uatom">uatom (ATOM via IBC)</option>
+                <option value="uosmo">uosmo (OSMO via IBC)</option>
+              </select>
+            </div>
+            <div class="trig-field">
+              <label>Renewal Policy</label>
+              <select id="trigRenewal" onchange="renderTrigSnippet()">
+                <option value="0" selected>0 — Unspecified (default)</option>
+                <option value="1">1 — Pay (auto-charge on renewal)</option>
+                <option value="2">2 — Charge (renew at current price)</option>
+              </select>
+            </div>
+            <div class="trig-field-row">
+              <label class="trig-check">
+                <input type="checkbox" id="trigGrantFee" checked onchange="renderTrigSnippet()">
+                <span>Issue fee grant after subscribe</span>
+              </label>
+              <div class="trig-field" style="flex:1;margin-bottom:0">
+                <label>Spend limit (P2P)</label>
+                <input type="number" id="trigSpendLimit" value="10" min="0" step="1" oninput="renderTrigSnippet()">
+              </div>
+            </div>
+            <button class="btn btn-primary trig-test-btn" onclick="runTrigTest()" id="trigTestBtn">
+              <span class="trig-test-btn-icon">▶</span> Test Trigger Now
+            </button>
+            <div class="trig-test-note">
+              Calls <code>${origin}/api/plan/subscribe</code> with your loaded wallet. Use this to verify your
+              plan + denom are valid before wiring it into your webhook.
+            </div>
+            <div id="trigTestResult" class="trig-test-result" style="display:none"></div>
           </div>
-          <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Request Body</div>
-          <pre style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);overflow-x:auto;margin:0">{
-  "userAddress": "sent1...",    // Subscriber's wallet address
-  "planId": ${S.mgrPlanId || 42},              // Your plan ID
-  "grantFee": true,             // Also issue fee grant (optional)
-  "spendLimitP2p": 10           // Fee grant spend limit (optional)
-}</pre>
+
+          <div class="trig-snippet">
+            <div class="trig-builder-head">
+              <span class="trig-builder-step">2</span>
+              <div class="trig-builder-title">Drop into your webhook</div>
+            </div>
+            <div class="trig-endpoint-row">
+              <span class="trig-method">POST</span>
+              <code class="trig-endpoint" onclick="copyToClipboard('${origin}/api/plan/subscribe', this)" title="Click to copy">${origin}/api/plan/subscribe</code>
+            </div>
+            <div class="trig-lang-tabs" role="tablist">
+              <button class="trig-lang-tab active" data-lang="curl" onclick="setTrigLang('curl')">curl</button>
+              <button class="trig-lang-tab" data-lang="node" onclick="setTrigLang('node')">Node.js</button>
+              <button class="trig-lang-tab" data-lang="python" onclick="setTrigLang('python')">Python</button>
+              <button class="trig-snippet-copy" onclick="copyTrigSnippet(this)" title="Copy snippet">📋 Copy</button>
+            </div>
+            <pre class="trig-code" id="trigSnippet"></pre>
+          </div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
-          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Integration Flow</div>
-          <div style="display:flex;flex-direction:column;gap:10px">
-            <div style="display:flex;align-items:flex-start;gap:10px">
-              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span>
-              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">User pays</strong> via your website/app (Stripe checkout, crypto payment, etc.)</div>
+
+        <div class="trig-flow">
+          <div class="trig-flow-title">How it fits in your stack</div>
+          <div class="trig-flow-steps">
+            <div class="trig-flow-step">
+              <div class="trig-flow-num">1</div>
+              <div class="trig-flow-label">User pays</div>
+              <div class="trig-flow-desc">Stripe / PayPal / BTCPay / your checkout</div>
             </div>
-            <div style="display:flex;align-items:flex-start;gap:10px">
-              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span>
-              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">Your webhook</strong> receives payment confirmation with user's <code style="color:var(--accent)">sent1...</code> address</div>
+            <div class="trig-flow-arrow">→</div>
+            <div class="trig-flow-step">
+              <div class="trig-flow-num">2</div>
+              <div class="trig-flow-label">Your webhook fires</div>
+              <div class="trig-flow-desc">Verify the payment signature</div>
             </div>
-            <div style="display:flex;align-items:flex-start;gap:10px">
-              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span>
-              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">POST to this API</strong> — Plan Manager subscribes the user and covers the network fee for you</div>
+            <div class="trig-flow-arrow">→</div>
+            <div class="trig-flow-step">
+              <div class="trig-flow-num">3</div>
+              <div class="trig-flow-label">POST to Plan Manager</div>
+              <div class="trig-flow-desc">Your server → this endpoint</div>
             </div>
-            <div style="display:flex;align-items:flex-start;gap:10px">
-              <span style="background:#10b981;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">4</span>
-              <div style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">User is subscribed</strong> and ready to connect — fees are already covered if you enabled it.</div>
+            <div class="trig-flow-arrow">→</div>
+            <div class="trig-flow-step trig-flow-step-success">
+              <div class="trig-flow-num">✓</div>
+              <div class="trig-flow-label">User subscribed</div>
+              <div class="trig-flow-desc">Connects with zero balance</div>
             </div>
           </div>
         </div>
-        <div style="background:rgba(217,119,6,0.06);border:1px solid rgba(217,119,6,0.15);border-radius:8px;padding:12px;font-size:12px;color:var(--yellow)">
-          <strong>Security:</strong> This endpoint should only be accessible from your backend. Add API key authentication before exposing to the internet.
+
+        <div class="trig-security">
+          <span class="trig-security-icon">🔐</span>
+          <div>
+            <strong>Bind this endpoint to your backend only.</strong> Plan Manager signs every TX with the
+            wallet you loaded — leaking the URL externally lets anyone burn your fees. Front it with an API
+            key, an internal-only host, or a private network.
+          </div>
         </div>
       </div>`;
+    // Initial snippet paint after the DOM exists.
+    setTimeout(() => { S._trigLang = S._trigLang || 'curl'; renderTrigSnippet(); }, 0);
   } else {
     content.innerHTML = `
       <div class="card-body">
@@ -5154,6 +7136,170 @@ function setTriggerTab(tab) {
         if (ct) ct.textContent = lines.length + ' address' + (lines.length !== 1 ? 'es' : '');
       });
     }
+  }
+}
+
+// ─── Trigger snippet builder + live test ──────────────────────────────────────
+function _trigInputs() {
+  const planId = parseInt($('trigPlanId')?.value || '0') || 0;
+  const denom = $('trigDenom')?.value || 'udvpn';
+  const renewal = parseInt($('trigRenewal')?.value || '0') || 0;
+  const grantFee = !!$('trigGrantFee')?.checked;
+  const spendLimit = parseInt($('trigSpendLimit')?.value || '0') || 0;
+  return { planId, denom, renewal, grantFee, spendLimit };
+}
+
+function setTrigLang(lang) {
+  S._trigLang = lang;
+  document.querySelectorAll('.trig-lang-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+  renderTrigSnippet();
+}
+
+function renderTrigSnippet() {
+  const el = $('trigSnippet');
+  if (!el) return;
+  const lang = S._trigLang || 'curl';
+  const { planId, denom, renewal } = _trigInputs();
+  const url = window.location.origin + '/api/plan/subscribe';
+  const body = { planId, denom, renewalPolicy: renewal };
+  let snippet = '';
+  if (lang === 'curl') {
+    snippet = 'curl -X POST ' + url + ' \\\n  -H "Content-Type: application/json" \\\n  -d \'' + JSON.stringify(body) + '\'';
+  } else if (lang === 'node') {
+    snippet =
+      'await fetch("' + url + '", {\n' +
+      '  method: "POST",\n' +
+      '  headers: { "Content-Type": "application/json" },\n' +
+      '  body: JSON.stringify(' + JSON.stringify(body, null, 2).replace(/\n/g, '\n  ') + ')\n' +
+      '});';
+  } else if (lang === 'python') {
+    snippet =
+      'import requests\n' +
+      'requests.post(\n' +
+      '  "' + url + '",\n' +
+      '  json=' + JSON.stringify(body) + '\n' +
+      ')';
+  }
+  el.textContent = snippet;
+}
+
+async function copyTrigSnippet(btn) {
+  const el = $('trigSnippet');
+  if (!el) return;
+  await copyToClipboard(el.textContent, btn);
+}
+
+function setFreeAuthLang(lang) {
+  S._freeAuthLang = lang;
+  document.querySelectorAll('#freeAuthSnippet').forEach(() => {});
+  document.querySelectorAll('.trig-lang-tab').forEach(b => {
+    if (b.getAttribute('onclick')?.includes('setFreeAuthLang')) {
+      b.classList.toggle('active', b.dataset.lang === lang);
+    }
+  });
+  renderFreeAuthSnippet();
+}
+
+function renderFreeAuthSnippet() {
+  const el = $('freeAuthSnippet');
+  if (!el) return;
+  const lang = S._freeAuthLang || 'curl';
+  const url = window.location.origin + '/api/feegrant/grant';
+  const body = { grantee: 'sent1abc...userPublicKey', spendLimitDvpn: 10, expirationDays: 30 };
+  let snippet = '';
+  if (lang === 'curl') {
+    snippet =
+      '# Fire after the user fulfills your trigger (ad watched, signup,\n' +
+      '# referral milestone, code redeemed, etc.)\n' +
+      'curl -X POST ' + url + ' \\\n' +
+      '  -H "Content-Type: application/json" \\\n' +
+      '  -d \'' + JSON.stringify(body) + '\'';
+  } else if (lang === 'node') {
+    snippet =
+      '// Call this from your backend after the user fulfills your trigger.\n' +
+      '// Example: inside your /api/ad-watched or /api/signup-completed handler.\n' +
+      'async function authorizeUser(userPublicKey) {\n' +
+      '  const r = await fetch("' + url + '", {\n' +
+      '    method: "POST",\n' +
+      '    headers: { "Content-Type": "application/json" },\n' +
+      '    body: JSON.stringify({\n' +
+      '      grantee: userPublicKey,    // sent1... address from your DB\n' +
+      '      spendLimitDvpn: 10,        // P2P cap your wallet will cover\n' +
+      '      expirationDays: 30,        // auto-revoke; re-call to extend\n' +
+      '    }),\n' +
+      '  });\n' +
+      '  if (!r.ok) throw new Error("authorize failed: " + r.status);\n' +
+      '  return r.json(); // { ok: true, txHash: "..." }\n' +
+      '}';
+  } else if (lang === 'python') {
+    snippet =
+      '# Call this from your backend after the user fulfills your trigger.\n' +
+      '# Example: inside your /api/ad-watched or /api/signup-completed handler.\n' +
+      'import requests\n' +
+      '\n' +
+      'def authorize_user(user_public_key: str):\n' +
+      '    r = requests.post(\n' +
+      '        "' + url + '",\n' +
+      '        json={\n' +
+      '            "grantee": user_public_key,   # sent1... address from your DB\n' +
+      '            "spendLimitDvpn": 10,         # P2P cap your wallet will cover\n' +
+      '            "expirationDays": 30,         # auto-revoke; re-call to extend\n' +
+      '        },\n' +
+      '        timeout=30,\n' +
+      '    )\n' +
+      '    r.raise_for_status()\n' +
+      '    return r.json()  # { "ok": True, "txHash": "..." }';
+  }
+  el.textContent = snippet;
+}
+
+async function copyFreeAuthSnippet(btn) {
+  const el = $('freeAuthSnippet');
+  if (!el) return;
+  await copyToClipboard(el.textContent, btn);
+}
+
+async function runTrigTest() {
+  const btn = $('trigTestBtn');
+  const out = $('trigTestResult');
+  if (!btn || !out) return;
+  const { planId, denom, renewal } = _trigInputs();
+  if (!planId) {
+    out.style.display = 'block';
+    out.className = 'trig-test-result trig-test-result-err';
+    out.innerHTML = '<strong>Plan ID required.</strong> Pick a plan from the picker above or type one in.';
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="trig-test-btn-icon">⏳</span> Broadcasting…';
+  out.style.display = 'block';
+  out.className = 'trig-test-result trig-test-result-pending';
+  out.innerHTML = '<strong>Broadcasting subscribe TX…</strong> Signing with your loaded wallet.';
+  try {
+    const r = await fetch('/api/plan/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId, denom, renewalPolicy: renewal }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && (j.ok || j.txHash)) {
+      out.className = 'trig-test-result trig-test-result-ok';
+      const subId = j.subscriptionId ? '<div>Subscription ID: <code>' + escapeHtml(String(j.subscriptionId)) + '</code></div>' : '';
+      const tx = j.txHash ? '<div>tx: <code>' + escapeHtml(j.txHash) + '</code></div>' : '';
+      out.innerHTML = '<strong>✓ Subscribe TX broadcast.</strong>' + subId + tx;
+    } else {
+      out.className = 'trig-test-result trig-test-result-err';
+      const errMsg = j.error || j.rawLog || ('HTTP ' + r.status);
+      out.innerHTML = '<strong>✗ Trigger failed.</strong><div>' + escapeHtml(errMsg) + '</div>';
+    }
+  } catch (e) {
+    out.className = 'trig-test-result trig-test-result-err';
+    out.innerHTML = '<strong>✗ Network error.</strong><div>' + escapeHtml(e.message || String(e)) + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="trig-test-btn-icon">▶</span> Test Trigger Now';
   }
 }
 
@@ -5244,16 +7390,23 @@ async function renderPricing() {
   const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadPricing()");
   const heroHtml = `
     <div class="page-hero">
-      <div class="page-hero-eyebrow">Plan Manager · Pricing</div>
-      <div class="page-hero-title">Plan pricing</div>
-      <div class="page-hero-sub">Review the price of every plan you own. Prices are set when the plan is created and cannot be edited afterwards — if you want a different price, publish a new plan.</div>
+      <div class="page-hero-eyebrow">Plan Manager · Payment</div>
+      <div class="page-hero-title">Payment</div>
+      <div class="page-hero-sub">Settle on-chain in IBC tokens, or take any other rail and trigger the subscription via API.</div>
     </div>`;
 
   if (!S.mgrPlanId) {
-    $('app').innerHTML = `<div class="page">${heroHtml}${planPicker}
+    // No plan selected yet — show the picker only when we already have plan
+    // data on hand. While plans are still loading, render the page hero
+    // alone so the user isn't greeted with a "Loading your plans..." spinner
+    // on initial entry.
+    const showPicker = !S.myPlansLoading && plans.length > 0;
+    $('app').innerHTML = `<div class="page">${heroHtml}${showPicker ? planPicker : ''}
       ${plans.length === 0 && !S.myPlansLoading
         ? '<div class="empty-state"><div>No plans found. <a href="/create" data-page="create" style="color:var(--accent)">Create one first</a>.</div></div>'
-        : '<div class="empty-state" style="padding:30px"><div style="color:var(--text-dim)">Select a plan above to view pricing</div></div>'}
+        : showPicker
+          ? '<div class="empty-state" style="padding:30px"><div style="color:var(--text-dim)">Select a plan above to view pricing</div></div>'
+          : ''}
     </div>`;
     return;
   }
@@ -5269,7 +7422,7 @@ async function renderPricing() {
   if (!planCached || !paramsCached) {
     const appEmpty = !$('app').firstElementChild;
     if (appEmpty) {
-      $('app').innerHTML = `<div class="page">${heroHtml}${planPicker}
+      $('app').innerHTML = `<div class="page">${heroHtml}
         <div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading plan details...</div></div>
       </div>`;
     }
@@ -5299,97 +7452,214 @@ async function renderPricing() {
     for (const p of (nodeParams.min_gigabyte_prices || [])) denomSet.add(p.denom);
     const acceptedDenoms = [...denomSet];
 
-    // Plan pricing card
-    const pricingHtml = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Plan #${S.mgrPlanId} — On-Chain Pricing</div>
-            <span class="badge ${currentPlan?.activeSubs > 0 ? 'badge-green' : 'badge-dim'}">${currentPlan?.activeSubs > 0 ? 'Active' : 'No active subs'}</span>
+    // Brand-mark logos for the rail cards. ATOM/OSMO are the official chain
+    // registry SVGs; the P2P slot uses the Sentinel shield-only mark
+    // (no wordmark) — same blue shield used across the brand.
+    const RAIL_LOGOS = {
+      atom: `<img src="/chain-logos/atom.svg" alt="ATOM" class="rail-img-mark">`,
+      p2p: `<img src="/sentinel-shield.png" alt="Sentinel" class="rail-img-mark rail-img-mark-sentinel">`,
+      osmo: `<img src="/chain-logos/osmo.svg" alt="OSMO" class="rail-img-mark">`,
+      visa: '<svg viewBox="0 0 78 26" width="78" height="26" aria-label="Visa" class="logo-visa"><text x="39" y="21" text-anchor="middle" font-family="Arial Black,Helvetica,sans-serif" font-style="italic" font-weight="900" font-size="22" letter-spacing="1" fill="currentColor">VISA</text><path d="M22 23 L25 23 L23.5 19 Z" fill="#f7b600"/></svg>',
+      mc: '<svg viewBox="0 0 64 40" width="60" height="38" aria-label="Mastercard"><circle cx="24" cy="20" r="13" fill="#eb001b"/><circle cx="40" cy="20" r="13" fill="#f79e1b"/><path d="M32 10.5a13 13 0 0 1 0 19 13 13 0 0 1 0-19z" fill="#ff5f00"/></svg>',
+      paypal: '<span class="logo-paypal" style="font-family:Arial,Helvetica,sans-serif;font-style:italic;font-weight:800;font-size:22px;letter-spacing:-0.3px"><span class="logo-paypal-pay">Pay</span><span class="logo-paypal-pal">Pal</span></span>',
+      btc: '<svg viewBox="0 0 4091.27 4091.73" width="48" height="48" aria-label="Bitcoin"><path fill="#F7931A" d="M4030.06 2540.77c-273.24 1096.01-1383.32 1763.02-2479.46 1489.71C455.15 3757.21-211.99 2647.08 61.35 1551.14 334.5 455.11 1444.58-211.99 2540.45 61.27c1096.06 273.24 1763.16 1383.51 1489.61 2479.5z"/><path fill="#FFF" d="M2947.77 1754.38c40.72-272.26-166.56-418.61-450-516.24l91.95-368.8-224.5-55.94-89.51 359.09c-59.02-14.72-119.63-28.59-179.87-42.34l90.16-361.46-224.36-55.94-92 368.68c-48.84-11.12-96.81-22.11-143.35-33.69l.26-1.16-309.59-77.31-59.72 239.78s166.56 38.18 163.05 40.53c90.91 22.69 107.35 82.87 104.62 130.57l-104.74 420.15c6.26 1.59 14.38 3.89 23.34 7.49-7.49-1.86-15.46-3.89-23.73-5.87l-146.81 588.57c-11.11 27.62-39.31 69.07-102.87 53.33 2.25 3.26-163.17-40.72-163.17-40.72l-111.46 256.98 292.15 72.83c54.35 13.63 107.61 27.89 160.06 41.3l-92.9 373.03 224.24 55.94 92-369.07c61.26 16.63 120.71 31.97 178.91 46.43l-91.69 367.33 224.51 55.94 92.89-372.33c382.82 72.45 670.67 43.24 791.83-303.02 97.63-278.78-4.86-439.58-206.26-544.44 146.69-33.83 257.18-130.31 286.64-329.61zm-512.93 719.26c-69.36 278.78-538.76 128.08-690.94 90.29l123.28-494.2c152.17 37.99 640.17 113.17 567.67 403.91zm69.41-723.3c-63.29 253.58-453.96 124.75-580.69 93.16l111.77-448.21c126.73 31.59 534.85 90.55 468.94 355.05z"/></svg>',
+      eth: '<svg viewBox="0 0 256 417" width="32" height="48" aria-label="Ethereum" preserveAspectRatio="xMidYMid"><path fill="#343434" d="M127.961 0l-2.795 9.5v275.668l2.795 2.79 127.962-75.638z"/><path fill="#8C8C8C" d="M127.962 0L0 212.32l127.962 75.639V154.158z"/><path fill="#3C3C3B" d="M127.961 312.187l-1.575 1.92v98.199l1.575 4.6L256 236.587z"/><path fill="#8C8C8C" d="M127.962 416.905v-104.72L0 236.585z"/><path fill="#141414" d="M127.961 287.958l127.96-75.637-127.96-58.162z"/><path fill="#393939" d="M0 212.32l127.96 75.638v-133.8z"/></svg>',
+      sol: '<svg viewBox="0 0 397.7 311.7" width="50" height="40" aria-label="Solana"><defs><linearGradient id="solg-bot" x1="360.879" y1="351.455" x2="141.213" y2="-69.294" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1 0 0 -1 0 314)"><stop offset="0" stop-color="#00ffa3"/><stop offset="1" stop-color="#dc1fff"/></linearGradient><linearGradient id="solg-mid" x1="264.829" y1="401.601" x2="45.163" y2="-19.148" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1 0 0 -1 0 314)"><stop offset="0" stop-color="#00ffa3"/><stop offset="1" stop-color="#dc1fff"/></linearGradient><linearGradient id="solg-top" x1="312.548" y1="376.688" x2="92.882" y2="-44.061" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1 0 0 -1 0 314)"><stop offset="0" stop-color="#00ffa3"/><stop offset="1" stop-color="#dc1fff"/></linearGradient></defs><path fill="url(#solg-bot)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z"/><path fill="url(#solg-mid)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z"/><path fill="url(#solg-top)" d="M333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.6z"/></svg>',
+      doge: '<svg viewBox="0 0 64 64" width="48" height="48" aria-label="Dogecoin"><circle cx="32" cy="32" r="32" fill="#c2a633"/><path d="M22 18 H33 c8 0 14 5 14 14 s-6 14 -14 14 H22 V35 H18 V29 H22 Z M28 24 V29 H35 V35 H28 V40 H33 c5 0 8 -3 8 -8 s-3 -8 -8 -8 Z" fill="#fff"/></svg>',
+      free: '<svg viewBox="0 0 32 32" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3l11 4v8c0 7-4.5 12-11 14C9.5 27 5 22 5 15V7l11-4z" fill="rgba(30,136,229,0.12)"/><path d="M16 3l11 4v8c0 7-4.5 12-11 14C9.5 27 5 22 5 15V7l11-4z"/><path d="M11 16l3.5 3.5L21 13"/></svg>',
+      stripe: '<svg viewBox="0 0 60 25" width="64" height="26" aria-label="Stripe"><path fill="#635BFF" d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.04 1.26-.06 1.48zm-5.92-5.62c-1.03 0-2.17.73-2.17 2.58h4.25c0-1.85-1.07-2.58-2.08-2.58zM40.95 20.3c-1.44 0-2.32-.6-2.9-1.04l-.02 4.63-4.12.87V5.57h3.76l.08 1.02a4.7 4.7 0 0 1 3.23-1.29c2.9 0 5.62 2.6 5.62 7.4 0 5.23-2.7 7.6-5.65 7.6zM40 9.04c-.95 0-1.54.34-1.97.81l.02 6.12c.4.44.98.78 1.95.78 1.52 0 2.54-1.65 2.54-3.87 0-2.16-1.04-3.84-2.54-3.84zM28.24 5.57h4.13v14.44h-4.13V5.57zm0-4.7L32.37 0v3.36l-4.13.88V.88zm-4.32 9.35v9.79H19.8V5.57h3.7l.12 1.22c1-1.77 3.07-1.41 3.62-1.22v3.79c-.52-.17-2.29-.43-3.32.86zm-8.55 4.72c0 2.43 2.6 1.68 3.12 1.46v3.36c-.55.3-1.54.54-2.89.54a4.15 4.15 0 0 1-4.27-4.24l.01-13.17 4.02-.86v3.54h3.14V9.1h-3.13v5.85zm-4.91.7c0 2.97-2.31 4.66-5.73 4.66a11.2 11.2 0 0 1-4.46-.93v-3.93c1.38.75 3.1 1.31 4.46 1.31.92 0 1.58-.24 1.58-1C6.31 13.83 0 14.84 0 10.2 0 7.29 2.27 5.55 5.61 5.55c1.36 0 2.72.2 4.09.75v3.88a9.23 9.23 0 0 0-4.1-1.06c-.86 0-1.4.25-1.4.9 0 1.85 6.35.97 6.35 5.62z"/></svg>',
+    };
+
+    // Rail picker: two large landing cards. Once the operator clicks one,
+    // the page enters focus mode (single hero + toggle switch).
+    const railTab = S._railTab || null;
+
+    const onchainEyebrow = 'IBC-Compatible Token Payment';
+    const onchainTitle = 'On-Chain Payments';
+    const onchainDesc = 'Native settlement on Sentinel. Subscribers pay directly in IBC tokens — ATOM, P2P/DVPN, OSMO and any other denom the chain accepts. No middleman, no chargebacks, instant on-chain finality.';
+    const fiatEyebrow = 'Card · PayPal · BTC · Free VPN';
+    const fiatTitle = 'Fiat Payment Rails & Non-IBC Token Payments';
+    const fiatDesc = 'Take payment off-chain through any processor — Stripe, PayPal, BTCPay, or even ad-supported free access — then trigger the subscription on-chain with one API call. You cover network fees so subscribers never need to hold a token.';
+
+    const onchainMarksHtml = `
+      <span class="rail-card-mark" title="Cosmos Hub (ATOM)">${RAIL_LOGOS.atom}</span>
+      <span class="rail-card-mark rail-card-mark-light" title="Sentinel P2P / DVPN">${RAIL_LOGOS.p2p}</span>
+      <span class="rail-card-mark" title="Osmosis (OSMO)">${RAIL_LOGOS.osmo}</span>`;
+    const fiatMarksHtml = `
+      <span class="rail-card-mark rail-card-mark-light" title="Visa">${RAIL_LOGOS.visa}</span>
+      <span class="rail-card-mark rail-card-mark-light" title="Mastercard">${RAIL_LOGOS.mc}</span>
+      <span class="rail-card-mark rail-card-mark-light" title="PayPal">${RAIL_LOGOS.paypal}</span>
+      <span class="rail-card-mark" title="Bitcoin">${RAIL_LOGOS.btc}</span>`;
+
+    const railCardsHtml = `
+      <div class="rail-cards">
+        <button class="rail-card" onclick="setRailTab('onchain')">
+          <div class="rail-card-marks">${onchainMarksHtml}</div>
+          <div class="rail-card-heading">
+            <div class="rail-card-eyebrow">${onchainEyebrow}</div>
+            <div class="rail-card-title">${onchainTitle}</div>
           </div>
-          <div class="card-body">
-            <div style="display:flex;flex-direction:column;gap:16px">
-              <div>
-                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Subscription Price</div>
-                <div style="font-size:28px;font-weight:700;color:var(--text)">${priceDvpn >= 1 ? fmt(Math.round(priceDvpn)) : priceDvpn.toFixed(6)} <span style="font-size:14px;font-weight:400;color:var(--text-dim)">P2P</span></div>
-                ${priceUsd !== null ? `<div style="font-size:14px;color:var(--accent);margin-top:2px">${fmtUsd(priceUsd)}</div>` : ''}
+          <div class="rail-card-desc">${onchainDesc}</div>
+          <div class="rail-card-cta">Click to view plan pricing &amp; accepted currencies →</div>
+        </button>
+        <button class="rail-card" onclick="setRailTab('fiat')">
+          <div class="rail-card-marks">${fiatMarksHtml}</div>
+          <div class="rail-card-heading">
+            <div class="rail-card-eyebrow">${fiatEyebrow}</div>
+            <div class="rail-card-title">${fiatTitle}</div>
+          </div>
+          <div class="rail-card-desc">${fiatDesc}</div>
+          <div class="rail-card-cta">Click to view rails &amp; authorization triggers →</div>
+        </button>
+      </div>`;
+
+    // Focus mode: toggle switch + single hero + the selected rail's panel.
+    const focusEyebrow = railTab === 'onchain' ? onchainEyebrow : fiatEyebrow;
+    const focusTitle = railTab === 'onchain' ? onchainTitle : fiatTitle;
+    const focusDesc = railTab === 'onchain' ? onchainDesc : fiatDesc;
+    const focusMarks = railTab === 'onchain' ? onchainMarksHtml : fiatMarksHtml;
+    const focusHeroHtml = railTab ? `
+      <div class="rail-toggle-bar">
+        <button class="rail-toggle-back" onclick="setRailTab(null)">← Back to options</button>
+        <div class="rail-toggle-switch" role="tablist" aria-label="Payment rail">
+          <button class="rail-toggle-option ${railTab === 'onchain' ? 'active' : ''}" onclick="setRailTab('onchain')">On-Chain</button>
+          <button class="rail-toggle-option ${railTab === 'fiat' ? 'active' : ''}" onclick="setRailTab('fiat')">Fiat &amp; Non-IBC</button>
+        </div>
+      </div>
+      <div class="rail-focus-hero">
+        <div class="rail-focus-marks">${focusMarks}</div>
+        <div class="rail-focus-body">
+          <div class="rail-focus-eyebrow">${focusEyebrow}</div>
+          <div class="rail-focus-title">${focusTitle}</div>
+          <div class="rail-focus-desc">${focusDesc}</div>
+        </div>
+      </div>` : '';
+
+    // On-chain tab body — existing two-card layout.
+    const onchainHtml = `
+      <div class="onchain-pricing-grid">
+        <div class="card onchain-pricing-card">
+          <div class="card-header">
+            <div class="card-title">Plan #${S.mgrPlanId} — On-Chain Payments</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span class="badge ${currentPlan?.activeSubs > 0 ? 'badge-green' : 'badge-dim'}">${currentPlan?.activeSubs > 0 ? 'Active' : 'No active subs'}</span>
+              <span class="badge badge-locked" title="Set at plan creation, cannot be edited">🔒 LOCKED</span>
+            </div>
+          </div>
+          <div class="card-body" style="padding:16px">
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px">Subscription Price · IMMUTABLE</div>
+                <div style="font-size:30px;font-weight:800;color:var(--text);line-height:1.1">${priceDvpn >= 1 ? fmt(Math.round(priceDvpn)) : priceDvpn.toFixed(6)} <span style="font-size:14px;font-weight:500;color:var(--text-dim)">P2P</span></div>
+                ${priceUsd !== null ? `<div style="font-size:13px;color:var(--accent);margin-top:2px">${fmtUsd(priceUsd)}</div>` : ''}
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
-                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Duration</div>
-                  <div style="font-size:16px;font-weight:600;color:var(--text)">${durationDays} days</div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
+                  <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Duration</div>
+                  <div style="font-size:14px;font-weight:600;color:var(--text)">${durationDays}d</div>
                 </div>
-                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
-                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Payment Denom</div>
-                  <div style="font-size:16px;font-weight:600;color:var(--text)">${denomDisplay(price.denom || 'udvpn').symbol}</div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
+                  <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Denom</div>
+                  <div style="font-size:14px;font-weight:600;color:var(--text)">${denomDisplay(price.denom || 'udvpn').symbol}</div>
                 </div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
-                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Nodes</div>
-                  <div style="font-size:16px;font-weight:600;color:var(--text)">${fmt(totalNodes)}</div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
+                  <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Nodes</div>
+                  <div style="font-size:14px;font-weight:600;color:var(--text)">${fmt(totalNodes)}</div>
                 </div>
-                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px">
-                  <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Subscribers</div>
-                  <div style="font-size:16px;font-weight:600;color:var(--text)">${fmt(totalSubs)}</div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
+                  <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Subs</div>
+                  <div style="font-size:14px;font-weight:600;color:var(--text)">${fmt(totalSubs)}</div>
                 </div>
               </div>
-              <div style="background:var(--yellow-dim);border:1px solid rgba(217,119,6,0.15);border-radius:8px;padding:12px;font-size:12px;color:var(--yellow)">
-                <strong>Note:</strong> Plan pricing can't be edited after a plan is created. To change pricing, publish a new plan from the <a href="/create" data-page="create" style="color:var(--accent)">Create Plan</a> page.
+              <div class="immutable-banner">
+                <span class="immutable-banner-icon">🔒</span>
+                <div class="immutable-banner-body">
+                  <div class="immutable-banner-title">Pricing is permanent — it cannot be edited.</div>
+                  <div class="immutable-banner-sub">Sentinel v3 plans are immutable on-chain. To charge a different price, <a href="/create" data-page="create">publish a new plan</a> and migrate subscribers.</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="card">
+        <div class="card onchain-pricing-card">
           <div class="card-header">
             <div class="card-title">Accepted Currencies</div>
             <span class="badge badge-blue">${acceptedDenoms.length} denoms</span>
           </div>
-          <div class="card-body">
-            <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">Currencies accepted on the Sentinel chain for node payments and subscriptions:</div>
-            <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="card-body" style="padding:14px 16px">
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Chain-accepted denoms for node &amp; subscription payments:</div>
+            <div class="accepted-denoms-list">
               ${acceptedDenoms.map(d => {
                 const info = denomDisplay(d);
                 const isActive = d === (price.denom || 'udvpn');
-                return `<div style="display:flex;align-items:center;gap:12px;padding:12px;background:${isActive ? 'var(--accent-glow)' : 'var(--bg)'};border:1px solid ${isActive ? 'var(--accent)' : 'var(--border)'};border-radius:10px;transition:all 0.2s">
-                  <span style="font-size:20px">${info.icon}</span>
-                  <div style="flex:1">
-                    <div style="font-size:13px;font-weight:600;color:var(--text)">${info.symbol}</div>
-                    <div style="font-size:11px;color:var(--text-dim)">${info.name}</div>
+                return `<div class="accepted-denom-row" style="background:${isActive ? 'var(--accent-glow)' : 'var(--bg)'};border-color:${isActive ? 'var(--accent)' : 'var(--border)'}">
+                  <span style="font-size:16px">${info.icon}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:600;color:var(--text)">${info.symbol}</div>
+                    <div style="font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${info.name}</div>
                   </div>
-                  ${isActive ? '<span class="badge badge-green" style="font-size:9px">Plan Denom</span>' : ''}
-                  <div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d}</div>
+                  ${isActive ? '<span class="badge badge-green" style="font-size:8px;padding:2px 6px">Plan</span>' : ''}
                 </div>`;
               }).join('')}
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header" style="flex-direction:column;align-items:stretch;gap:0">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div class="card-title">Authorization Triggers</div>
-          </div>
-          <div style="display:flex;gap:0;border-bottom:2px solid var(--border)">
-            <button id="trigTabPayment" onclick="setTriggerTab('payment')" style="flex:1;padding:10px 16px;background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;color:var(--accent);font-weight:600;font-size:13px;cursor:pointer;transition:all 0.2s">
-              External Payment Trigger
-            </button>
-            <button id="trigTabFreeAuth" onclick="setTriggerTab('freeauth')" style="flex:1;padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-muted);font-weight:500;font-size:13px;cursor:pointer;transition:all 0.2s">
-              Free App Usage Authorization
-            </button>
-          </div>
-        </div>
-        <div id="triggerTabContent">
-          <!-- Populated by setTriggerTab() -->
-        </div>
       </div>`;
 
-    // Render trigger tab content after DOM insert
+    // Fiat tab body — non-IBC rails. Each tile is clickable and opens a
+    // detail view (buildFiatDetailHtml) with rail-specific integration code
+    // and the Authorization Triggers card scoped to that rail.
+    const fiatTilesHtml = `
+      <div class="fiat-rail-grid">
+        <button type="button" class="fiat-rail-tile" onclick="setFiatTile('card')">
+          <div class="fiat-rail-mark-row">
+            <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.visa}</span>
+            <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.mc}</span>
+          </div>
+          <div class="fiat-rail-name">Credit / Debit Card</div>
+          <div class="fiat-rail-desc">Accept Visa, Mastercard, Amex, Discover, JCB, and Diners through Stripe. Capture payment, call the trigger.</div>
+          <div class="fiat-rail-cta">Click to integrate →</div>
+        </button>
+        <button type="button" class="fiat-rail-tile" onclick="setFiatTile('paypal')">
+          <div class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.paypal}</div>
+          <div class="fiat-rail-name">PayPal</div>
+          <div class="fiat-rail-desc">PayPal Checkout / Subscriptions. Webhook-driven activation.</div>
+          <div class="fiat-rail-cta">Click to integrate →</div>
+        </button>
+        <button type="button" class="fiat-rail-tile" onclick="setFiatTile('crypto')">
+          <div class="fiat-rail-mark-row">
+            <span class="fiat-rail-mark">${RAIL_LOGOS.btc}</span>
+            <span class="fiat-rail-mark">${RAIL_LOGOS.eth}</span>
+            <span class="fiat-rail-mark">${RAIL_LOGOS.sol}</span>
+          </div>
+          <div class="fiat-rail-name">Digital Currencies</div>
+          <div class="fiat-rail-desc">Accept payment in any non-IBC digital currency — BTC, ETH, SOL and other chains via your processor of choice. Confirm payment, then fire the trigger.</div>
+          <div class="fiat-rail-cta">Click to integrate →</div>
+        </button>
+        <button type="button" class="fiat-rail-tile" onclick="setFiatTile('free')">
+          <div class="fiat-rail-mark">${RAIL_LOGOS.free}</div>
+          <div class="fiat-rail-name">Free VPN</div>
+          <div class="fiat-rail-desc">Add users to your free VPN and retain them based on dynamic condition triggers — watching ads, completing marketing offers, referral milestones, and more.</div>
+          <div class="fiat-rail-cta">Click to integrate →</div>
+        </button>
+      </div>`;
+
+    const fiatHtml = S._fiatTile
+      ? buildFiatDetailHtml(S._fiatTile, RAIL_LOGOS, window.location.origin, S.mgrPlanId || 0)
+      : fiatTilesHtml;
+
+    const pricingHtml = railTab
+      ? `${railTab === 'fiat' && S._fiatTile ? '' : focusHeroHtml}
+         <div class="rail-panel" id="railPanelOnchain" style="${railTab === 'onchain' ? '' : 'display:none'}">${onchainHtml}</div>
+         <div class="rail-panel" id="railPanelFiat" style="${railTab === 'fiat' ? '' : 'display:none'}">${fiatHtml}</div>`
+      : railCardsHtml;
+
+    // Render trigger tab content after DOM insert (only meaningful when fiat
+    // tab is visible, but harmless either way — element lookup just no-ops).
     setTimeout(() => setTriggerTab(S._triggerTab || 'payment'), 0);
 
-    $('app').innerHTML = `<div class="page">${heroHtml}${planPicker}${pricingHtml}</div>`;
+    $('app').innerHTML = `<div class="page">${!railTab ? heroHtml : ''}${railTab ? planPicker : ''}${pricingHtml}</div>`;
   } catch (e) {
     if (S.page !== 'pricing') return;
     $('app').innerHTML = `<div class="page">${planPicker}<div class="empty-state" style="color:var(--red)">Failed to load pricing: ${escapeHtml(e.message)}</div></div>`;
