@@ -6,6 +6,7 @@ wallet.json
 my-plans.json
 nodes-cache.json
 sellers.json
+an.json
 server.log
 boot.log
 *.log

@@ -4,11 +4,13 @@
 
 import 'dotenv/config';
 import express from 'express';
+import QRCode from 'qrcode';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import {
   listNodes,
+  nodeStatusV3,
   registerCleanupHandlers,
   disconnect,
   cached,
@@ -37,12 +39,15 @@ import {
   rpcQuerySessionsForAccount,
   rpcQuerySubscriptionsForPlan,
   rpcQueryFeeGrantsIssued,
+  rpcQueryPlan,
+  rpcQueryProvider,
+  rpcQueryBalance,
 } from './lib/chain.js';
-import { getAddr, getProvAddr, initWallet, clearWalletState, loadSavedWallet, requireWallet } from './lib/wallet.js';
+import { getAddr, getProvAddr, requireWallet } from './lib/wallet.js';
 import {
   initSession, isMultiUser, encryptMnemonic, decryptMnemonic,
   sessionFromMnemonic, runWithSession, parseCookies,
-  buildSetCookie, buildClearCookie, COOKIE_NAME,
+  buildSetCookie, buildClearCookie, COOKIE_NAME, dropSessionFromCache,
 } from './lib/session.js';
 
 registerCleanupHandlers();
@@ -55,7 +60,12 @@ try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 initSession(DATA_DIR);
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '32kb' }));
+// Suppress fingerprinting header.
+app.disable('x-powered-by');
+// Trust the loopback proxy so req.secure reflects the X-Forwarded-Proto
+// header when an HTTPS-terminating reverse proxy fronts us on localhost.
+app.set('trust proxy', 'loopback');
 
 // ─── Security Headers (FIX 4) ─────────────────────────────────────────────────
 // TODO: Move to nonce-based CSP to eliminate 'unsafe-inline' for script-src.
@@ -180,6 +190,136 @@ function saveMyPlanId(id) {
     store[addr] = list;
     writeFileSync(MY_PLANS_FILE, JSON.stringify(store), 'utf8');
   }
+}
+
+/**
+ * Drop plan IDs from the per-wallet `my-plans.json` ledger. Used to evict
+ * stale entries left over from a different mnemonic — these would otherwise
+ * surface in the UI and produce "address … is not authorized" errors when
+ * the user tries to link nodes / change status / etc.
+ */
+function dropMyPlanIds(ids) {
+  const addr = getAddr();
+  if (!addr || !ids || ids.length === 0) return;
+  const drop = new Set(ids.map(Number));
+  const store = readPlanStore();
+  const list = (store[addr] || []).filter(id => !drop.has(Number(id)));
+  store[addr] = list;
+  try { writeFileSync(MY_PLANS_FILE, JSON.stringify(store), 'utf8'); } catch {}
+}
+
+/**
+ * RPC-first ownership check for the active wallet's plan list. Returns the
+ * subset of `planIds` actually owned by `getProvAddr()` and prunes the rest
+ * from `my-plans.json` so the UI never offers them again.
+ *
+ * Cached for 60s under `myPlansOwned:<provAddr>` to avoid hitting RPC on
+ * every dashboard refresh.
+ */
+/**
+ * Pre-flight ownership check for any TX that names a `planId`. RPC-first.
+ * Returns null on success, or an Express-friendly `{ status, error }` object
+ * to short-circuit the handler. Prevents broadcasting a doomed
+ * "address … is not authorized" TX (and burning gas) when the user's
+ * `my-plans.json` lists a plan they don't actually own.
+ */
+async function assertPlanOwnership(planId) {
+  if (!planId) return { status: 400, error: 'planId is required' };
+  const myProv = getProvAddr();
+  if (!myProv) return { status: 401, error: 'Wallet not loaded' };
+
+  // Resolve the plan's prov_address with RPC first, LCD fallback when RPC
+  // returns null (the SDK's rpcQueryPlan swallows ALL errors as null —
+  // transient blip vs missing plan are indistinguishable, so we MUST verify
+  // via LCD before allowing the TX, or doomed "is not authorized" broadcasts
+  // sneak through and burn gas).
+  let provAddress = null;
+  try {
+    const client = await getRpcClient();
+    if (client) {
+      const plan = await rpcQueryPlan(client, planId);
+      if (plan?.prov_address) provAddress = plan.prov_address;
+    }
+  } catch (e) {
+    console.warn(`[ownership] RPC ownership probe threw for plan ${planId}: ${e.message}`);
+  }
+
+  if (!provAddress) {
+    try {
+      const lcdPlan = await lcd(`/sentinel/plan/v3/plans/${planId}`);
+      if (lcdPlan?.plan?.prov_address) provAddress = lcdPlan.plan.prov_address;
+    } catch (e) {
+      console.warn(`[ownership] LCD ownership probe failed for plan ${planId}: ${e.message} — allowing TX (chain will validate)`);
+      return null;
+    }
+  }
+
+  if (!provAddress) {
+    // Both RPC and LCD failed to return a prov_address. Don't block —
+    // could be a brand-new plan or a transient outage. Chain will reject
+    // if foreign.
+    console.warn(`[ownership] No prov_address resolved for plan ${planId} via RPC or LCD — allowing TX`);
+    return null;
+  }
+
+  if (provAddress !== myProv) {
+    dropMyPlanIds([planId]);
+    return {
+      status: 403,
+      error: `Plan ${planId} is owned by ${provAddress}, not your wallet (${myProv}). It has been removed from your plan list.`,
+    };
+  }
+  return null;
+}
+
+async function filterOwnedPlanIds(planIds) {
+  if (!planIds || planIds.length === 0) return [];
+  const myProv = getProvAddr();
+  if (!myProv) return [];
+  return cached(`myPlansOwned:${myProv}:${planIds.slice().sort().join(',')}`, 60_000, async () => {
+    const client = await getRpcClient();
+    if (!client) {
+      // No RPC — can't make ownership decisions. Return list as-is, do not
+      // prune. Better to show possibly-stale plans than to nuke the list on
+      // a transient outage.
+      return planIds.map(Number).sort((a, b) => a - b);
+    }
+    const kept = [];
+    const foreign = [];
+    await Promise.all(planIds.map(async (id) => {
+      // RPC first.
+      let provAddress = null;
+      try {
+        const p = await rpcQueryPlan(client, id);
+        if (p?.prov_address) provAddress = p.prov_address;
+      } catch {}
+
+      // LCD fallback when RPC returned null (could be transient OR foreign).
+      if (!provAddress) {
+        try {
+          const lcdPlan = await lcd(`/sentinel/plan/v3/plans/${id}`);
+          if (lcdPlan?.plan?.prov_address) provAddress = lcdPlan.plan.prov_address;
+        } catch {
+          // Both queries failed — indeterminate, keep optimistically.
+          kept.push(Number(id));
+          return;
+        }
+      }
+
+      if (!provAddress) {
+        // Both RPC and LCD couldn't resolve — indeterminate, keep.
+        kept.push(Number(id));
+        return;
+      }
+      if (provAddress === myProv) kept.push(Number(id));
+      else foreign.push(Number(id));
+    }));
+    if (foreign.length) {
+      console.log(`[ownership] Pruning ${foreign.length} confirmed foreign plan(s) from my-plans.json: ${foreign.join(', ')}`);
+      dropMyPlanIds(foreign);
+    }
+    return kept.sort((a, b) => a - b);
+  });
 }
 
 // ─── Node Cache (SDK scan) ────────────────────────────────────────────────────
@@ -350,14 +490,14 @@ async function _getPlanStatsImpl(planId) {
   let rpc = null;
   try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
 
-  const [subsData, nodesData, latestSubs] = await Promise.all([
+  const [subsData, nodesData, latestSubs, planRecord] = await Promise.all([
     // count_total — LCD is the only way to get pagination.total; keep LCD.
     lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`),
     // Plan nodes — RPC-first, fall back to LCD.
     (async () => {
       if (rpc) {
         try {
-          const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
+          const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 1, limit: 5000 });
           if (nodes) return { nodes };
         } catch (err) {
           console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
@@ -367,6 +507,22 @@ async function _getPlanStatsImpl(planId) {
     })(),
     // RPC doesn't expose reverse pagination — LCD only.
     lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=200&pagination.reverse=true`),
+    // Plan record (RPC-first, LCD fallback) — authoritative source for price &
+    // duration. Subscription samples can't be used for plans with zero subs.
+    (async () => {
+      if (rpc) {
+        try {
+          const p = await rpcQueryPlan(rpc, planId);
+          if (p) return p;
+        } catch (err) {
+          console.log(`[RPC] _getPlanStatsImpl plan(${planId}) failed: ${err.message} — LCD fallback`);
+        }
+      }
+      try {
+        const lp = await lcd(`/sentinel/plan/v3/plans/${planId}`);
+        return lp?.plan || null;
+      } catch { return null; }
+    })(),
   ]);
 
   const totalSubs = parseInt(subsData.pagination?.total || '0');
@@ -378,8 +534,16 @@ async function _getPlanStatsImpl(planId) {
   const ownSubs = allSampleSubs.length - sampleSubs.length;
 
   const sample = sampleSubs[0] || allSampleSubs[0];
-  const price = sample?.price || { denom: 'udvpn', quote_value: '0', base_value: '0' };
   const renewalPolicy = sample?.renewal_price_policy || 'unknown';
+
+  // Authoritative price comes from the plan record (set at creation, immutable).
+  // Subscription samples are only used as a last-resort fallback when the plan
+  // record didn't load — pricing must NOT silently fall back to zero just
+  // because the plan has no subscribers yet.
+  const planPrice = Array.isArray(planRecord?.prices) ? planRecord.prices[0] : null;
+  const price = planPrice
+    ? { denom: planPrice.denom, quote_value: planPrice.quote_value, base_value: planPrice.base_value }
+    : (sample?.price || { denom: 'udvpn', quote_value: '0', base_value: '0' });
 
   const now = new Date();
   let activeSubs = 0;
@@ -393,13 +557,24 @@ async function _getPlanStatsImpl(planId) {
   const earliestStart = dates[0]?.toISOString() || null;
   const latestStart = dates[dates.length - 1]?.toISOString() || null;
 
+  // Duration from the plan record (seconds → days). Fall back to the
+  // sample-derived duration only when the plan record didn't load.
   let durationDays = null;
-  if (sample) {
+  if (planRecord?.duration != null) {
+    const durSec = typeof planRecord.duration === 'string'
+      ? parseInt(planRecord.duration)
+      : Number(planRecord.duration);
+    if (Number.isFinite(durSec) && durSec > 0) {
+      durationDays = Math.round(durSec / 86400);
+    }
+  }
+  if (durationDays == null && sample) {
     const start = new Date(sample.start_at);
     const end = new Date(sample.inactive_at);
     durationDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
   }
 
+  const quoteNum = parseInt(price.quote_value || '0');
   return {
     planId,
     totalSubscriptions: Math.max(0, totalSubs - ownSubs),
@@ -409,7 +584,7 @@ async function _getPlanStatsImpl(planId) {
       denom: price.denom,
       quoteValue: price.quote_value,
       baseValue: price.base_value,
-      dvpnAmount: price.denom === 'udvpn' ? (parseInt(price.quote_value) / 1e6) : null,
+      dvpnAmount: price.denom === 'udvpn' ? (quoteNum / 1e6) : null,
     },
     renewalPolicy,
     activeSubs,
@@ -418,7 +593,7 @@ async function _getPlanStatsImpl(planId) {
     durationDays,
     earliestStart,
     latestStart,
-    estimatedTotalP2p: price.denom === 'udvpn' ? (totalSubs * parseInt(price.quote_value) / 1e6) : null,
+    estimatedTotalP2p: price.denom === 'udvpn' ? (totalSubs * quoteNum / 1e6) : null,
   };
 }
 
@@ -429,7 +604,7 @@ async function getNodesForPlan(planId) {
   try {
     const rpc = await getRpcClient();
     if (rpc) {
-      const rpcNodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
+      const rpcNodes = await rpcQueryNodesForPlan(rpc, planId, { status: 1, limit: 5000 });
       for (const n of rpcNodes) {
         const rawAddr = (n.remote_addrs || [])[0] || '';
         nodes.push({
@@ -681,20 +856,47 @@ async function batchLeaseNodes(addrs, hours = 24) {
 
 // ─── Routes: Wallet ──────────────────────────────────────────────────────────
 
+// ─── Wallet route rate limiter ───────────────────────────────────────────────
+// In-memory token bucket. Localhost-only deployment, so this exists primarily
+// to slow brute-force or runaway scripts on the same machine — not to defend
+// against an external attacker (the bind to 127.0.0.1 already handles that).
+const _rl = new Map();
+function rateLimit(bucket, max, windowMs) {
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = `${bucket}:${ip}`;
+    const now = Date.now();
+    const e = _rl.get(key) || { count: 0, reset: now + windowMs };
+    if (now > e.reset) { e.count = 0; e.reset = now + windowMs; }
+    e.count += 1;
+    _rl.set(key, e);
+    if (e.count > max) {
+      res.setHeader('Retry-After', Math.ceil((e.reset - now) / 1000));
+      return res.status(429).json({ error: 'Too many requests' });
+    }
+    next();
+  };
+}
+// Periodic cleanup of stale buckets.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _rl) if (now > v.reset) _rl.delete(k);
+}, 60_000).unref();
+
 app.get('/api/wallet/status', (req, res) => {
   res.json({ loaded: !!getAddr(), address: getAddr() || null, multiUser: isMultiUser() });
 });
 
-app.post('/api/wallet/generate', async (req, res) => {
+app.post('/api/wallet/generate', rateLimit('wgen', 10, 60_000), async (req, res) => {
   // FIX 5: Mnemonic is returned once so the user can write it down during the
-  // wallet-creation flow. This is intentional for a single-user local tool.
-  // Known gap: the mnemonic travels over localhost HTTP (no TLS). Mitigation:
-  // the server is bound to 127.0.0.1 only (FIX 2), so it is never reachable
-  // from other hosts. Future work: serve over HTTPS with a self-signed cert.
+  // wallet-creation flow. The response is marked no-store so intermediaries
+  // and the browser disk cache do not retain it.
   try {
     const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
     const wallet = await DirectSecp256k1HdWallet.generate(24, { prefix: 'sent' });
     const [account] = await wallet.getAccounts();
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
     res.json({ mnemonic: wallet.mnemonic, address: account.address });
   } catch (err) {
     console.error('Wallet generate error:', err.message);
@@ -702,28 +904,29 @@ app.post('/api/wallet/generate', async (req, res) => {
   }
 });
 
-app.post('/api/wallet/import', async (req, res) => {
+app.post('/api/wallet/import', rateLimit('wimp', 20, 60_000), async (req, res) => {
   try {
     const { mnemonic } = req.body;
-    if (!mnemonic) return res.status(400).json({ error: 'mnemonic required' });
+    if (!mnemonic || typeof mnemonic !== 'string') {
+      return res.status(400).json({ error: 'mnemonic required' });
+    }
+    if (mnemonic.length > 1024) {
+      return res.status(413).json({ error: 'Mnemonic too long' });
+    }
     const trimmed = mnemonic.trim();
     const words = trimmed.split(/\s+/);
     if (words.length !== 12 && words.length !== 24) {
       return res.status(400).json({ error: 'Mnemonic must be 12 or 24 words' });
     }
 
-    // Derive the wallet now to validate the mnemonic before we ever store it
-    // in a cookie.
+    // Derive the wallet to validate the mnemonic before encrypting it into
+    // the cookie. The mnemonic never leaves this request frame on the server
+    // side — it lives in the user's encrypted browser cookie.
     const session = await sessionFromMnemonic(trimmed);
     const token = encryptMnemonic(trimmed);
     res.setHeader('Set-Cookie', buildSetCookie(token, { secure: req.secure }));
-
-    // In single-user mode, also set the module-level wallet so the classic
-    // local-deploy UX (env MNEMONIC, one shared wallet) keeps working for
-    // clients that don't carry the cookie (e.g. the CLI on the same host).
-    if (!isMultiUser()) {
-      await initWallet(trimmed);
-    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
 
     res.json({ ok: true, address: session.addr, provAddress: session.provAddr });
   } catch (err) {
@@ -732,37 +935,22 @@ app.post('/api/wallet/import', async (req, res) => {
   }
 });
 
-app.post('/api/wallet/test-import', async (req, res) => {
-  if (isMultiUser()) {
-    return res.status(403).json({ error: 'Disabled in multi-user mode — paste your own mnemonic instead.' });
-  }
-  try {
-    const envPath = join(__dirname, '.env');
-    if (!existsSync(envPath)) {
-      return res.status(404).json({ error: 'No .env file found' });
-    }
-    const envContent = readFileSync(envPath, 'utf8');
-    const match = envContent.match(/^MNEMONIC=(.+)$/m);
-    if (!match || !match[1].trim()) {
-      return res.status(400).json({ error: 'No MNEMONIC in .env' });
-    }
-    await initWallet(match[1].trim());
-    res.json({ ok: true, address: getAddr(), provAddress: getProvAddr() });
-  } catch (err) {
-    console.error('Test wallet import error:', err.message);
-    res.status(400).json({ error: 'Failed to load test wallet: ' + err.message });
-  }
-});
-
 app.post('/api/wallet/logout', (req, res) => {
+  // Drop the per-process derived-wallet cache for this mnemonic so a stolen
+  // cookie value cannot continue to resolve to the cached wallet. The cookie
+  // itself is also cleared on the user's browser.
+  try {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies[COOKIE_NAME];
+    if (token) {
+      try {
+        const m = decryptMnemonic(token);
+        dropSessionFromCache(m);
+      } catch {}
+    }
+  } catch {}
   res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
-  // Only wipe the module-level wallet in single-user mode — in multi-user
-  // mode there is no shared state to clear, and doing so would log out
-  // everyone who still has a valid cookie.
-  if (!isMultiUser()) {
-    clearWalletState();
-    console.log('Wallet cleared');
-  }
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.json({ ok: true });
 });
 
@@ -776,9 +964,20 @@ app.get('/api/wallet', async (req, res) => {
       }),
       getDvpnPrice(),
       cached(`provider:${getAddr()}`, 600_000, async () => {
+        // RPC-first: direct lookup by sentprov address — single round trip vs scanning 500 providers.
+        try {
+          const rpc = await getRpcClient();
+          if (rpc) {
+            const prov = await rpcQueryProvider(rpc, getProvAddr());
+            if (prov) return prov;
+          }
+        } catch (err) {
+          console.log(`[RPC] provider lookup failed: ${err.message} — LCD fallback`);
+        }
+        // LCD fallback
         try {
           const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
-          return (provs.providers || []).find(p => p.address.includes(getAddr().slice(4, 20))) || null;
+          return (provs.providers || []).find(p => p.address === getProvAddr()) || null;
         } catch (err) {
           console.error('Failed to lookup provider:', err.message);
           return null;
@@ -797,6 +996,82 @@ app.get('/api/wallet', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: parseChainError(err.message) });
+  }
+});
+
+// ─── Wallet Send (MsgSend) ───────────────────────────────────────────────────
+// POST /api/wallet/send  body: { to, amountDvpn, memo? }
+// Broadcasts a Cosmos bank MsgSend from the session wallet. RPC-first via
+// the standard signing client. Validates bech32 prefix, positive amount,
+// non-self recipient, and sufficient balance (incl. gas) before broadcast.
+const SEND_BECH32_RE = /^sent1[0-9a-z]{38,58}$/;
+
+app.post('/api/wallet/send', rateLimit('wsend', 30, 60_000), async (req, res) => {
+  if (!requireWallet(req, res)) return;
+  try {
+    const { to, amountDvpn, memo } = req.body || {};
+    const from = getAddr();
+
+    const trimmedTo = typeof to === 'string' ? to.trim() : '';
+    if (!SEND_BECH32_RE.test(trimmedTo)) {
+      return res.status(400).json({ ok: false, error: 'Recipient address looks malformed.', errorCode: 'invalid-address' });
+    }
+    if (trimmedTo === from) {
+      return res.status(400).json({ ok: false, error: 'Cannot send to your own address.', errorCode: 'invalid-address' });
+    }
+    const amt = Number(amountDvpn);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return res.status(400).json({ ok: false, error: 'Amount must be greater than 0.', errorCode: 'invalid-amount' });
+    }
+    const safeMemo = typeof memo === 'string' ? memo.slice(0, 256) : undefined;
+    const amountUdvpn = String(Math.round(amt * 1e6));
+
+    const msg = {
+      typeUrl: '/cosmos.bank.v1beta1.MsgSend',
+      value: {
+        fromAddress: from,
+        toAddress: trimmedTo,
+        amount: [{ denom: 'udvpn', amount: amountUdvpn }],
+      },
+    };
+
+    console.log(`[SEND] ${from} → ${trimmedTo} : ${amt} P2P (${amountUdvpn} udvpn)${safeMemo ? ` memo="${safeMemo}"` : ''}`);
+    const result = await safeBroadcast([msg], safeMemo);
+
+    if (result.code !== 0) {
+      const parsed = parseChainError(result.rawLog || 'Broadcast failed');
+      console.log(`[SEND] failed code=${result.code}: ${parsed}`);
+      return res.json({ ok: false, error: parsed, errorCode: 'tx-failed', txHash: result.transactionHash });
+    }
+    cacheInvalidate(`balance:${from}`);
+    return res.json({
+      ok: true,
+      txHash: result.transactionHash,
+      height: result.height != null ? Number(result.height) : undefined,
+      gasUsed: result.gasUsed != null ? String(result.gasUsed) : undefined,
+      gasWanted: result.gasWanted != null ? String(result.gasWanted) : undefined,
+    });
+  } catch (err) {
+    console.error('[SEND] error:', err.message);
+    res.status(500).json({ ok: false, error: parseChainError(err.message), errorCode: 'broadcast-error' });
+  }
+});
+
+// GET /api/wallet/qr — returns an SVG QR for the session wallet's address.
+app.get('/api/wallet/qr', async (req, res) => {
+  if (!requireWallet(req, res)) return;
+  try {
+    const svg = await QRCode.toString(getAddr(), {
+      type: 'svg',
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      color: { dark: '#0156FC', light: '#00000000' },
+    });
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(svg);
+  } catch (err) {
+    res.status(500).json({ error: 'QR generation failed: ' + err.message });
   }
 });
 
@@ -884,7 +1159,13 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
 app.get('/api/my-plans', async (req, res) => {
   if (!requireWallet(req, res)) return;
   try {
-    const planIds = loadMyPlanIds();
+    const rawPlanIds = loadMyPlanIds();
+    // RPC ownership filter: drop any plan whose `prov_address` ≠ our
+    // current sentprov address. Stale entries (e.g. plans created from a
+    // different mnemonic that ended up under our wallet's bucket) are
+    // pruned from `my-plans.json` so the UI never offers them again and
+    // we never try to broadcast a doomed link/unlink/status TX.
+    const planIds = await filterOwnedPlanIds(rawPlanIds);
 
     const [bal, ...myPlans] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
@@ -991,6 +1272,9 @@ app.post('/api/plan/status', async (req, res) => {
   try {
     const { planId, status } = req.body;
     if (!planId || !status) return res.status(400).json({ error: 'planId and status required' });
+
+    const ownErr = await assertPlanOwnership(planId);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
     await getSigningClient();
     const msg = {
@@ -1168,24 +1452,43 @@ app.get('/api/all-nodes', async (req, res) => {
     if (inPlanOnly && planId) {
       const cachedAddrs = new Set(filtered.map(n => n.address));
       filtered = filtered.filter(n => planNodeMap.has(n.address));
-      // Add missing plan nodes from chain data
+      // For plan-linked nodes missing from the SDK probe cache, probe the
+      // node's /status endpoint directly so moniker/country/city/protocol
+      // populate immediately instead of showing as null.
+      const missing = [];
       for (const [addr, pn] of planNodeMap) {
-        if (!cachedAddrs.has(addr)) {
-          filtered.push({
-            address: addr,
-            moniker: null,
-            country: null,
-            city: null,
-            protocol: null,
-            speedMbps: null,
-            hrPriceUdvpn: pn.hourlyPrices?.find(p => p.denom === 'udvpn')?.quote_value ? parseInt(pn.hourlyPrices.find(p => p.denom === 'udvpn').quote_value) : null,
-            gbPriceUdvpn: pn.gigabytePrices?.find(p => p.denom === 'udvpn')?.quote_value ? parseInt(pn.gigabytePrices.find(p => p.denom === 'udvpn').quote_value) : null,
-            remoteUrl: pn.remoteUrl || null,
-            status: pn.status || 'unknown',
-            notInCache: true,
-          });
-        }
+        if (!cachedAddrs.has(addr)) missing.push([addr, pn]);
       }
+      // 3s per probe, 4s overall ceiling — never let a dead node block the tab.
+      const probeWithTimeout = (url) => Promise.race([
+        nodeStatusV3(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('probe timeout')), 3000)),
+      ]);
+      const batch = Promise.allSettled(missing.map(([, pn]) =>
+        pn.remoteUrl ? probeWithTimeout(pn.remoteUrl) : Promise.reject(new Error('no remoteUrl'))
+      ));
+      const probes = await Promise.race([
+        batch,
+        new Promise((resolve) => setTimeout(() => resolve(missing.map(() => ({ status: 'rejected', reason: 'batch timeout' }))), 4000)),
+      ]);
+      missing.forEach(([addr, pn], i) => {
+        const r = probes[i];
+        const ok = r.status === 'fulfilled' && r.value;
+        const s = ok ? r.value : null;
+        filtered.push({
+          address: addr,
+          moniker: s?.moniker || null,
+          country: s?.location?.country || null,
+          city: s?.location?.city || null,
+          protocol: s?.type || null,
+          speedMbps: null,
+          hrPriceUdvpn: pn.hourlyPrices?.find(p => p.denom === 'udvpn')?.quote_value ? parseInt(pn.hourlyPrices.find(p => p.denom === 'udvpn').quote_value) : null,
+          gbPriceUdvpn: pn.gigabytePrices?.find(p => p.denom === 'udvpn')?.quote_value ? parseInt(pn.gigabytePrices.find(p => p.denom === 'udvpn').quote_value) : null,
+          remoteUrl: pn.remoteUrl || null,
+          status: pn.status || 'unknown',
+          notInCache: !ok,
+        });
+      });
     }
 
     const withStatus = filtered.map(n => {
@@ -1246,6 +1549,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
   try {
     const { planId, nodeAddress, leaseHours: reqLeaseHours } = req.body;
     if (!planId || !nodeAddress) return res.status(400).json({ error: 'Plan ID and node address are required' });
+
+    const ownErr = await assertPlanOwnership(planId);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
     await getSigningClient();
     const linkMsg = {
@@ -1314,6 +1620,8 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     if (!planId || !nodeAddresses || !Array.isArray(nodeAddresses) || nodeAddresses.length === 0) {
       return res.status(400).json({ error: 'planId and nodeAddresses[] required' });
     }
+    const ownErr = await assertPlanOwnership(planId);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
     const hours = parseInt(reqLeaseHours) || 24;
     const addrs = [...new Set(nodeAddresses)];
     console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
@@ -1394,6 +1702,9 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
     const { planId, nodeAddress } = req.body;
     if (!planId || !nodeAddress) return res.status(400).json({ error: 'Plan ID and node address are required' });
 
+    const ownErr = await assertPlanOwnership(planId);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
+
     await getSigningClient();
     const msg = {
       typeUrl: C.MSG_UNLINK_TYPE,
@@ -1435,6 +1746,8 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
     if (!planId || !nodeAddresses || !Array.isArray(nodeAddresses) || nodeAddresses.length === 0) {
       return res.status(400).json({ error: 'planId and nodeAddresses[] required' });
     }
+    const ownErr = await assertPlanOwnership(planId);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
     const addrs = [...new Set(nodeAddresses)];
     console.log(`\n[BATCH-UNLINK] ${addrs.length} nodes from plan ${planId}`);
 
@@ -1464,6 +1777,35 @@ app.post('/api/lease/start', async (req, res) => {
     const { nodeAddress, hours, maxPriceDenom, maxPriceBaseValue, maxPriceQuoteValue, renewalPolicy } = req.body;
     if (!nodeAddress) return res.status(400).json({ error: 'nodeAddress required' });
 
+    // The chain rejects any maxPrice that doesn't EXACTLY match an entry in the
+    // node's hourly_prices array. Look up the node first and pass its current
+    // price through verbatim, unless the caller explicitly overrides it.
+    // Sentinel lease module rejects a maxPrice that isn't an EXACT match for an
+    // entry in the node's hourly_prices array (denom + base_value + quote_value
+    // all identical). RPC-first lookup of the node's current price.
+    let nodePrice = null;
+    try {
+      const rpcClient = await getRpcClient();
+      const node = await rpcQueryNode(rpcClient, nodeAddress);
+      const prices = node?.hourly_prices || node?.hourlyPrices;
+      if (Array.isArray(prices) && prices.length) {
+        const denom = maxPriceDenom || 'udvpn';
+        nodePrice = prices.find((p) => p.denom === denom) || prices[0];
+      }
+    } catch (err) {
+      console.log(`[LEASE] RPC node price lookup failed: ${err.message}`);
+    }
+
+    if (!nodePrice) {
+      return res.status(400).json({
+        error: 'Could not fetch node price from chain — node may be offline or unreachable',
+      });
+    }
+
+    const baseValue = nodePrice.base_value ?? nodePrice.baseValue;
+    const quoteValue = String(nodePrice.quote_value ?? nodePrice.quoteValue);
+    console.log(`[LEASE] Node price: ${nodePrice.denom} base=${baseValue} quote=${quoteValue}`);
+
     await getSigningClient();
     const msg = {
       typeUrl: C.MSG_START_LEASE_TYPE,
@@ -1472,9 +1814,9 @@ app.post('/api/lease/start', async (req, res) => {
         nodeAddress,
         hours: parseInt(hours || 720),
         maxPrice: {
-          denom: maxPriceDenom || 'udvpn',
-          base_value: maxPriceBaseValue || '0.003000000000000000',
-          quote_value: String(maxPriceQuoteValue || '40152030'),
+          denom: nodePrice.denom,
+          base_value: baseValue,
+          quote_value: quoteValue,
         },
         renewalPricePolicy: parseInt(renewalPolicy || 7),
       },
@@ -1555,11 +1897,23 @@ app.post('/api/provider/register', async (req, res) => {
     await getSigningClient();
 
     let alreadyExists = false;
+    // RPC-first: direct lookup by sentprov address — exact match, no substring heuristic.
     try {
-      const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
-      alreadyExists = (provs.providers || []).some(p => p.address.includes(getAddr().slice(4, 20)));
+      const rpc = await getRpcClient();
+      if (rpc) {
+        const prov = await rpcQueryProvider(rpc, getProvAddr());
+        if (prov) alreadyExists = true;
+      }
     } catch (err) {
-      console.error('Failed to check existing providers:', err.message);
+      console.log(`[RPC] provider exists probe failed: ${err.message} — LCD fallback`);
+    }
+    if (!alreadyExists) {
+      try {
+        const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
+        alreadyExists = (provs.providers || []).some(p => p.address === getProvAddr());
+      } catch (err) {
+        console.error('Failed to check existing providers:', err.message);
+      }
     }
 
     const typeUrl = alreadyExists ? C.MSG_UPDATE_PROVIDER_DETAILS_TYPE : C.MSG_REGISTER_PROVIDER_TYPE;
@@ -2561,36 +2915,7 @@ app.use((req, res, next) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
-const _savedMnemonic = loadSavedWallet();
-if (isMultiUser()) {
-  console.log('[wallet] MULTI_USER=true — skipping env/disk wallet bootstrap. Each visitor logs in with their own mnemonic.');
-} else if (_savedMnemonic) {
-  initWallet(_savedMnemonic).then(() => {
-    console.log(`Restored wallet: ${getAddr()}`);
-  }).catch(err => {
-    console.error('Failed to restore wallet:', err.message);
-    clearWalletState();
-  });
-} else {
-  const envPath = join(__dirname, '.env');
-  const fromProcess = (process.env.MNEMONIC || '').trim();
-  const fromFile = existsSync(envPath)
-    ? (readFileSync(envPath, 'utf8').match(/^MNEMONIC=(.+)$/m)?.[1] || '').trim()
-    : '';
-  const envMnemonic = fromProcess || fromFile;
-  const source = fromProcess ? 'environment' : '.env';
-  const isPlaceholder = /your twelve or twenty four/i.test(envMnemonic);
-  if (envMnemonic && !isPlaceholder) {
-    initWallet(envMnemonic).then(() => {
-      console.log(`[wallet] Loaded from ${source}: ${getAddr()}`);
-    }).catch(err => {
-      console.error(`[wallet] Failed to load from ${source}: ${err.message}`);
-      clearWalletState();
-    });
-  } else {
-    console.warn('[wallet] No wallet loaded. Create one in the UI, set MNEMONIC=... in .env (copy from .env.example), or pass MNEMONIC via the process environment. Chain writes (plans, links, grants) are disabled until a wallet is present.');
-  }
-}
+console.log('[wallet] Cookie-mode: each visitor signs in with their own mnemonic, encrypted into an httpOnly browser cookie. No mnemonic env var or .wallet.json is read.');
 
 // ─── FIX 8: .env permissions warning ─────────────────────────────────────────
 // Non-fatal check: warn if .env has group/world read bits (Unix only; no-op on Windows).
