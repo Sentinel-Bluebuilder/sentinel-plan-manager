@@ -8,9 +8,24 @@
 // Exit: 0 if every test passes, 1 otherwise.
 
 import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
+import { readFileSync, existsSync } from 'fs';
 
 const BASE = process.env.BASE_URL || 'http://localhost:3003';
 const results = [];
+
+// Cookie jar — server now uses cookie-only auth (no env mnemonic, no
+// .wallet.json). Pull mnemonic from .env and import on first run.
+let cookieHeader = '';
+
+function captureCookie(res) {
+  // Set-Cookie may be a single string or an array (Node returns string).
+  const sc = res.headers.get('set-cookie');
+  if (!sc) return;
+  // Keep only the name=value bit, strip attributes.
+  const parts = sc.split(/,(?=\s*\w+=)/g).map(s => s.split(';')[0].trim()).filter(Boolean);
+  const merged = parts.join('; ');
+  cookieHeader = cookieHeader ? cookieHeader + '; ' + merged : merged;
+}
 
 function log(name, ok, detail = '') {
   const tag = ok ? '✓' : '✗';
@@ -20,7 +35,13 @@ function log(name, ok, detail = '') {
 }
 
 async function get(path) {
-  const r = await fetch(BASE + path);
+  const r = await fetch(BASE + path, {
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    },
+  });
+  captureCookie(r);
   const text = await r.text();
   let body;
   try { body = JSON.parse(text); } catch { body = text; }
@@ -30,13 +51,28 @@ async function get(path) {
 async function post(path, payload) {
   const r = await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    },
     body: JSON.stringify(payload ?? {}),
   });
+  captureCookie(r);
   const text = await r.text();
   let body;
   try { body = JSON.parse(text); } catch { body = text; }
   return { status: r.status, body };
+}
+
+async function loginFromEnv() {
+  if (!existsSync('.env')) return false;
+  const env = readFileSync('.env', 'utf8');
+  const m = env.match(/^MNEMONIC=(.+)$/m);
+  if (!m) return false;
+  const mnemonic = m[1].trim();
+  const r = await post('/api/wallet/import', { mnemonic });
+  return r.status === 200 && r.body?.ok;
 }
 
 async function section(title) {
@@ -62,6 +98,14 @@ async function genGrantee() {
   {
     const { status, body } = await get('/health');
     log('/health', status === 200 && body && body.ok !== false, `status=${status}`);
+  }
+
+  // Server now uses cookie-only auth. Import mnemonic from .env and reuse
+  // the resulting cookie for the rest of the run.
+  {
+    const ok = await loginFromEnv();
+    log('login via /api/wallet/import (cookie)', ok, ok ? 'cookie attached' : 'no .env or import failed');
+    if (!ok) { summarize(); return; }
   }
 
   let walletAddr = null;
@@ -96,7 +140,6 @@ async function genGrantee() {
     '/api/all-nodes?page=1&limit=20',
     '/api/providers',
     '/api/feegrant/grants',
-    '/api/feegrant/gas-costs',
     '/api/feegrant/auto-grant',
     '/api/node-rankings',
     '/api/rpcs',
@@ -122,6 +165,8 @@ async function genGrantee() {
     log(`/api/plans/${firstPlanId}`, status === 200 && body && !body.error, `status=${status}`);
     const subs = await get(`/api/plans/${firstPlanId}/subscriptions?limit=50`);
     log(`/api/plans/${firstPlanId}/subscriptions`, subs.status === 200 && !subs.body.error, `status=${subs.status}`);
+    const gas = await get(`/api/feegrant/gas-costs?planId=${firstPlanId}`);
+    log(`/api/feegrant/gas-costs?planId=${firstPlanId}`, gas.status === 200 && !gas.body.error, `status=${gas.status}`);
   } else {
     log('per-plan GETs skipped', true, 'no plans on wallet');
   }
@@ -222,36 +267,55 @@ async function genGrantee() {
 
   // ─── 5. Destructive endpoints — safety checks only, don't fire ───────────
   await section('5. Destructive endpoints (presence only, not fired)');
-  const destructive = [
-    ['POST', '/api/plan/create'],
-    ['POST', '/api/plan/status'],
-    ['POST', '/api/plan/subscribe'],
-    ['POST', '/api/plan/start-session'],
-    ['POST', '/api/plan-manager/batch-link'],
-    ['POST', '/api/plan-manager/batch-unlink'],
-    ['POST', '/api/lease/start'],
-    ['POST', '/api/lease/end'],
-    ['POST', '/api/provider/register'],
-    ['POST', '/api/feegrant/grant-subscribers'],
-    ['POST', '/api/feegrant/revoke-all'],
-    ['POST', '/api/wallet/logout'],
-    ['POST', '/api/wallet/generate'],
-    ['POST', '/api/wallet/import'],
+  // Endpoints that require a body field — empty body MUST 400.
+  const requireBody = [
+    '/api/plan/create',
+    '/api/plan/status',
+    '/api/plan/subscribe',
+    '/api/plan/start-session',
+    '/api/plan-manager/batch-link',
+    '/api/plan-manager/batch-unlink',
+    '/api/lease/start',
+    '/api/lease/end',
+    '/api/provider/register',
+    '/api/feegrant/grant-subscribers',
+    '/api/wallet/import',
   ];
-  for (const [_, path] of destructive) {
-    // Send empty body — handler must reject with validation error, not crash
+  for (const path of requireBody) {
     const { status, body } = await post(path, {});
     const ok = status === 400 || status === 401 || (status === 200 && body?.error);
     log(`${path} (empty → validated)`, ok, `status=${status}`);
   }
+  // /api/feegrant/revoke-all needs no body — empty body is valid; it returns
+  // 200 with `revoked:0` when there are no grants. Just check it doesn't 500.
+  // Skipped under live test because it would actually clear all grants — only
+  // verifying the endpoint accepts empty body without crashing is enough here.
 
   // ─── 6. Final balance check ──────────────────────────────────────────────
+  // Run BEFORE /api/wallet/generate or /api/wallet/logout (those rotate the
+  // cookie session). Live grant + revoke costs ~0.06 P2P; allow generous budget.
   await section('6. Post-test balance');
   {
     const { body } = await get('/api/wallet');
     const after = body?.balanceUdvpn || 0;
     const spent = balanceUdvpn - after;
-    log('wallet still loaded', !!body?.address, `before=${balanceUdvpn} after=${after} spent=${spent} udvpn`);
+    const okSpent = spent >= 0 && spent < 1_000_000; // < 1 P2P max
+    log('wallet still loaded',
+      !!body?.address && body.address === walletAddr && okSpent,
+      `before=${balanceUdvpn} after=${after} spent=${spent} udvpn`);
+  }
+
+  // Wallet-rotating endpoints — fire LAST so they don't disrupt earlier tests.
+  await section('7. Wallet rotation endpoints (fire last)');
+  {
+    // logout: returns 200 + clears cookie; that's the contract.
+    const { status } = await post('/api/wallet/logout', {});
+    log('/api/wallet/logout', status === 200, `status=${status}`);
+  }
+  {
+    // After logout, generate a fresh wallet — should 200 with new address.
+    const { status, body } = await post('/api/wallet/generate', {});
+    log('/api/wallet/generate', status === 200 && body?.address?.startsWith('sent1'), `status=${status} addr=${body?.address?.slice(0, 14) || 'n/a'}`);
   }
 
   summarize();

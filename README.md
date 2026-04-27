@@ -309,11 +309,11 @@ your-workspace/
 |---|---|
 | `server.js` | Express backend — LCD/RPC queries, TX broadcast, batch operations, analytics. |
 | `index.html` | Single-page app — dark/light theme, grid/list, batch pickers, plan switcher. |
-| `lib/protobuf.js` | Hand-rolled v3 protobuf encoding (plan, link, lease, fee grants). |
-| `lib/chain.js` | LCD/RPC wrappers, signing client lifecycle, broadcast with sequence retry. |
+| `lib/protobuf.js` | Re-exports SDK `buildRegistry` as `createRegistry` (all encoders SDK-backed). |
+| `lib/chain.js` | LCD/RPC wrappers (delegating to SDK `lcdQuery`), signing client lifecycle, broadcast with sequence retry. |
 | `lib/wallet.js` | Mnemonic → signer, sentprov address derivation, `.wallet.json` persistence. |
 | `lib/constants.js` | Port, endpoints, cache TTLs. |
-| `lib/cache.js`, `lib/errors.js` | Local wrappers around SDK primitives. |
+| `lib/errors.js` | Local error parsing for plan/lease patterns not in SDK. |
 | `my-plans.json` | Plan IDs you've created (append-only, gitignored). |
 | `nodes-cache.json` | Last node scan (5-minute TTL, gitignored). |
 

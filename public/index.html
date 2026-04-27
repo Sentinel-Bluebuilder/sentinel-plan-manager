@@ -2349,10 +2349,11 @@ html[data-theme="light"] .topbar-title,
 html[data-theme="light"] .lease-slider-wrap .lease-value { color: var(--text); }
 
 /* ─── Subscribers Table ─── */
-.subs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.subs-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .subs-table th { text-align: left; padding: 12px 14px; font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; border-bottom: 1px solid var(--border); }
-.subs-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.subs-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subs-table tr:hover td { background: var(--bg-card-hover); color: var(--text); }
+.subs-table td .sub-id-cell { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .subs-badge-active { font-family: var(--font-mono); background: var(--green-dim); color: var(--green-bright); padding: 3px 8px; border-radius: var(--radius-xs); font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; border: 1px solid rgba(0, 200, 83, 0.22); }
 .subs-badge-inactive { font-family: var(--font-mono); background: var(--red-dim); color: var(--red); padding: 3px 8px; border-radius: var(--radius-xs); font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; border: 1px solid rgba(255, 23, 68, 0.22); }
 
@@ -3682,10 +3683,18 @@ button.fiat-rail-tile:hover {
 
       <!-- Import pane -->
       <div id="importPane">
-        <div class="import-form-title">Import your wallet</div>
+        <div class="import-form-title">Connect your wallet</div>
         <div class="import-form-sub">
-          Paste the 12 or 24 word mnemonic of the wallet that will own this plan.
-          The phrase is encrypted with AES-256-GCM and stored in an httpOnly cookie scoped to your browser. It is never written to the server's disk and never shared between users.
+          Use the Keplr browser extension for the safest experience — your private key never leaves the extension. Or paste a 12/24-word mnemonic; it is encrypted with AES-256-GCM and stored in an httpOnly cookie. Either way the server never persists your key to disk.
+        </div>
+
+        <button class="import-btn" id="keplrBtn" onclick="doKeplrLogin()" style="margin-bottom:12px">Connect with Keplr</button>
+        <div class="import-error" id="keplrError"></div>
+
+        <div class="import-or" style="display:flex;align-items:center;gap:10px;margin:8px 0 12px;color:var(--text-dim, #888);font-size:12px;text-transform:uppercase;letter-spacing:0.08em">
+          <div style="flex:1;height:1px;background:rgba(255,255,255,0.08)"></div>
+          <span>or paste mnemonic</span>
+          <div style="flex:1;height:1px;background:rgba(255,255,255,0.08)"></div>
         </div>
 
         <textarea class="import-textarea" id="importInput" placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12" spellcheck="false"></textarea>
@@ -3874,6 +3883,7 @@ const S = {
   countries: [], protocols: [],
   // Manager
   mgrPlanId: '', mgrNodes: null, mgrPage: 1, myPlans: null, myPlansLoading: false,
+  subsPage: 1, fgPage: 1,
   leaseHours: 24, addSet: new Set(), removeSet: new Set(),
   nodePriceCache: {},
   // Create
@@ -4835,12 +4845,11 @@ async function doWalletSend() {
   btn.textContent = 'Broadcasting…';
   resultEl.style.display = 'none';
   try {
-    const r = await fetch('/api/wallet/send', {
+    const d = await txFetch('/api/wallet/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ to, amountDvpn: amt, memo: memo || undefined }),
     });
-    const d = await r.json();
     if (d.ok) {
       resultEl.style.display = '';
       resultEl.innerHTML = `<div style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:var(--radius-md);padding:10px 12px;font-size:12px;color:var(--text)">
@@ -5084,6 +5093,153 @@ async function doConfirmBackup() {
     btn.textContent = 'Continue';
     toast('Connection error: ' + e.message, 'error');
   }
+}
+
+// ─── Keplr Integration ───────────────────────────────────────────────────────
+// Sentinel chain isn't pre-bundled in Keplr, so we suggest it on first
+// connect, then ADR-36 sign a server-issued nonce to prove address ownership
+// before the cookie is issued. From there, every TX route either broadcasts
+// (mnemonic flow) or returns {mode:'keplr-sign', signDoc} which we sign with
+// signDirect and POST back to /api/tx/broadcast-signed.
+
+const SENTINEL_KEPLR_CHAIN = {
+  chainId: 'sentinelhub-2',
+  chainName: 'Sentinel',
+  rpc: 'https://rpc.sentinel.co:443',
+  rest: 'https://lcd.sentinel.co',
+  bip44: { coinType: 118 },
+  bech32Config: {
+    bech32PrefixAccAddr: 'sent',
+    bech32PrefixAccPub: 'sentpub',
+    bech32PrefixValAddr: 'sentvaloper',
+    bech32PrefixValPub: 'sentvaloperpub',
+    bech32PrefixConsAddr: 'sentvalcons',
+    bech32PrefixConsPub: 'sentvalconspub',
+  },
+  currencies: [{ coinDenom: 'P2P', coinMinimalDenom: 'udvpn', coinDecimals: 6, coinGeckoId: 'sentinel' }],
+  feeCurrencies: [{
+    coinDenom: 'P2P', coinMinimalDenom: 'udvpn', coinDecimals: 6, coinGeckoId: 'sentinel',
+    gasPriceStep: { low: 0.05, average: 0.1, high: 0.25 },
+  }],
+  stakeCurrency: { coinDenom: 'P2P', coinMinimalDenom: 'udvpn', coinDecimals: 6, coinGeckoId: 'sentinel' },
+  features: [],
+};
+
+function setKeplrError(msg) { const e = $('keplrError'); if (e) e.textContent = msg || ''; }
+
+async function doKeplrLogin() {
+  const btn = $('keplrBtn');
+  setKeplrError('');
+  if (!window.keplr) {
+    setKeplrError('Keplr extension not detected. Install it from keplr.app, then reload.');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+  try {
+    try {
+      await window.keplr.experimentalSuggestChain(SENTINEL_KEPLR_CHAIN);
+    } catch (e) {
+      // Already-known chains throw a benign rejection on some Keplr builds — ignore.
+      if (!/already/i.test(e.message || '')) throw e;
+    }
+    await window.keplr.enable('sentinelhub-2');
+    const key = await window.keplr.getKey('sentinelhub-2');
+    if (!key?.bech32Address?.startsWith('sent1')) throw new Error('Unexpected Keplr address: ' + key?.bech32Address);
+
+    // Challenge → ADR-36 sign → login
+    const challengeRes = await fetch('/api/wallet/keplr-challenge', {
+      method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    const challenge = await challengeRes.json();
+    if (!challenge.nonce) throw new Error('Failed to fetch challenge');
+
+    const signed = await window.keplr.signArbitrary('sentinelhub-2', key.bech32Address, challenge.nonce);
+    // signed = { signature: base64, pub_key: { type, value } }
+    const loginRes = await fetch('/api/wallet/keplr-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({
+        addr: key.bech32Address,
+        pubkey: signed.pub_key.value,
+        signature: signed.signature,
+        nonce: challenge.nonce,
+      }),
+    });
+    const d = await loginRes.json();
+    if (!d.ok) throw new Error(d.error || 'Login failed');
+
+    invalidateCache(/.*/);
+    S.wallet = null;
+    S.myPlans = null;
+    S.signMode = 'keplr';
+    S.keplrKey = key; // cached pubkey for signDirect; address comes from server cookie
+    await loadWallet();
+    await navigateUnderOverlay('dashboard');
+    hideImportOverlay();
+  } catch (e) {
+    console.error('[keplr]', e);
+    setKeplrError(e.message || 'Keplr connection cancelled');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect with Keplr';
+  }
+}
+
+// ─── Keplr-aware fetch ───────────────────────────────────────────────────────
+// Wraps fetch + JSON parse. If the response is a Keplr sign-required payload,
+// transparently runs signDirect and re-broadcasts via /api/tx/broadcast-signed.
+// Routes don't need to know whether they're talking to a mnemonic or Keplr
+// session — caller code reads the same {ok, txHash, ...} shape either way.
+async function txFetch(url, opts = {}) {
+  const res = await fetch(url, {
+    ...opts,
+    headers: { 'X-Requested-With': 'XMLHttpRequest', ...(opts.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data && data.mode === 'keplr-sign' && data.signDoc) {
+    return await signAndBroadcast(data.signDoc);
+  }
+  return data;
+}
+
+async function signAndBroadcast(signDoc) {
+  if (!window.keplr) throw new Error('Keplr not available');
+  const addr = walletAddress || (S.keplrKey && S.keplrKey.bech32Address);
+  if (!addr) throw new Error('No Keplr address loaded');
+  // signDirect needs Uint8Arrays for body/auth; the server hands us base64.
+  const bodyBytes = b64ToUint8(signDoc.bodyBytes);
+  const authInfoBytes = b64ToUint8(signDoc.authInfoBytes);
+  const direct = {
+    chainId: signDoc.chainId,
+    accountNumber: signDoc.accountNumber, // string is fine
+    bodyBytes,
+    authInfoBytes,
+  };
+  const signed = await window.keplr.signDirect(signDoc.chainId, addr, direct);
+  // signed.signed.* echoes the doc; signed.signature.signature is base64 sig.
+  const broadcast = await fetch('/api/tx/broadcast-signed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({
+      bodyBytes: uint8ToB64(signed.signed.bodyBytes),
+      authInfoBytes: uint8ToB64(signed.signed.authInfoBytes),
+      signature: signed.signature.signature,
+    }),
+  });
+  return await broadcast.json();
+}
+
+function b64ToUint8(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function uint8ToB64(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s);
 }
 
 async function doLogout() {
@@ -5469,7 +5625,7 @@ async function registerProvider() {
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner"></div> Broadcasting...';
   try {
-    const r = await fetch('/api/provider/register', {
+    const d = await txFetch('/api/provider/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({
         name,
@@ -5478,7 +5634,6 @@ async function registerProvider() {
         description: $('provDesc').value.trim(),
       }),
     });
-    const d = await r.json();
     if (d.ok) {
       const label = d.action === 'updated' ? 'Provider updated' : 'Provider registered';
       toast(label + '! TX: ' + d.txHash.slice(0, 16) + '...', 'success');
@@ -5515,7 +5670,7 @@ async function createPlan() {
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner"></div> Broadcasting...';
   try {
-    const r = await fetch('/api/plan/create', {
+    const d = await txFetch('/api/plan/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({
         durationSeconds: dur,
@@ -5524,7 +5679,6 @@ async function createPlan() {
         priceAmount: price,
       }),
     });
-    const d = await r.json();
     if (d.ok) {
       const planMsg = d.planId ? `Plan #${d.planId} created!` : 'Plan created!';
       toast(planMsg + ' TX: ' + d.txHash.slice(0, 16) + '...', 'success');
@@ -5651,6 +5805,8 @@ function prefetchPerPlan() {
 function selectPlan(id, opts = {}) {
   S.mgrPlanId = String(id);
   S.mgrPage = 1;
+  S.subsPage = 1;
+  S.fgPage = 1;
   S.mgrNodes = null;
   S.addSet.clear();
   S.removeSet.clear();
@@ -5864,7 +6020,7 @@ function renderAddNodes() {
             <span class="node-list-flag">${flag}</span>
             <div class="node-list-info">
               <span class="node-list-addr">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</span>
-              ${n.moniker ? `<span class="node-list-moniker">${escapeHtml(n.moniker)}</span>` : ''}
+              ${n.moniker ? `<span class="node-list-moniker" title="${escapeAttr(n.moniker)}">${escapeHtml(n.moniker.length > 60 ? n.moniker.slice(0, 60) + '…' : n.moniker)}</span>` : ''}
             </div>
             <span>${escapeHtml(n.country) || '??'}</span>
             <span class="node-list-city" title="${escapeAttr(n.city || '')}">${n.city ? escapeHtml(n.city) : '<span style="color:var(--text-muted)">—</span>'}</span>
@@ -5881,7 +6037,7 @@ function renderAddNodes() {
         return `<div class="node-card ${selClass}" ${onclick} id="acard_${n.address.slice(-12)}">
           <div class="node-card-top">
             <span class="node-card-select ${selBadge}">${selText}</span>
-            ${n.moniker ? `<span class="node-card-moniker" title="${escapeAttr(n.moniker)}">${escapeHtml(n.moniker)}</span>` : ''}
+            ${n.moniker ? `<span class="node-card-moniker" title="${escapeAttr(n.moniker)}">${escapeHtml(n.moniker.length > 60 ? n.moniker.slice(0, 60) + '…' : n.moniker)}</span>` : ''}
           </div>
           <div class="node-card-addr" title="${n.address}">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</div>
           <div class="node-card-meta">
@@ -6359,11 +6515,10 @@ async function linkBatch() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Adding ' + addrs.length + '...'; }
 
   try {
-    const r = await fetch('/api/plan-manager/batch-link', {
+    const d = await txFetch('/api/plan-manager/batch-link', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ planId: parseInt(S.mgrPlanId), nodeAddresses: addrs, leaseHours: S.leaseHours }),
     });
-    const d = await r.json();
     if (d.ok) {
       const count = d.linked || addrs.length;
       toast(d.alreadyLinked ? 'Nodes already in plan' : count + ' nodes linked in 1 TX!', d.alreadyLinked ? 'info' : 'success');
@@ -6400,11 +6555,10 @@ async function unlinkBatch() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Removing ' + addrs.length + '...'; }
 
   try {
-    const r = await fetch('/api/plan-manager/batch-unlink', {
+    const d = await txFetch('/api/plan-manager/batch-unlink', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ planId: parseInt(S.mgrPlanId), nodeAddresses: addrs }),
     });
-    const d = await r.json();
     if (d.ok) {
       toast((d.unlinked || addrs.length) + ' nodes removed in 1 TX', 'success');
       if (S.mgrNodes && S.mgrNodes.nodes) {
@@ -7278,20 +7432,19 @@ async function runTrigTest() {
   out.className = 'trig-test-result trig-test-result-pending';
   out.innerHTML = '<strong>Broadcasting subscribe TX…</strong> Signing with your loaded wallet.';
   try {
-    const r = await fetch('/api/plan/subscribe', {
+    const j = await txFetch('/api/plan/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ planId, denom, renewalPolicy: renewal }),
     });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok && (j.ok || j.txHash)) {
+    if (j.ok || j.txHash) {
       out.className = 'trig-test-result trig-test-result-ok';
       const subId = j.subscriptionId ? '<div>Subscription ID: <code>' + escapeHtml(String(j.subscriptionId)) + '</code></div>' : '';
       const tx = j.txHash ? '<div>tx: <code>' + escapeHtml(j.txHash) + '</code></div>' : '';
       out.innerHTML = '<strong>✓ Subscribe TX broadcast.</strong>' + subId + tx;
     } else {
       out.className = 'trig-test-result trig-test-result-err';
-      const errMsg = j.error || j.rawLog || ('HTTP ' + r.status);
+      const errMsg = j.error || j.rawLog || 'Subscribe failed';
       out.innerHTML = '<strong>✗ Trigger failed.</strong><div>' + escapeHtml(errMsg) + '</div>';
     }
   } catch (e) {
@@ -7321,12 +7474,11 @@ async function authorizeUser() {
   try {
     // Issue fee grant (the main authorization action)
     if (grantFee) {
-      const r = await fetch('/api/feegrant/grant', {
+      const d = await txFetch('/api/feegrant/grant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         body: JSON.stringify({ grantee: addr, spendLimitDvpn: 10, expirationDays: 30 }),
       });
-      const d = await r.json();
       if (d.error) throw new Error(d.error);
     }
     if (status) status.innerHTML = '<span style="color:#10b981">Authorized! Fee grant issued. User can now use the plan.</span>';
@@ -7364,12 +7516,11 @@ async function authorizeBulk() {
     if (status) status.innerHTML = '<span style="color:var(--text-muted)">Batch ' + (Math.floor(i/5)+1) + '/' + Math.ceil(addrs.length/5) + '...</span>';
     for (const addr of batch) {
       try {
-        const r = await fetch('/api/feegrant/grant', {
+        const d = await txFetch('/api/feegrant/grant', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
           body: JSON.stringify({ grantee: addr, spendLimitDvpn: 10, expirationDays: 30 }),
         });
-        const d = await r.json();
         if (d.error) throw new Error(d.error);
         granted++;
       } catch { errors++; }
@@ -7692,7 +7843,7 @@ async function renderSubscribers() {
     return;
   }
 
-  const subsUrl = '/api/plans/' + S.mgrPlanId + '/subscriptions?limit=200';
+  const subsUrl = '/api/plans/' + S.mgrPlanId + '/subscriptions?limit=2000';
   const subsCached = _dataCache[subsUrl];
 
   if (!subsCached) {
@@ -7766,7 +7917,14 @@ async function renderSubscribers() {
         <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Share your Plan ID <strong style="color:var(--accent)">#${S.mgrPlanId}</strong> with users so they can subscribe</div>
       </div>`;
     } else {
-      const rows = subs.map(s => {
+      const PAGE_SIZE = 100;
+      const totalPages = Math.max(1, Math.ceil(subs.length / PAGE_SIZE));
+      if (S.subsPage > totalPages) S.subsPage = totalPages;
+      if (S.subsPage < 1) S.subsPage = 1;
+      const startIdx = (S.subsPage - 1) * PAGE_SIZE;
+      const pageSubs = subs.slice(startIdx, startIdx + PAGE_SIZE);
+
+      const rows = pageSubs.map(s => {
         const expiry = s.inactive_at ? new Date(s.inactive_at) : null;
         const isActive = s.status === 'active' && expiry && expiry > now;
         const startDate = s.start_at ? new Date(s.start_at).toLocaleDateString() : '--';
@@ -7798,6 +7956,7 @@ async function renderSubscribers() {
           }
         }
 
+        const subIdStr = s.id != null ? String(s.id) : '--';
         return `<tr>
           <td><span class="copyable" title="${s.acc_address}" onclick="copyToClipboard('${s.acc_address}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(s.acc_address)}</span> ${explorerLink('wallet', s.acc_address, '↗', 'class="explorer-link-icon" title="View wallet on explorer"')}</td>
           <td><span class="${isActive ? 'subs-badge-active' : 'subs-badge-inactive'}">${isActive ? 'Active' : 'Inactive'}</span></td>
@@ -7805,9 +7964,15 @@ async function renderSubscribers() {
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${sPriceDvpn >= 1 ? fmt(Math.round(sPriceDvpn)) : sPriceDvpn.toFixed(3)} P2P${sPriceUsd !== null ? `<div style="font-size:10px;color:var(--text-dim)">${fmtUsd(sPriceUsd)}</div>` : ''}</td>
           <td style="font-size:11px">${startDate}</td>
           <td style="font-size:11px">${endDate}</td>
-          <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${s.id || '--'}</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px"><span class="sub-id-cell" title="${escapeAttr(subIdStr)}">${escapeHtml(subIdStr)}</span></td>
         </tr>`;
       }).join('');
+
+      const paginationHtml = totalPages > 1 ? `<div class="pagination" style="padding:12px 14px">
+        <button class="btn btn-ghost btn-sm" ${S.subsPage <= 1 ? 'disabled' : ''} onclick="S.subsPage--;renderSubscribers()">Prev</button>
+        <span class="info">Page ${S.subsPage} of ${totalPages} · ${fmt(startIdx + 1)}–${fmt(Math.min(startIdx + PAGE_SIZE, subs.length))} of ${fmt(subs.length)}</span>
+        <button class="btn btn-ghost btn-sm" ${S.subsPage >= totalPages ? 'disabled' : ''} onclick="S.subsPage++;renderSubscribers()">Next</button>
+      </div>` : '';
 
       tableHtml = `<div class="card">
         <div class="card-header">
@@ -7816,12 +7981,16 @@ async function renderSubscribers() {
         </div>
         <div style="overflow-x:auto">
           <table class="subs-table">
+            <colgroup>
+              <col style="width:22%"><col style="width:10%"><col style="width:11%"><col style="width:15%"><col style="width:14%"><col style="width:14%"><col style="width:14%">
+            </colgroup>
             <thead><tr>
-              <th>Wallet</th><th>Status</th><th>Time Left</th><th>Price Paid</th><th>Started</th><th>Expires</th><th>Sub ID</th>
+              <th scope="col">Wallet</th><th scope="col">Status</th><th scope="col">Time Left</th><th scope="col">Price Paid</th><th scope="col">Started</th><th scope="col">Expires</th><th scope="col">Sub ID</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
+        ${paginationHtml}
       </div>`;
     }
 
@@ -7854,7 +8023,13 @@ async function loadFeeGrants() {
   if (S.page === 'fee-grants') renderFeeGrants();
 }
 
+let _fgRendering = false;
 async function renderFeeGrants() {
+  if (_fgRendering) return;
+  _fgRendering = true;
+  try { return await _renderFeeGrantsInner(); } finally { _fgRendering = false; }
+}
+async function _renderFeeGrantsInner() {
   const plans = S.myPlans || [];
   const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadFeeGrants()");
 
@@ -8104,7 +8279,14 @@ async function renderFeeGrants() {
         <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Use the settings above to grant fee allowances to your subscribers</div>
       </div>`;
     } else {
-      const rows = grants.map(g => {
+      const PAGE_SIZE = 100;
+      const totalPages = Math.max(1, Math.ceil(grants.length / PAGE_SIZE));
+      if (S.fgPage > totalPages) S.fgPage = totalPages;
+      if (S.fgPage < 1) S.fgPage = 1;
+      const startIdx = (S.fgPage - 1) * PAGE_SIZE;
+      const pageGrants = grants.slice(startIdx, startIdx + PAGE_SIZE);
+
+      const rows = pageGrants.map(g => {
         const isSub = subscriberAddrs.has(g.grantee);
         const limitStr = g.spendLimit && g.spendLimit.length > 0
           ? g.spendLimit.map(c => `${(parseInt(c.amount) / 1e6).toFixed(1)} ${c.denom === 'udvpn' ? 'P2P' : c.denom}`).join(', ')
@@ -8118,7 +8300,7 @@ async function renderFeeGrants() {
           }
         }
         return `<tr>
-          <td><span class="copyable" title="${g.grantee}" onclick="copyToClipboard('${g.grantee}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(g.grantee)}</span> ${explorerLink('wallet', g.grantee, '↗', 'class="explorer-link-icon" title="View wallet on explorer"')}${isSub ? ' <span style="background:var(--accent-glow);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-family:system-ui">SUB</span>' : ''}</td>
+          <td><span class="copyable" title="${g.grantee}" onclick="copyToClipboard('${g.grantee}', this)" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:pointer">${shortAddr(g.grantee)}</span> ${explorerLink('wallet', g.grantee, '↗', 'class="explorer-link-icon" title="View wallet on explorer" aria-label="View wallet on explorer"')}${isSub ? ' <span style="background:var(--accent-glow);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-family:system-ui">SUB</span>' : ''}</td>
           <td><span class="subs-badge-${g.allowanceType === 'basic' ? 'active' : 'inactive'}" style="font-size:11px">${escapeHtml(g.allowanceType)}</span></td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${limitStr}</td>
           <td style="font-size:12px">${expStr}</td>
@@ -8126,15 +8308,25 @@ async function renderFeeGrants() {
         </tr>`;
       }).join('');
 
+      const paginationHtml = totalPages > 1 ? `<div class="pagination" style="padding:12px 14px">
+        <button class="btn btn-ghost btn-sm" ${S.fgPage <= 1 ? 'disabled' : ''} onclick="S.fgPage--;renderFeeGrants()">Prev</button>
+        <span class="info">Page ${S.fgPage} of ${totalPages} · ${fmt(startIdx + 1)}–${fmt(Math.min(startIdx + PAGE_SIZE, grants.length))} of ${fmt(grants.length)}</span>
+        <button class="btn btn-ghost btn-sm" ${S.fgPage >= totalPages ? 'disabled' : ''} onclick="S.fgPage++;renderFeeGrants()">Next</button>
+      </div>` : '';
+
       tableHtml = `${statsHtml}
         <div style="overflow-x:auto">
           <table class="subs-table" style="width:100%">
+            <colgroup>
+              <col style="width:32%"><col style="width:14%"><col style="width:22%"><col style="width:18%"><col style="width:14%">
+            </colgroup>
             <thead><tr>
-              <th style="text-align:left">Grantee</th><th style="text-align:left">Type</th><th style="text-align:left">Spend Limit</th><th style="text-align:left">Expires</th><th style="text-align:right">Action</th>
+              <th scope="col" style="text-align:left">Grantee</th><th scope="col" style="text-align:left">Type</th><th scope="col" style="text-align:left">Spend Limit</th><th scope="col" style="text-align:left">Expires</th><th scope="col" style="text-align:right">Action</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
-        </div>`;
+        </div>
+        ${paginationHtml}`;
     }
 
     document.getElementById('fgTableArea').innerHTML = tableHtml;
@@ -8163,12 +8355,11 @@ async function initAutoGrant() {
       // Auto-grant: silently run grant-all for new subscribers
       const spendLimit = parseFloat($('fgSpendLimit')?.value) || d.spendLimitDvpn || 10;
       const expDays = parseInt($('fgExpDays')?.value) || d.expirationDays || 30;
-      const r2 = await fetch('/api/feegrant/grant-subscribers', {
+      const d2 = await txFetch('/api/feegrant/grant-subscribers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         body: JSON.stringify({ planId: S.mgrPlanId, spendLimitDvpn: spendLimit, expirationDays: expDays }),
       });
-      const d2 = await r2.json();
       if (d2.granted > 0) {
         _autoGrantSessionCount += d2.granted;
         toast(`Auto-granted ${d2.granted} new subscriber${d2.granted > 1 ? 's' : ''} (${_autoGrantSessionCount} this session)`, 'success');
@@ -8408,12 +8599,11 @@ async function grantAllSubscribers() {
   const spendLimit = parseFloat($('fgSpendLimit')?.value) || 0;
   const expDays = parseInt($('fgExpDays')?.value) || 0;
   try {
-    const r = await fetch('/api/feegrant/grant-subscribers', {
+    const d = await txFetch('/api/feegrant/grant-subscribers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ planId: S.mgrPlanId, spendLimitDvpn: spendLimit, expirationDays: expDays }),
     });
-    const d = await r.json();
     if (d.error) throw new Error(d.error);
     if (d.granted > 0) _autoGrantSessionCount += d.granted;
     toast(`Granted: ${d.granted}, skipped: ${d.skipped || 0}${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
@@ -8433,12 +8623,11 @@ async function grantSingleAddr() {
   const spendLimit = parseFloat(document.getElementById('fgSpendLimit')?.value) || 0;
   const expDays = parseInt(document.getElementById('fgExpDays')?.value) || 0;
   try {
-    const r = await fetch('/api/feegrant/grant', {
+    const d = await txFetch('/api/feegrant/grant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ grantee: addr, spendLimitDvpn: spendLimit, expirationDays: expDays }),
     });
-    const d = await r.json();
     if (d.error) throw new Error(d.error);
     toast(`Fee grant issued! TX: ${d.txHash?.slice(0, 12)}...`, 'success');
     document.getElementById('fgSingleAddr').value = '';
@@ -8460,12 +8649,11 @@ async function revokeSingleGrant(grantee) {
   });
   if (!ok) return;
   try {
-    const r = await fetch('/api/feegrant/revoke', {
+    const d = await txFetch('/api/feegrant/revoke', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ grantee }),
     });
-    const d = await r.json();
     if (d.error) throw new Error(d.error);
     toast(`Grant revoked! TX: ${d.txHash?.slice(0, 12)}...`, 'success');
     invalidateCache('/api/feegrant/grants');
@@ -8488,11 +8676,10 @@ async function revokeAllGrants() {
   const btn = document.getElementById('fgRevokeAllBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Revoking...'; }
   try {
-    const r = await fetch('/api/feegrant/revoke-all', {
+    const d = await txFetch('/api/feegrant/revoke-all', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
     });
-    const d = await r.json();
     if (d.error) throw new Error(d.error);
     toast(`Revoked ${d.revoked} grants${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
     invalidateCache('/api/feegrant/grants');
@@ -8521,12 +8708,11 @@ async function cleanupStaleGrants() {
   if (!ok) return;
   toast(`Revoking ${grantees.length} stale grants…`, 'info');
   try {
-    const r = await fetch('/api/feegrant/revoke-list', {
+    const d = await txFetch('/api/feegrant/revoke-list', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ grantees }),
     });
-    const d = await r.json();
     if (d.error) throw new Error(d.error);
     const parts = [];
     if (d.revoked) parts.push(`${d.revoked} revoked`);

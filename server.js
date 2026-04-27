@@ -1,6 +1,7 @@
 // ─── Plan Manager Server ──────────────────────────────────────────────────────
 // Express backend for Sentinel dVPN plan management.
-// Modules: lib/constants, lib/cache, lib/errors, lib/protobuf, lib/chain, lib/wallet
+// Modules: lib/constants, lib/errors, lib/protobuf, lib/chain, lib/wallet
+// Cache (cached/cacheInvalidate/cacheClear) imported from blue-js-sdk.
 
 import 'dotenv/config';
 import express from 'express';
@@ -16,9 +17,8 @@ import {
   cached,
   cacheInvalidate,
   cacheClear,
-  ErrorCodes,
-  isRetryable,
-  userMessage,
+  buildFeeGrantMsg,
+  buildRevokeFeeGrantMsg,
 } from 'blue-js-sdk';
 
 // ─── Module Imports ──────────────────────────────────────────────────────────
@@ -42,12 +42,16 @@ import {
   rpcQueryPlan,
   rpcQueryProvider,
   rpcQueryBalance,
+  KeplrSignRequiredError,
+  broadcastSignedTx,
 } from './lib/chain.js';
 import { getAddr, getProvAddr, requireWallet } from './lib/wallet.js';
 import {
   initSession, isMultiUser, encryptMnemonic, decryptMnemonic,
   sessionFromMnemonic, runWithSession, parseCookies,
   buildSetCookie, buildClearCookie, COOKIE_NAME, dropSessionFromCache,
+  KEPLR_COOKIE_NAME, keplrSessionFromAddress, dropKeplrSessionFromCache,
+  buildKeplrToken, parseKeplrToken, buildSetKeplrCookie, buildClearKeplrCookie,
 } from './lib/session.js';
 
 registerCleanupHandlers();
@@ -125,18 +129,35 @@ app.use(express.static(join(__dirname, 'public')));
 // those helpers automatically resolve to the per-request wallet.
 app.use(async (req, res, next) => {
   const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[COOKIE_NAME];
-  if (!token) return next();
-  try {
-    const mnemonic = decryptMnemonic(token);
-    const session = await sessionFromMnemonic(mnemonic);
-    runWithSession(session, () => next());
-  } catch (err) {
-    // Tampered / stale / key-rotated cookie — clear it and continue.
-    console.warn('[session] Rejecting cookie:', err.message);
-    res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
-    next();
+  const mnemonicToken = cookies[COOKIE_NAME];
+  const keplrToken = cookies[KEPLR_COOKIE_NAME];
+
+  if (mnemonicToken) {
+    try {
+      const mnemonic = decryptMnemonic(mnemonicToken);
+      const session = await sessionFromMnemonic(mnemonic);
+      return runWithSession(session, () => next());
+    } catch (err) {
+      if (relayKeplrSign(err, res)) return;
+      console.warn('[session] Rejecting mnemonic cookie:', err.message);
+      res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
+      // Fall through to Keplr probe (mnemonic and Keplr can't both be active,
+      // but a stale mnemonic cookie shouldn't lock out an otherwise-valid
+      // Keplr session).
+    }
   }
+
+  if (keplrToken) {
+    const parsed = parseKeplrToken(keplrToken);
+    if (parsed) {
+      const session = keplrSessionFromAddress(parsed.addr, parsed.pubkeyB64);
+      return runWithSession(session, () => next());
+    }
+    console.warn('[session] Rejecting Keplr cookie (HMAC mismatch)');
+    res.setHeader('Set-Cookie', buildClearKeplrCookie({ secure: req.secure }));
+  }
+
+  next();
 });
 
 // ─── Plan ID Persistence ──────────────────────────────────────────────────────
@@ -158,6 +179,7 @@ function readPlanStore() {
     }
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Failed to load my-plans.json:', err.message);
     return {};
   }
@@ -344,6 +366,7 @@ function loadNodeCacheFromDisk() {
       }
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Failed to load node cache from disk:', err.message);
   }
 }
@@ -432,6 +455,7 @@ async function discoverPlanIds() {
             const result = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 1 });
             if (result && result.length > 0) { ids.add(planId); return; }
           } catch (err) {
+            if (relayKeplrSign(err, res)) return;
             console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} — LCD fallback`);
           }
         }
@@ -461,6 +485,7 @@ async function getUniqueWallets(planId) {
       return wallets.size;
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} — LCD fallback`);
   }
 
@@ -500,6 +525,7 @@ async function _getPlanStatsImpl(planId) {
           const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 1, limit: 5000 });
           if (nodes) return { nodes };
         } catch (err) {
+          if (relayKeplrSign(err, res)) return;
           console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
         }
       }
@@ -515,6 +541,7 @@ async function _getPlanStatsImpl(planId) {
           const p = await rpcQueryPlan(rpc, planId);
           if (p) return p;
         } catch (err) {
+          if (relayKeplrSign(err, res)) return;
           console.log(`[RPC] _getPlanStatsImpl plan(${planId}) failed: ${err.message} — LCD fallback`);
         }
       }
@@ -620,6 +647,7 @@ async function getNodesForPlan(planId) {
       return nodes;
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] getNodesForPlan(${planId}) failed: ${err.message} — LCD fallback`);
   }
 
@@ -680,6 +708,7 @@ async function getAllNodeInfo() {
       return nodeMap;
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] getAllNodeInfo failed (${err.message}), falling back to LCD`);
   }
 
@@ -747,6 +776,7 @@ async function autoLeaseNode(nodeAddress, hours = 24) {
     nodeInfo = await rpcQueryNode(rpcClient, nodeAddress);
     if (nodeInfo) console.log(`[LEASE] Node found via RPC: ${nodeAddress}`);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.log(`[LEASE] RPC lookup failed (${err.message}), falling back to LCD`);
   }
 
@@ -805,6 +835,7 @@ async function batchLeaseNodes(addrs, hours = 24) {
     }
     console.log(`[BATCH-LEASE] RPC lookup: ${Object.keys(rawMap).length}/${addrs.length} nodes found`);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.log(`[BATCH-LEASE] RPC failed (${err.message}), falling back to LCD`);
     // LCD fallback: paginated scan (slow but reliable)
     let rawNodesList = [], nextKey = null;
@@ -899,6 +930,7 @@ app.post('/api/wallet/generate', rateLimit('wgen', 10, 60_000), async (req, res)
     res.setHeader('Pragma', 'no-cache');
     res.json({ mnemonic: wallet.mnemonic, address: account.address });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Wallet generate error:', err.message);
     res.status(500).json({ error: 'Failed to generate wallet: ' + err.message });
   }
@@ -930,6 +962,7 @@ app.post('/api/wallet/import', rateLimit('wimp', 20, 60_000), async (req, res) =
 
     res.json({ ok: true, address: session.addr, provAddress: session.provAddr });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Wallet import error:', err.message);
     res.status(400).json({ error: 'Invalid mnemonic: ' + err.message });
   }
@@ -948,10 +981,199 @@ app.post('/api/wallet/logout', (req, res) => {
         dropSessionFromCache(m);
       } catch {}
     }
+    const kt = cookies[KEPLR_COOKIE_NAME];
+    if (kt) {
+      const parsed = parseKeplrToken(kt);
+      if (parsed) dropKeplrSessionFromCache(parsed.addr);
+    }
   } catch {}
-  res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
+  // Clear both cookies so a Keplr → mnemonic switch (or vice versa) leaves
+  // no residual session.
+  res.setHeader('Set-Cookie', [
+    buildClearCookie({ secure: req.secure }),
+    buildClearKeplrCookie({ secure: req.secure }),
+  ]);
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.json({ ok: true });
+});
+
+// ─── Keplr Login ─────────────────────────────────────────────────────────────
+// Client flow:
+//   1. POST /api/wallet/keplr-challenge           → { nonce }
+//   2. window.keplr.signArbitrary(chainId, addr, nonce) → { signature, pub_key }
+//   3. POST /api/wallet/keplr-login { addr, pubkey, signature, nonce }
+// We verify the ADR-36 signature server-side before issuing the spm_keplr
+// cookie. This proves the browser holds the private key for `addr` (defends
+// against a malicious page racing the cookie set after a user picks the
+// wrong wallet).
+
+const keplrChallenges = new Map(); // nonce -> expiresAt
+const KEPLR_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * If `err` is a Keplr sign-required signal, write the {mode,signDoc} response
+ * and return true. Routes' catch blocks call this first so they don't 500 a
+ * legitimate client-signs request.
+ */
+function relayKeplrSign(err, res) {
+  if (err && err.code === 'KEPLR_SIGN_REQUIRED' && err.signDoc) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ mode: 'keplr-sign', signDoc: err.signDoc });
+    return true;
+  }
+  return false;
+}
+
+// ADR-36 verification:
+//   - signDoc is an amino StdSignDoc with chain_id="", account_number="0",
+//     sequence="0", fee={gas:"0",amount:[]}, memo="", and a single
+//     {type:"sign/MsgSignData", value:{signer:addr, data:base64(message)}}.
+//   - Sorted-keys JSON encoding (amino) → SHA-256 → secp256k1.verify.
+//   - Pubkey-derived address must match the claimed bech32.
+async function verifyAdr36Signature({ addr, pubkeyB64, signatureB64, message }) {
+  try {
+    const { Secp256k1, Sha256, ripemd160 } = await import('@cosmjs/crypto');
+    const { fromBase64, toBech32: toBech } = await import('@cosmjs/encoding');
+
+    const pubkey = fromBase64(pubkeyB64);
+    if (pubkey.length !== 33) return false;
+    const signature = fromBase64(signatureB64);
+    if (signature.length !== 64) return false;
+
+    // Derive bech32 from pubkey: sha256 → ripemd160 → bech32('sent', ...).
+    const sha = new Sha256(pubkey).digest();
+    const ripemd = ripemd160(sha);
+    const derived = toBech('sent', ripemd);
+    if (derived !== addr) return false;
+
+    // Build the canonical amino StdSignDoc Keplr produces for signArbitrary.
+    const dataB64 = Buffer.from(message, 'utf8').toString('base64');
+    const signDoc = {
+      account_number: '0',
+      chain_id: '',
+      fee: { amount: [], gas: '0' },
+      memo: '',
+      msgs: [{ type: 'sign/MsgSignData', value: { data: dataB64, signer: addr } }],
+      sequence: '0',
+    };
+    const sortedJson = sortedJsonStringify(signDoc);
+    const hash = new Sha256(Buffer.from(sortedJson, 'utf8')).digest();
+
+    return await Secp256k1.verifySignature(
+      // Secp256k1Signature.fromFixedLength(signature) — but the lib wants
+      // an ExtendedSecp256k1Signature; we pass via the static helper.
+      // Use the simpler `.verifySignature` API which accepts the 64-byte sig.
+      // Build a Secp256k1Signature from r||s.
+      (await import('@cosmjs/crypto')).Secp256k1Signature.fromFixedLength(signature),
+      hash,
+      pubkey,
+    );
+  } catch (err) {
+    if (relayKeplrSign(err, res)) return;
+    console.warn('[keplr] ADR-36 verify error:', err.message);
+    return false;
+  }
+}
+
+function sortedJsonStringify(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(sortedJsonStringify).join(',') + ']';
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + sortedJsonStringify(obj[k])).join(',') + '}';
+}
+
+function gcKeplrChallenges() {
+  const now = Date.now();
+  for (const [n, exp] of keplrChallenges) if (exp < now) keplrChallenges.delete(n);
+}
+
+app.post('/api/wallet/keplr-challenge', rateLimit('kchal', 30, 60_000), (req, res) => {
+  gcKeplrChallenges();
+  const nonce = `spm-login-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  keplrChallenges.set(nonce, Date.now() + KEPLR_CHALLENGE_TTL_MS);
+  res.json({ nonce });
+});
+
+app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req, res) => {
+  try {
+    const { addr, pubkey, signature, nonce } = req.body || {};
+    if (!addr || !pubkey || !signature || !nonce) {
+      return res.status(400).json({ error: 'addr, pubkey, signature, nonce required' });
+    }
+    if (typeof addr !== 'string' || !addr.startsWith('sent1')) {
+      return res.status(400).json({ error: 'Invalid Sentinel address' });
+    }
+    if (!keplrChallenges.has(nonce)) {
+      return res.status(400).json({ error: 'Unknown or expired challenge' });
+    }
+    keplrChallenges.delete(nonce); // single-use
+
+    // Verify ADR-36 signature manually (no Keplr dep).
+    //   1. Rebuild the canonical amino SignDoc Keplr signs for arbitrary text.
+    //   2. SHA-256 the JSON bytes.
+    //   3. secp256k1.verify(hash, sig, pubkey).
+    //   4. Confirm pubkey hash → addr matches the claimed bech32 address
+    //      (otherwise an attacker could submit anyone's pubkey + a sig made
+    //      with their own key for a different address).
+    const ok = await verifyAdr36Signature({ addr, pubkeyB64: pubkey, signatureB64: signature, message: nonce });
+    if (!ok) {
+      return res.status(401).json({ error: 'Signature verification failed' });
+    }
+
+    const session = keplrSessionFromAddress(addr, pubkey);
+    const token = buildKeplrToken(session.addr, session.pubkeyB64);
+    // Clear any stale mnemonic cookie so the two paths don't fight in the
+    // middleware (mnemonic wins if both are set).
+    res.setHeader('Set-Cookie', [
+      buildClearCookie({ secure: req.secure }),
+      buildSetKeplrCookie(token, { secure: req.secure }),
+    ]);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.json({ ok: true, address: session.addr, provAddress: session.provAddr, mode: 'keplr' });
+  } catch (err) {
+    if (relayKeplrSign(err, res)) return;
+    console.error('Keplr login error:', err.message);
+    res.status(500).json({ error: 'Keplr login failed: ' + err.message });
+  }
+});
+
+// ─── Keplr Broadcast (client-signed TxRaw) ───────────────────────────────────
+// The browser POSTs back the result of window.keplr.signDirect packaged as a
+// TxRaw (bodyBytes, authInfoBytes, signatures[]) base64-encoded. We broadcast
+// it via the existing RPC failover and respond in the same shape mnemonic
+// flows return. Cookie middleware already validated the Keplr session.
+app.post('/api/tx/broadcast-signed', async (req, res) => {
+  if (!requireWallet(req, res)) return;
+  try {
+    const { bodyBytes, authInfoBytes, signature } = req.body || {};
+    if (!bodyBytes || !authInfoBytes || !signature) {
+      return res.status(400).json({ error: 'bodyBytes, authInfoBytes, signature required' });
+    }
+    const { TxRaw } = await import('cosmjs-types/cosmos/tx/v1beta1/tx.js');
+    const { fromBase64, toBase64 } = await import('@cosmjs/encoding');
+    const txRaw = TxRaw.encode(TxRaw.fromPartial({
+      bodyBytes: fromBase64(bodyBytes),
+      authInfoBytes: fromBase64(authInfoBytes),
+      signatures: [fromBase64(signature)],
+    })).finish();
+    const result = await broadcastSignedTx(toBase64(txRaw));
+    if (result.code !== 0) {
+      return res.json({ ok: false, error: parseChainError(result.rawLog || 'Broadcast failed'), errorCode: 'tx-failed', txHash: result.transactionHash });
+    }
+    cacheInvalidate(`balance:${getAddr()}`);
+    return res.json({
+      ok: true,
+      txHash: result.transactionHash,
+      height: result.height,
+      gasUsed: result.gasUsed,
+      gasWanted: result.gasWanted,
+      pending: result.pending || false,
+    });
+  } catch (err) {
+    if (relayKeplrSign(err, res)) return;
+    console.error('[broadcast-signed] error:', err.message);
+    res.status(500).json({ ok: false, error: parseChainError(err.message), errorCode: 'broadcast-error' });
+  }
 });
 
 app.get('/api/wallet', async (req, res) => {
@@ -972,6 +1194,7 @@ app.get('/api/wallet', async (req, res) => {
             if (prov) return prov;
           }
         } catch (err) {
+          if (relayKeplrSign(err, res)) return;
           console.log(`[RPC] provider lookup failed: ${err.message} — LCD fallback`);
         }
         // LCD fallback
@@ -979,6 +1202,7 @@ app.get('/api/wallet', async (req, res) => {
           const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
           return (provs.providers || []).find(p => p.address === getProvAddr()) || null;
         } catch (err) {
+          if (relayKeplrSign(err, res)) return;
           console.error('Failed to lookup provider:', err.message);
           return null;
         }
@@ -995,6 +1219,7 @@ app.get('/api/wallet', async (req, res) => {
       multiUser: isMultiUser(),
     });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1052,6 +1277,7 @@ app.post('/api/wallet/send', rateLimit('wsend', 30, 60_000), async (req, res) =>
       gasWanted: result.gasWanted != null ? String(result.gasWanted) : undefined,
     });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('[SEND] error:', err.message);
     res.status(500).json({ ok: false, error: parseChainError(err.message), errorCode: 'broadcast-error' });
   }
@@ -1071,6 +1297,7 @@ app.get('/api/wallet/qr', async (req, res) => {
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.send(svg);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: 'QR generation failed: ' + err.message });
   }
 });
@@ -1088,6 +1315,7 @@ app.get('/api/plans', async (req, res) => {
     });
     res.json(result);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Error fetching plans:', err);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1103,6 +1331,7 @@ app.get('/api/plans/:id', async (req, res) => {
     const uniqueWallets = await getUniqueWallets(planId);
     res.json({ ...stats, uniqueWallets, nodes });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching plan ${req.params.id}:`, err);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1136,6 +1365,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
           }
         }
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.log(`[RPC] GET /api/plans/${planId}/subscriptions failed: ${err.message} — LCD fallback`);
         d = null;
       }
@@ -1152,6 +1382,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     }
     res.json(d);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1185,6 +1416,7 @@ app.get('/api/my-plans', async (req, res) => {
       plans,
     });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1256,6 +1488,7 @@ app.post('/api/plan/create', async (req, res) => {
           resp.activationError = parseChainError(statusResp.rawLog);
         }
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.error('Plan activation error:', err.message);
         resp.activationError = parseChainError(err.message);
       }
@@ -1263,6 +1496,7 @@ app.post('/api/plan/create', async (req, res) => {
 
     res.json(resp);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1293,6 +1527,7 @@ app.post('/api/plan/status', async (req, res) => {
       res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Plan status error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1337,6 +1572,7 @@ app.post('/api/plan/subscribe', async (req, res) => {
       res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Subscribe error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1383,6 +1619,7 @@ app.post('/api/plan/start-session', async (req, res) => {
       res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Start session error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1411,6 +1648,7 @@ app.get('/api/nodes/chain-count', async (req, res) => {
       return res.json({ count: nodes.length, cached: false });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] chain-count failed (${err.message}), falling back to LCD`);
   }
   try {
@@ -1419,6 +1657,7 @@ app.get('/api/nodes/chain-count', async (req, res) => {
     chainCountCache = { count, ts: now };
     res.json({ count, cached: false });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: err.message });
   }
 });
@@ -1441,6 +1680,7 @@ app.get('/api/all-nodes', async (req, res) => {
         const planNodes = await getNodesForPlan(planId);
         for (const n of planNodes) planNodeMap.set(n.address, n);
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.error(`Failed to fetch nodes for plan ${planId}:`, err.message);
       }
     }
@@ -1512,6 +1752,7 @@ app.get('/api/all-nodes', async (req, res) => {
       protocols,
     });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1538,6 +1779,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
 
     res.json({ sessions: allSessions, total: allSessions.length });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1567,6 +1809,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
       console.log(`[LINK] Step 1: Direct link attempt...`);
       result = await safeBroadcast([linkMsg]);
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       const msg = err.message || '';
       console.log(`[LINK] Step 1 threw: ${msg.slice(0, 150)}`);
       if (isDuplicateNode(msg)) return res.json({ ok: true, alreadyLinked: true, msg: 'Node is already in this plan' });
@@ -1608,6 +1851,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
     console.log(`[LINK] OK: tx=${resp.txHash}`);
     res.json(resp);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Link error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1638,6 +1882,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     try {
       result = await safeBroadcast(linkMsgs);
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       const msg = err.message || '';
       console.log(`[BATCH-LINK] Step 1 threw: ${msg.slice(0, 200)}`);
 
@@ -1691,6 +1936,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     console.log(`[BATCH-LINK] OK: ${addrs.length} nodes linked, tx=${resp.txHash}`);
     res.json({ ...resp, linked: addrs.length });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('[BATCH-LINK] Error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1716,6 +1962,7 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
     try {
       result = await safeBroadcast([msg]);
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       const m = err.message || '';
       if (m.includes('does not exist') || m.includes('not found')) {
         return res.json({ ok: true, alreadyUnlinked: true, msg: 'Node was already removed from this plan' });
@@ -1734,6 +1981,7 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
       res.status(400).json({ error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Unlink error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1766,6 +2014,7 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
     console.log(`[BATCH-UNLINK] OK: ${addrs.length} nodes removed, tx=${resp.txHash}`);
     res.json({ ...resp, unlinked: addrs.length });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('[BATCH-UNLINK] Error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1793,6 +2042,7 @@ app.post('/api/lease/start', async (req, res) => {
         nodePrice = prices.find((p) => p.denom === denom) || prices[0];
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[LEASE] RPC node price lookup failed: ${err.message}`);
     }
 
@@ -1844,6 +2094,7 @@ app.post('/api/lease/start', async (req, res) => {
       res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Lease start error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1872,6 +2123,7 @@ app.post('/api/lease/end', async (req, res) => {
       res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Lease end error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1884,6 +2136,7 @@ app.get('/api/providers', async (req, res) => {
     const providers = await cached('providers', 600_000, getProviders);
     res.json({ providers });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -1905,6 +2158,7 @@ app.post('/api/provider/register', async (req, res) => {
         if (prov) alreadyExists = true;
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[RPC] provider exists probe failed: ${err.message} — LCD fallback`);
     }
     if (!alreadyExists) {
@@ -1912,6 +2166,7 @@ app.post('/api/provider/register', async (req, res) => {
         const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
         alreadyExists = (provs.providers || []).some(p => p.address === getProvAddr());
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.error('Failed to check existing providers:', err.message);
       }
     }
@@ -1957,6 +2212,7 @@ app.post('/api/provider/register', async (req, res) => {
           resp.activationError = parseChainError(statusResp.rawLog);
         }
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.error('Provider activation error:', err.message);
         resp.activationError = parseChainError(err.message);
       }
@@ -1964,6 +2220,7 @@ app.post('/api/provider/register', async (req, res) => {
 
     res.json(resp);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Provider register/update error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -1993,6 +2250,7 @@ app.post('/api/provider/status', async (req, res) => {
       res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
     }
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Provider status error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -2012,6 +2270,7 @@ app.get('/api/params', async (req, res) => {
     });
     res.json(result);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
@@ -2033,6 +2292,7 @@ app.get('/api/feegrant/grants', async (req, res) => {
           if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
         }
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.log(`[RPC] feegrant/grants failed: ${err.message} — LCD fallback`);
       }
       return lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
@@ -2090,35 +2350,14 @@ app.post('/api/feegrant/grant', async (req, res) => {
   }
 
   try {
-    const { MsgGrantAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
-    const { BasicAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/feegrant');
-    const { Any } = await import('cosmjs-types/google/protobuf/any');
-
-    const allowanceValue = {};
+    const opts = {};
     if (spendLimitDvpn && spendLimitDvpn > 0) {
-      allowanceValue.spendLimit = [{ denom: 'udvpn', amount: String(Math.round(spendLimitDvpn * 1e6)) }];
+      opts.spendLimit = [{ denom: 'udvpn', amount: String(Math.round(spendLimitDvpn * 1e6)) }];
     }
     if (expirationDays && expirationDays > 0) {
-      const exp = new Date(Date.now() + expirationDays * 86400000);
-      allowanceValue.expiration = {
-        seconds: BigInt(Math.floor(exp.getTime() / 1000)),
-        nanos: 0,
-      };
+      opts.expiration = new Date(Date.now() + expirationDays * 86400000);
     }
-
-    const encodedAllowance = Any.fromPartial({
-      typeUrl: '/cosmos.feegrant.v1beta1.BasicAllowance',
-      value: BasicAllowance.encode(BasicAllowance.fromPartial(allowanceValue)).finish(),
-    });
-
-    const msg = {
-      typeUrl: '/cosmos.feegrant.v1beta1.MsgGrantAllowance',
-      value: MsgGrantAllowance.fromPartial({
-        granter: getAddr(),
-        grantee,
-        allowance: encodedAllowance,
-      }),
-    };
+    const msg = buildFeeGrantMsg(getAddr(), grantee, opts);
 
     const result = await safeBroadcast([msg], 'Fee grant');
     if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
@@ -2162,6 +2401,7 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
     }
     if (!subsFromRpc) {
@@ -2191,6 +2431,7 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowances.length}`);
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!existingAllowances.length) {
@@ -2209,22 +2450,14 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
       return;
     }
 
-    const { MsgGrantAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
-    const { BasicAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/feegrant');
-    const { Any } = await import('cosmjs-types/google/protobuf/any');
-
-    const allowanceValue = {};
+    const opts = {};
     const limitNum = parseFloat(spendLimitDvpn) || 0;
     const expNum = parseInt(expirationDays) || 0;
     if (limitNum > 0) {
-      allowanceValue.spendLimit = [{ denom: 'udvpn', amount: String(Math.round(limitNum * 1e6)) }];
+      opts.spendLimit = [{ denom: 'udvpn', amount: String(Math.round(limitNum * 1e6)) }];
     }
     if (expNum > 0) {
-      const exp = new Date(Date.now() + expNum * 86400000);
-      allowanceValue.expiration = {
-        seconds: BigInt(Math.floor(exp.getTime() / 1000)),
-        nanos: 0,
-      };
+      opts.expiration = new Date(Date.now() + expNum * 86400000);
     }
 
     const BATCH = 5;
@@ -2241,17 +2474,7 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
 
       send('batch_start', { batch: batchNum, total: totalBatches, count: batch.length, addresses: shortAddrs });
 
-      const msgs = batch.map(grantee => ({
-        typeUrl: '/cosmos.feegrant.v1beta1.MsgGrantAllowance',
-        value: MsgGrantAllowance.fromPartial({
-          granter: getAddr(),
-          grantee,
-          allowance: Any.fromPartial({
-            typeUrl: '/cosmos.feegrant.v1beta1.BasicAllowance',
-            value: BasicAllowance.encode(BasicAllowance.fromPartial(allowanceValue)).finish(),
-          }),
-        }),
-      }));
+      const msgs = batch.map(grantee => buildFeeGrantMsg(getAddr(), grantee, opts));
 
       try {
         const t0 = Date.now();
@@ -2311,6 +2534,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
     }
     if (!subsFromRpc) {
@@ -2339,6 +2563,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowancesPost.length}`);
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!existingAllowancesPost.length) {
@@ -2352,20 +2577,12 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     console.log(`[FeeGrant] ${existingGrantees.size} existing grants, ${needGrant.length} need granting`);
     if (needGrant.length === 0) return res.json({ ok: true, granted: 0, skipped: uniqueAddrs.length, message: 'All subscribers already have grants' });
 
-    const { MsgGrantAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
-    const { BasicAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/feegrant');
-    const { Any } = await import('cosmjs-types/google/protobuf/any');
-
-    const allowanceValue = {};
+    const opts = {};
     if (spendLimitDvpn && spendLimitDvpn > 0) {
-      allowanceValue.spendLimit = [{ denom: 'udvpn', amount: String(Math.round(spendLimitDvpn * 1e6)) }];
+      opts.spendLimit = [{ denom: 'udvpn', amount: String(Math.round(spendLimitDvpn * 1e6)) }];
     }
     if (expirationDays && expirationDays > 0) {
-      const exp = new Date(Date.now() + expirationDays * 86400000);
-      allowanceValue.expiration = {
-        seconds: BigInt(Math.floor(exp.getTime() / 1000)),
-        nanos: 0,
-      };
+      opts.expiration = new Date(Date.now() + expirationDays * 86400000);
     }
 
     const BATCH = 5;
@@ -2376,17 +2593,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
       const batchNum = Math.floor(i / BATCH) + 1;
       const batch = needGrant.slice(i, i + BATCH);
       console.log(`[FeeGrant] Batch ${batchNum}/${totalBatches}: ${batch.length} addresses`);
-      const msgs = batch.map(grantee => ({
-        typeUrl: '/cosmos.feegrant.v1beta1.MsgGrantAllowance',
-        value: MsgGrantAllowance.fromPartial({
-          granter: getAddr(),
-          grantee,
-          allowance: Any.fromPartial({
-            typeUrl: '/cosmos.feegrant.v1beta1.BasicAllowance',
-            value: BasicAllowance.encode(BasicAllowance.fromPartial(allowanceValue)).finish(),
-          }),
-        }),
-      }));
+      const msgs = batch.map(grantee => buildFeeGrantMsg(getAddr(), grantee, opts));
       try {
         const t0 = Date.now();
         const result = await safeBroadcast(msgs, `Fee grant batch ${batchNum}/${totalBatches}`);
@@ -2417,14 +2624,7 @@ app.post('/api/feegrant/revoke', async (req, res) => {
   if (!grantee) return res.status(400).json({ error: 'grantee address required' });
 
   try {
-    const { MsgRevokeAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
-    const msg = {
-      typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
-      value: MsgRevokeAllowance.fromPartial({
-        granter: getAddr(),
-        grantee,
-      }),
-    };
+    const msg = buildRevokeFeeGrantMsg(getAddr(), grantee);
     const result = await safeBroadcast([msg], 'Revoke fee grant');
     if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
     cacheInvalidate(`feegrants:${getAddr()}`);
@@ -2454,7 +2654,6 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
   if (list.length === 0) return res.status(400).json({ error: 'no valid grantees in list' });
 
   try {
-    const { MsgRevokeAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
     const BATCH = 5;
     let revoked = 0;
     let alreadyGone = 0;
@@ -2462,10 +2661,7 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
 
     for (let i = 0; i < list.length; i += BATCH) {
       const batch = list.slice(i, i + BATCH);
-      const msgs = batch.map(grantee => ({
-        typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
-        value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
-      }));
+      const msgs = batch.map(grantee => buildRevokeFeeGrantMsg(getAddr(), grantee));
       try {
         const result = await safeBroadcast(msgs, `Revoke batch ${Math.floor(i / BATCH) + 1}`);
         if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
@@ -2474,10 +2670,7 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
         console.log(`[revoke-list] batch ${Math.floor(i / BATCH) + 1} failed, retrying one-by-one: ${batchErr.message}`);
         for (const grantee of batch) {
           try {
-            const msg = {
-              typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
-              value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
-            };
+            const msg = buildRevokeFeeGrantMsg(getAddr(), grantee);
             const r = await safeBroadcast([msg], `Revoke ${grantee.slice(0, 14)}`);
             if (r.code !== 0) throw new Error(r.rawLog || `TX failed code=${r.code}`);
             revoked += 1;
@@ -2518,6 +2711,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${revokeAllowances.length}`);
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!revokeAllowances.length) {
@@ -2531,7 +2725,6 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
       return res.json({ ok: true, revoked: 0, alreadyGone: 0, message: 'No grants to revoke' });
     }
 
-    const { MsgRevokeAllowance } = await import('cosmjs-types/cosmos/feegrant/v1beta1/tx');
     const BATCH = 5;
     let revoked = 0;
     let alreadyGone = 0;
@@ -2542,10 +2735,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
     // grantees in that batch still get revoked.
     for (let i = 0; i < grantees.length; i += BATCH) {
       const batch = grantees.slice(i, i + BATCH);
-      const msgs = batch.map(grantee => ({
-        typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
-        value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
-      }));
+      const msgs = batch.map(grantee => buildRevokeFeeGrantMsg(getAddr(), grantee));
       try {
         const result = await safeBroadcast(msgs, `Revoke batch ${Math.floor(i / BATCH) + 1}`);
         if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
@@ -2555,10 +2745,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
         console.log(`[revoke-all] batch ${Math.floor(i / BATCH) + 1} failed, retrying one-by-one: ${batchErr.message}`);
         for (const grantee of batch) {
           try {
-            const msg = {
-              typeUrl: '/cosmos.feegrant.v1beta1.MsgRevokeAllowance',
-              value: MsgRevokeAllowance.fromPartial({ granter: getAddr(), grantee }),
-            };
+            const msg = buildRevokeFeeGrantMsg(getAddr(), grantee);
             const r = await safeBroadcast([msg], `Revoke ${grantee.slice(0, 14)}`);
             if (r.code !== 0) throw new Error(r.rawLog || `TX failed code=${r.code}`);
             revoked += 1;
@@ -2604,6 +2791,7 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
           if (rpcResult) return { subscriptions: rpcResult };
         }
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} — LCD fallback`);
       }
       return lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`);
@@ -2647,6 +2835,7 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
         }
         console.log(`[GasCosts] ${addr.slice(0, 12)}...: ${rawTxs.length} txs checked, ${addrTxCount} fee-granted`);
       } catch (err) {
+        if (relayKeplrSign(err, res)) return;
         console.error(`[GasCosts] ${addr.slice(0, 12)}... failed: ${err.message}`);
       }
     }
@@ -2735,6 +2924,7 @@ app.get('/api/node-rankings', async (req, res) => {
     }); // end cached()
     res.json(result);
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Error scanning sessions:', err);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -2779,6 +2969,7 @@ app.get('/api/rpcs', async (req, res) => {
         try { const j = await r.json(); errorMsg = j.message || `HTTP ${r.status}`; } catch { errorMsg = `HTTP ${r.status}`; }
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       latencyMs = Date.now() - start;
       status = 'timeout';
       errorMsg = err.message;
@@ -2838,6 +3029,7 @@ app.get('/api/rpcs', async (req, res) => {
         explorerActiveSessions = expData.result[0].active_sessions;
       }
     } catch (err) {
+      if (relayKeplrSign(err, res)) return;
       console.error('Failed to fetch explorer stats:', err.message);
     }
 
@@ -2849,6 +3041,7 @@ app.get('/api/rpcs', async (req, res) => {
       sampleSize: (sessPage.sessions || []).length,
     };
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     console.error('Failed to compute peer stats:', err.message);
   }
 
@@ -2898,6 +3091,7 @@ app.get('/api/rpc-providers', async (req, res) => {
       checkedAt: new Date().toISOString(),
     });
   } catch (err) {
+    if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
   }
 });
