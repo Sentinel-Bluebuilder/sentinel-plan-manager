@@ -48,7 +48,7 @@ import {
 import { getAddr, getProvAddr, requireWallet } from './lib/wallet.js';
 import {
   initSession, isMultiUser, encryptMnemonic, decryptMnemonic,
-  sessionFromMnemonic, runWithSession, parseCookies,
+  sessionFromMnemonic, runWithSession, currentSession, parseCookies,
   buildSetCookie, buildClearCookie, COOKIE_NAME, dropSessionFromCache,
   KEPLR_COOKIE_NAME, keplrSessionFromAddress, dropKeplrSessionFromCache,
   buildKeplrToken, parseKeplrToken, buildSetKeplrCookie, buildClearKeplrCookie,
@@ -138,7 +138,8 @@ app.use(async (req, res, next) => {
       const session = await sessionFromMnemonic(mnemonic);
       return runWithSession(session, () => next());
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Cookie decrypt + wallet derivation are pure crypto — no broadcast,
+      // no KEPLR_SIGN_REQUIRED can surface here. Just clear the bad cookie.
       console.warn('[session] Rejecting mnemonic cookie:', err.message);
       res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
       // Fall through to Keplr probe (mnemonic and Keplr can't both be active,
@@ -179,7 +180,7 @@ function readPlanStore() {
     }
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
+    // Helper has no `res` in scope — log and return safe default.
     console.error('Failed to load my-plans.json:', err.message);
     return {};
   }
@@ -366,7 +367,6 @@ function loadNodeCacheFromDisk() {
       }
     }
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
     console.error('Failed to load node cache from disk:', err.message);
   }
 }
@@ -455,7 +455,6 @@ async function discoverPlanIds() {
             const result = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 1 });
             if (result && result.length > 0) { ids.add(planId); return; }
           } catch (err) {
-            if (relayKeplrSign(err, res)) return;
             console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} — LCD fallback`);
           }
         }
@@ -485,7 +484,6 @@ async function getUniqueWallets(planId) {
       return wallets.size;
     }
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} — LCD fallback`);
   }
 
@@ -525,7 +523,6 @@ async function _getPlanStatsImpl(planId) {
           const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 1, limit: 5000 });
           if (nodes) return { nodes };
         } catch (err) {
-          if (relayKeplrSign(err, res)) return;
           console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
         }
       }
@@ -541,7 +538,6 @@ async function _getPlanStatsImpl(planId) {
           const p = await rpcQueryPlan(rpc, planId);
           if (p) return p;
         } catch (err) {
-          if (relayKeplrSign(err, res)) return;
           console.log(`[RPC] _getPlanStatsImpl plan(${planId}) failed: ${err.message} — LCD fallback`);
         }
       }
@@ -647,7 +643,6 @@ async function getNodesForPlan(planId) {
       return nodes;
     }
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] getNodesForPlan(${planId}) failed: ${err.message} — LCD fallback`);
   }
 
@@ -708,7 +703,6 @@ async function getAllNodeInfo() {
       return nodeMap;
     }
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
     console.log(`[RPC] getAllNodeInfo failed (${err.message}), falling back to LCD`);
   }
 
@@ -776,7 +770,6 @@ async function autoLeaseNode(nodeAddress, hours = 24) {
     nodeInfo = await rpcQueryNode(rpcClient, nodeAddress);
     if (nodeInfo) console.log(`[LEASE] Node found via RPC: ${nodeAddress}`);
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
     console.log(`[LEASE] RPC lookup failed (${err.message}), falling back to LCD`);
   }
 
@@ -835,7 +828,6 @@ async function batchLeaseNodes(addrs, hours = 24) {
     }
     console.log(`[BATCH-LEASE] RPC lookup: ${Object.keys(rawMap).length}/${addrs.length} nodes found`);
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
     console.log(`[BATCH-LEASE] RPC failed (${err.message}), falling back to LCD`);
     // LCD fallback: paginated scan (slow but reliable)
     let rawNodesList = [], nextKey = null;
@@ -1069,7 +1061,7 @@ async function verifyAdr36Signature({ addr, pubkeyB64, signatureB64, message }) 
       pubkey,
     );
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
+    // Helper has no `res` in scope — log and treat as verification failure.
     console.warn('[keplr] ADR-36 verify error:', err.message);
     return false;
   }
@@ -1137,6 +1129,86 @@ app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req,
   }
 });
 
+// ─── Privy Login (custody-preserving embedded wallet) ────────────────────────
+// Privy holds the secp256k1 key inside its enclave. The browser asks Privy for
+// the user's Cosmos pubkey + access token, then POSTs them here. We verify the
+// access token via @privy-io/server-auth, derive the sent1 address from the
+// pubkey, assert it matches what the browser claimed, and reuse the Keplr
+// session shape (kind === 'keplr' from the cookie's POV) — same custody model:
+// server never holds the key, client signs, server broadcasts via TxRaw.
+const PRIVY_APP_ID = process.env.PRIVY_APP_ID || '';
+const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET || '';
+let _privyClientPromise = null;
+async function getPrivyClient() {
+  if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) return null;
+  if (!_privyClientPromise) {
+    _privyClientPromise = (async () => {
+      const { PrivyClient } = await import('@privy-io/server-auth');
+      return new PrivyClient(PRIVY_APP_ID, PRIVY_APP_SECRET);
+    })();
+  }
+  return _privyClientPromise;
+}
+
+app.get('/api/wallet/privy-config', (req, res) => {
+  res.json({ enabled: !!(PRIVY_APP_ID && PRIVY_APP_SECRET), appId: PRIVY_APP_ID || null });
+});
+
+app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req, res) => {
+  try {
+    const privy = await getPrivyClient();
+    if (!privy) {
+      return res.status(503).json({ error: 'Privy not configured. Set PRIVY_APP_ID and PRIVY_APP_SECRET in .env.' });
+    }
+    const { accessToken, addr, pubkey } = req.body || {};
+    if (!accessToken || !addr || !pubkey) {
+      return res.status(400).json({ error: 'accessToken, addr, pubkey required' });
+    }
+    if (typeof addr !== 'string' || !addr.startsWith('sent1')) {
+      return res.status(400).json({ error: 'Invalid Sentinel address' });
+    }
+
+    // Verify the Privy access token. Throws if invalid/expired.
+    let verified;
+    try {
+      verified = await privy.verifyAuthToken(accessToken);
+    } catch (verifyErr) {
+      return res.status(401).json({ error: 'Privy token verification failed: ' + verifyErr.message });
+    }
+    if (!verified?.userId) {
+      return res.status(401).json({ error: 'Privy token missing userId' });
+    }
+
+    // Derive sent1 from the supplied compressed secp256k1 pubkey and assert it
+    // matches the address the browser claimed. Without this, a logged-in
+    // Privy user could submit anyone else's address into our session.
+    const { fromBase64, toBech32: toBech } = await import('@cosmjs/encoding');
+    const { Sha256, ripemd160 } = await import('@cosmjs/crypto');
+    let pubkeyBytes;
+    try { pubkeyBytes = fromBase64(pubkey); } catch { return res.status(400).json({ error: 'pubkey must be base64' }); }
+    if (pubkeyBytes.length !== 33) {
+      return res.status(400).json({ error: 'pubkey must be 33-byte compressed secp256k1' });
+    }
+    const sha = new Sha256(pubkeyBytes).digest();
+    const derivedAddr = toBech('sent', ripemd160(sha));
+    if (derivedAddr !== addr) {
+      return res.status(403).json({ error: 'pubkey does not derive to the supplied address' });
+    }
+
+    const session = keplrSessionFromAddress(addr, pubkey);
+    const token = buildKeplrToken(session.addr, session.pubkeyB64);
+    res.setHeader('Set-Cookie', [
+      buildClearCookie({ secure: req.secure }),
+      buildSetKeplrCookie(token, { secure: req.secure }),
+    ]);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.json({ ok: true, address: session.addr, provAddress: session.provAddr, mode: 'privy', userId: verified.userId });
+  } catch (err) {
+    console.error('Privy login error:', err.message);
+    res.status(500).json({ error: 'Privy login failed: ' + err.message });
+  }
+});
+
 // ─── Keplr Broadcast (client-signed TxRaw) ───────────────────────────────────
 // The browser POSTs back the result of window.keplr.signDirect packaged as a
 // TxRaw (bodyBytes, authInfoBytes, signatures[]) base64-encoded. We broadcast
@@ -1149,8 +1221,34 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
     if (!bodyBytes || !authInfoBytes || !signature) {
       return res.status(400).json({ error: 'bodyBytes, authInfoBytes, signature required' });
     }
-    const { TxRaw } = await import('cosmjs-types/cosmos/tx/v1beta1/tx.js');
-    const { fromBase64, toBase64 } = await import('@cosmjs/encoding');
+    const { TxRaw, AuthInfo } = await import('cosmjs-types/cosmos/tx/v1beta1/tx');
+    const { PubKey } = await import('cosmjs-types/cosmos/crypto/secp256k1/keys');
+    const { fromBase64, toBase64, toBech32: toBech } = await import('@cosmjs/encoding');
+    const { Sha256, ripemd160 } = await import('@cosmjs/crypto');
+
+    // Assert the signer pubkey inside authInfoBytes derives to the session's
+    // bech32 address. Without this, a logged-in Keplr user could POST a TxRaw
+    // signed by a different wallet — chain rejects it (sig mismatch) but we
+    // still don't want to act as a relay for arbitrary signed payloads.
+    const authInfo = AuthInfo.decode(fromBase64(authInfoBytes));
+    const signerInfo = authInfo.signerInfos?.[0];
+    if (!signerInfo?.publicKey?.value) {
+      return res.status(400).json({ error: 'authInfoBytes missing signer publicKey' });
+    }
+    if (signerInfo.publicKey.typeUrl !== '/cosmos.crypto.secp256k1.PubKey') {
+      return res.status(400).json({ error: `Unsupported signer key type: ${signerInfo.publicKey.typeUrl}` });
+    }
+    const signerPubKey = PubKey.decode(signerInfo.publicKey.value).key;
+    if (signerPubKey.length !== 33) {
+      return res.status(400).json({ error: 'Invalid secp256k1 pubkey length' });
+    }
+    const sha = new Sha256(signerPubKey).digest();
+    const derivedAddr = toBech('sent', ripemd160(sha));
+    if (derivedAddr !== getAddr()) {
+      console.warn('[broadcast-signed] addr mismatch: derived=%s session=%s', derivedAddr, getAddr());
+      return res.status(403).json({ error: 'Signed TX wallet does not match session wallet' });
+    }
+
     const txRaw = TxRaw.encode(TxRaw.fromPartial({
       bodyBytes: fromBase64(bodyBytes),
       authInfoBytes: fromBase64(authInfoBytes),
@@ -1170,7 +1268,9 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
       pending: result.pending || false,
     });
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
+    // No relayKeplrSign here: this endpoint receives an already-signed TxRaw,
+    // so broadcastSignedTx() never enters the signing path that throws
+    // KEPLR_SIGN_REQUIRED. Any error here is a real broadcast failure.
     console.error('[broadcast-signed] error:', err.message);
     res.status(500).json({ ok: false, error: parseChainError(err.message), errorCode: 'broadcast-error' });
   }
@@ -1194,7 +1294,8 @@ app.get('/api/wallet', async (req, res) => {
             if (prov) return prov;
           }
         } catch (err) {
-          if (relayKeplrSign(err, res)) return;
+          // Read-only query — never produces KEPLR_SIGN_REQUIRED. Don't write
+          // to `res` from inside a cached() callback or we'd double-respond.
           console.log(`[RPC] provider lookup failed: ${err.message} — LCD fallback`);
         }
         // LCD fallback
@@ -1202,7 +1303,6 @@ app.get('/api/wallet', async (req, res) => {
           const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
           return (provs.providers || []).find(p => p.address === getProvAddr()) || null;
         } catch (err) {
-          if (relayKeplrSign(err, res)) return;
           console.error('Failed to lookup provider:', err.message);
           return null;
         }
@@ -1211,6 +1311,7 @@ app.get('/api/wallet', async (req, res) => {
 
     res.json({
       address: getAddr(),
+      kind: currentSession()?.kind || 'mnemonic',
       balanceUdvpn: parseInt(bal.amount),
       balanceDvpn: parseFloat((parseInt(bal.amount) / 1e6).toFixed(2)),
       dvpnPriceUsd: dvpnPrice,
@@ -1365,7 +1466,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
           }
         }
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Read-only RPC probe — never produces KEPLR_SIGN_REQUIRED. Outer catch handles user-facing errors.
         console.log(`[RPC] GET /api/plans/${planId}/subscriptions failed: ${err.message} — LCD fallback`);
         d = null;
       }
@@ -1488,9 +1589,14 @@ app.post('/api/plan/create', async (req, res) => {
           resp.activationError = parseChainError(statusResp.rawLog);
         }
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Plan create TX already succeeded; activation failure is a soft error
+        // attached to the response. If the user is on Keplr they'll be prompted
+        // to sign the activation TX from a follow-up "Activate plan" button —
+        // never relay keplr-sign here or the create result is hidden.
         console.error('Plan activation error:', err.message);
-        resp.activationError = parseChainError(err.message);
+        resp.activationError = err.code === 'KEPLR_SIGN_REQUIRED'
+          ? 'Plan was created but activation needs a Keplr signature. Use the Activate button on the plan card.'
+          : parseChainError(err.message);
       }
     }
 
@@ -1680,7 +1786,7 @@ app.get('/api/all-nodes', async (req, res) => {
         const planNodes = await getNodesForPlan(planId);
         for (const n of planNodes) planNodeMap.set(n.address, n);
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Read-only chain query — never produces KEPLR_SIGN_REQUIRED. Soft-fail.
         console.error(`Failed to fetch nodes for plan ${planId}:`, err.message);
       }
     }
@@ -1809,6 +1915,8 @@ app.post('/api/plan-manager/link', async (req, res) => {
       console.log(`[LINK] Step 1: Direct link attempt...`);
       result = await safeBroadcast([linkMsg]);
     } catch (err) {
+      // Keplr sign-required is a real outcome here — relay it before the
+      // duplicate / lease-not-found branches, which assume err.message exists.
       if (relayKeplrSign(err, res)) return;
       const msg = err.message || '';
       console.log(`[LINK] Step 1 threw: ${msg.slice(0, 150)}`);
@@ -2042,7 +2150,7 @@ app.post('/api/lease/start', async (req, res) => {
         nodePrice = prices.find((p) => p.denom === denom) || prices[0];
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Read-only RPC node lookup — never KEPLR_SIGN_REQUIRED. Soft-fail to nodePrice=null.
       console.log(`[LEASE] RPC node price lookup failed: ${err.message}`);
     }
 
@@ -2158,7 +2266,7 @@ app.post('/api/provider/register', async (req, res) => {
         if (prov) alreadyExists = true;
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Read-only provider lookup — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] provider exists probe failed: ${err.message} — LCD fallback`);
     }
     if (!alreadyExists) {
@@ -2166,7 +2274,7 @@ app.post('/api/provider/register', async (req, res) => {
         const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
         alreadyExists = (provs.providers || []).some(p => p.address === getProvAddr());
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Read-only LCD lookup — never KEPLR_SIGN_REQUIRED. Fall through; treat as not-registered.
         console.error('Failed to check existing providers:', err.message);
       }
     }
@@ -2212,9 +2320,13 @@ app.post('/api/provider/register', async (req, res) => {
           resp.activationError = parseChainError(statusResp.rawLog);
         }
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Provider register TX already succeeded; activation is a follow-up.
+        // Don't relay keplr-sign here — surface the register result and let
+        // the user retry activation via the provider status button.
         console.error('Provider activation error:', err.message);
-        resp.activationError = parseChainError(err.message);
+        resp.activationError = err.code === 'KEPLR_SIGN_REQUIRED'
+          ? 'Provider registered but activation needs a Keplr signature. Use the Activate button.'
+          : parseChainError(err.message);
       }
     }
 
@@ -2292,7 +2404,9 @@ app.get('/api/feegrant/grants', async (req, res) => {
           if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
         }
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Inside cached() callback — never write to res from here (callers
+        // wait on the promise then write). Read-only RPC can't produce
+        // KEPLR_SIGN_REQUIRED anyway. Fall through to LCD.
         console.log(`[RPC] feegrant/grants failed: ${err.message} — LCD fallback`);
       }
       return lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
@@ -2401,7 +2515,8 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // SSE stream — headers already written; never call relayKeplrSign here.
+      // Read-only RPC query also can't produce KEPLR_SIGN_REQUIRED.
       console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
     }
     if (!subsFromRpc) {
@@ -2431,7 +2546,8 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowances.length}`);
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // SSE stream — headers already written; never call relayKeplrSign here.
+      // Read-only RPC query also can't produce KEPLR_SIGN_REQUIRED.
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!existingAllowances.length) {
@@ -2534,7 +2650,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Read-only RPC subs query — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
     }
     if (!subsFromRpc) {
@@ -2563,7 +2679,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowancesPost.length}`);
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Read-only RPC query — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!existingAllowancesPost.length) {
@@ -2711,7 +2827,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${revokeAllowances.length}`);
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Read-only RPC query — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!revokeAllowances.length) {
@@ -2791,7 +2907,8 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
           if (rpcResult) return { subscriptions: rpcResult };
         }
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Inside cached() — never write to res from here. Read-only RPC can't
+        // produce KEPLR_SIGN_REQUIRED. Fall through to LCD.
         console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} — LCD fallback`);
       }
       return lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=500`);
@@ -2835,7 +2952,8 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
         }
         console.log(`[GasCosts] ${addr.slice(0, 12)}...: ${rawTxs.length} txs checked, ${addrTxCount} fee-granted`);
       } catch (err) {
-        if (relayKeplrSign(err, res)) return;
+        // Per-address LCD probe inside accumulator loop — never KEPLR_SIGN_REQUIRED.
+        // Don't bail the whole loop on a single address failure.
         console.error(`[GasCosts] ${addr.slice(0, 12)}... failed: ${err.message}`);
       }
     }
@@ -2969,7 +3087,8 @@ app.get('/api/rpcs', async (req, res) => {
         try { const j = await r.json(); errorMsg = j.message || `HTTP ${r.status}`; } catch { errorMsg = `HTTP ${r.status}`; }
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // Inside Promise.allSettled probe — fetch() error, never KEPLR_SIGN_REQUIRED.
+      // Writing to res here would race with the outer res.json at the bottom.
       latencyMs = Date.now() - start;
       status = 'timeout';
       errorMsg = err.message;
@@ -3029,7 +3148,7 @@ app.get('/api/rpcs', async (req, res) => {
         explorerActiveSessions = expData.result[0].active_sessions;
       }
     } catch (err) {
-      if (relayKeplrSign(err, res)) return;
+      // External explorer fetch — never KEPLR_SIGN_REQUIRED. Soft-fail; explorerActiveSessions stays null.
       console.error('Failed to fetch explorer stats:', err.message);
     }
 
@@ -3041,7 +3160,7 @@ app.get('/api/rpcs', async (req, res) => {
       sampleSize: (sessPage.sessions || []).length,
     };
   } catch (err) {
-    if (relayKeplrSign(err, res)) return;
+    // Read-only LCD aggregation — never KEPLR_SIGN_REQUIRED. Soft-fail; peerStats stays null.
     console.error('Failed to compute peer stats:', err.message);
   }
 

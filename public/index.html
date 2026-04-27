@@ -416,6 +416,38 @@ body.boot-pending::before {
 .import-textarea::placeholder { color: var(--text-muted); }
 .import-error { color: var(--red); font-size: 12px; min-height: 0; }
 .import-error:empty { display: none; }
+.mnemonic-disclosure {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 12px; margin: 4px 0 10px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display); font-size: 12px; line-height: 1.55;
+  color: var(--text-dim);
+}
+.mnemonic-disclosure svg { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+.mnemonic-disclosure-more {
+  background: none; border: 0; padding: 0; margin-left: 4px;
+  color: var(--accent); cursor: pointer; font: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.mnemonic-disclosure-more:hover { color: var(--accent-bright); }
+.mnemonic-details {
+  margin: 0 0 10px; padding: 12px 14px;
+  background: var(--bg-base); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display); font-size: 12px; line-height: 1.6;
+  color: var(--text-dim);
+}
+.mnemonic-details ul { margin: 0; padding-left: 18px; }
+.mnemonic-details li { margin-bottom: 6px; }
+.mnemonic-details li:last-child { margin-bottom: 0; }
+.mnemonic-details code {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg-input); padding: 1px 5px; border-radius: 3px;
+  color: var(--text);
+}
+.mnemonic-details a { color: var(--accent); text-decoration: none; }
+.mnemonic-details a:hover { color: var(--accent-bright); text-decoration: underline; }
 .import-btn {
   width: 100%; padding: 12px 18px; border: 1px solid var(--accent);
   border-radius: var(--radius-sm); cursor: pointer;
@@ -446,6 +478,234 @@ body.boot-pending::before {
   margin-top: auto;
 }
 .import-note strong { color: var(--text-dim); font-weight: 600; }
+
+/* ─── Auth-method chooser (4 cards) ───────────────────────────────────── */
+.auth-chooser {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  margin-top: 8px;
+}
+.auth-card {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 14px;
+  padding: 22px 16px 20px;
+  min-height: 168px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer; text-align: center;
+  font-family: var(--font-display);
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.auth-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(30,136,229,0.04);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-accent);
+}
+.auth-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.auth-card:disabled { opacity: 0.55; cursor: not-allowed; }
+.auth-card-icon {
+  width: 56px; height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 14px; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.auth-card-icon img, .auth-card-icon svg { width: 44px; height: 44px; display: block; }
+/* Outline-style brand icons (Privy email, recovery lock, plus) need a touch of stroke weight */
+.auth-card-icon svg.stroke { width: 30px; height: 30px; }
+.auth-card-title {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.1px;
+  display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
+  line-height: 1.25;
+}
+.auth-card-badge {
+  display: inline-block;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px; border-radius: 999px;
+  margin-top: 2px;
+}
+.auth-card-badge.recommended {
+  background: rgba(30,136,229,0.14); color: var(--accent);
+}
+.auth-card-badge.soon {
+  background: rgba(255,255,255,0.08); color: var(--text-muted);
+}
+.auth-card-badge.powered {
+  background: rgba(30,136,229,0.14); color: var(--accent);
+}
+.auth-back {
+  background: none; border: 0; padding: 0; margin: -4px 0 4px;
+  font-family: var(--font-display); font-size: 12px; font-weight: 600;
+  color: var(--text-dim); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: color 0.15s ease;
+}
+.auth-back:hover { color: var(--accent); }
+
+/* Security FAQ trigger (sits under the chooser grid) */
+.auth-security-link {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin-top: 14px;
+  background: none; border: 0; padding: 6px 10px;
+  font-family: var(--font-display); font-size: 12px; font-weight: 500;
+  color: var(--text-dim); cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.auth-security-link:hover { color: var(--accent); background: rgba(30,136,229,0.06); }
+.auth-security-link svg { width: 14px; height: 14px; }
+
+/* ─── Security FAQ modal (4-card grid, single-viewport) ──────────── */
+.security-faq-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(7,11,19,0.72); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.security-faq-overlay.show { opacity: 1; pointer-events: auto; }
+.security-faq-panel {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  width: 100%; max-width: 1180px;
+  max-height: calc(100vh - 32px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  font-family: var(--font-display);
+  overflow: hidden;
+}
+.security-faq-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.security-faq-head h3 {
+  margin: 0; font-size: 15px; font-weight: 600; color: var(--text);
+  display: flex; align-items: center; gap: 8px;
+}
+.security-faq-head h3 svg { width: 16px; height: 16px; color: var(--accent); }
+.security-faq-head .sub {
+  display: block; font-size: 11.5px; font-weight: 400; color: var(--text-dim);
+  margin-top: 1px;
+}
+.security-faq-close {
+  background: none; border: 0; cursor: pointer; color: var(--text-dim);
+  padding: 6px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.security-faq-close:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.security-faq-body {
+  padding: 14px 16px 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.security-faq-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  height: 100%;
+}
+.security-faq-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 12px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+  font-family: var(--font-display);
+  min-height: 0;
+}
+.security-faq-card-head {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.security-faq-card-icon {
+  width: 34px; height: 34px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 9px; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.security-faq-card-icon svg { width: 24px; height: 24px; }
+.security-faq-card-icon svg.stroke { width: 18px; height: 18px; }
+.security-faq-card-icon img { width: 24px; height: 24px; display: block; }
+.security-faq-card-title {
+  flex: 1; min-width: 0;
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  line-height: 1.2;
+}
+.security-faq-card-title .auth-card-badge { margin-top: 0; font-size: 8.5px; padding: 2px 5px; }
+.security-faq-card dl {
+  margin: 0;
+  display: flex; flex-direction: column; gap: 7px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.security-faq-card dl::-webkit-scrollbar { width: 4px; }
+.security-faq-card dl::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+.security-faq-card dt {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.security-faq-card dd {
+  margin: 0;
+  font-size: 11.5px; line-height: 1.45; color: var(--text-dim);
+}
+.security-faq-card ul {
+  margin: 0; padding-left: 14px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.security-faq-card li { font-size: 11.5px; line-height: 1.4; color: var(--text-dim); }
+.security-faq-card code {
+  background: rgba(255,255,255,0.05); padding: 0 4px; border-radius: 3px;
+  font-size: 10.5px; color: var(--text);
+}
+.security-faq-card a { color: var(--accent); text-decoration: none; }
+.security-faq-card a:hover { text-decoration: underline; }
+.security-faq-card .ref-list {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+.security-faq-card .ref-list .ref-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 1px;
+}
+.security-faq-card .ref-list a {
+  display: inline-flex; align-items: center; gap: 6px;
+  line-height: 1.3;
+}
+.security-faq-card .ref-list a svg.gh-icon {
+  width: 12px; height: 12px; flex: 0 0 auto;
+  color: var(--text-dim);
+}
+.security-faq-card .ref-list a:hover svg.gh-icon { color: var(--accent); }
+
+@media (max-width: 1080px) {
+  .security-faq-grid { grid-template-columns: repeat(2, 1fr); }
+  .security-faq-panel { max-width: 720px; max-height: 92vh; }
+  .security-faq-body { overflow-y: auto; }
+}
+@media (max-width: 560px) {
+  .security-faq-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 480px) {
+  .auth-chooser { grid-template-columns: 1fr; }
+  .auth-card { min-height: 140px; padding: 18px 14px; }
+}
 
 .import-tabs {
   display: flex; gap: 0;
@@ -3676,28 +3936,120 @@ button.fiat-rail-tile:hover {
 
     <!-- Form -->
     <div class="import-form" id="importForm">
-      <div class="import-tabs">
-        <button class="import-tab active" id="tabImport" onclick="switchImportTab('import')">Import Wallet</button>
-        <button class="import-tab" id="tabCreate" onclick="switchImportTab('create')">Create Account</button>
-      </div>
 
-      <!-- Import pane -->
-      <div id="importPane">
-        <div class="import-form-title">Connect your wallet</div>
-        <div class="import-form-sub">
-          Use the Keplr browser extension for the safest experience — your private key never leaves the extension. Or paste a 12/24-word mnemonic; it is encrypted with AES-256-GCM and stored in an httpOnly cookie. Either way the server never persists your key to disk.
+      <!-- Chooser pane (default) — 4 auth methods -->
+      <div id="chooserPane">
+        <div class="import-form-title">Sign in to Plan Manager</div>
+        <div class="import-form-sub">Pick a sign-in method.</div>
+
+        <div class="auth-chooser" role="group" aria-label="Choose sign-in method">
+          <!-- Keplr -->
+          <button type="button" class="auth-card" onclick="doKeplrLogin()" id="authCardKeplr">
+            <div class="auth-card-icon">
+              <!-- Keplr brand mark (gradient orb). Inline SVG so we don't depend on a remote asset. -->
+              <svg viewBox="0 0 64 64" aria-hidden="true">
+                <defs>
+                  <linearGradient id="keplrG" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#6f7afe"/>
+                    <stop offset="1" stop-color="#9b6cf3"/>
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#keplrG)"/>
+                <path d="M22 16h6v15.5L40.5 16H48L34 33l14 15h-7.7L28 34.5V48h-6V16z" fill="#fff"/>
+              </svg>
+            </div>
+            <div class="auth-card-title">Sign in with Keplr</div>
+          </button>
+
+          <!-- Privy / Email -->
+          <button type="button" class="auth-card" onclick="openPrivyPane()" id="authCardPrivy">
+            <div class="auth-card-icon">
+              <!-- Privy brand mark — purple gradient orb with stylised "P" (inline SVG, no remote asset) -->
+              <svg viewBox="0 0 64 64" aria-hidden="true">
+                <defs>
+                  <linearGradient id="privyG" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#7d5cff"/>
+                    <stop offset="1" stop-color="#a78bfa"/>
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#privyG)"/>
+                <path d="M22 14h13.5c5.8 0 10 4.2 10 10s-4.2 10-10 10H28v16h-6V14zm6 6v8h7.5c2.5 0 4-1.5 4-4s-1.5-4-4-4H28z" fill="#fff"/>
+              </svg>
+            </div>
+            <div class="auth-card-title">Sign in with email</div>
+            <span class="auth-card-badge powered">Powered by Privy</span>
+          </button>
+
+          <!-- Recovery phrase -->
+          <button type="button" class="auth-card" onclick="openRecoveryPane()" id="authCardRecovery">
+            <div class="auth-card-icon">
+              <svg class="stroke" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                <path d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+            </div>
+            <div class="auth-card-title">Recovery phrase</div>
+          </button>
+
+          <!-- Create wallet -->
+          <button type="button" class="auth-card" onclick="openCreatePane()" id="authCardCreate">
+            <div class="auth-card-icon">
+              <svg class="stroke" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </div>
+            <div class="auth-card-title">Create new wallet</div>
+          </button>
         </div>
-
-        <button class="import-btn" id="keplrBtn" onclick="doKeplrLogin()" style="margin-bottom:12px">Connect with Keplr</button>
         <div class="import-error" id="keplrError"></div>
 
-        <div class="import-or" style="display:flex;align-items:center;gap:10px;margin:8px 0 12px;color:var(--text-dim, #888);font-size:12px;text-transform:uppercase;letter-spacing:0.08em">
+        <button type="button" class="auth-security-link" onclick="openSecurityFaq()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <span>Security FAQ — how each sign-in method protects your key</span>
+        </button>
+      </div>
+
+      <!-- Privy / email pane -->
+      <div id="privyPane" style="display:none">
+        <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
+        <div class="import-form-title">Sign in with email</div>
+        <div class="import-form-sub">
+          Enter your email. Privy will send a one-time code, then create or unlock an embedded Sentinel wallet for your account. Powered by <a href="https://privy.io" target="_blank" rel="noopener" style="color:var(--accent)">Privy</a>.
+        </div>
+        <div id="privyMount"></div>
+        <div class="import-error" id="privyError"></div>
+      </div>
+
+      <!-- Recovery phrase pane (was: Import pane) -->
+      <div id="importPane" style="display:none">
+        <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
+        <div class="import-form-title">Sign in with recovery phrase</div>
+        <div class="import-form-sub">
+          Paste your 12 or 24-word mnemonic. It is encrypted with AES-256-GCM and stored only in an httpOnly cookie scoped to your browser. The server never writes plaintext to disk.
+        </div>
+
+        <div class="import-or" style="display:none">
           <div style="flex:1;height:1px;background:rgba(255,255,255,0.08)"></div>
-          <span>or paste mnemonic</span>
+          <span>recovery phrase</span>
           <div style="flex:1;height:1px;background:rgba(255,255,255,0.08)"></div>
         </div>
 
-        <textarea class="import-textarea" id="importInput" placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12" spellcheck="false"></textarea>
+        <div class="mnemonic-disclosure" role="note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <span>Your seed is encrypted in your browser cookie with AES-256-GCM. The server never sees plaintext after this request, never logs it, and never writes it to disk. <button type="button" class="mnemonic-disclosure-more" onclick="toggleMnemonicDetails(event)" aria-expanded="false">Details</button></span>
+        </div>
+        <div class="mnemonic-details" id="mnemonicDetails" hidden>
+          <ul>
+            <li><strong>What we store:</strong> a single httpOnly + SameSite=Strict cookie (<code>spm_sess</code>) holding your mnemonic encrypted with AES-256-GCM. Random 12-byte IV, 16-byte auth tag, scoped to this origin only.</li>
+            <li><strong>Where the key lives:</strong> a 32-byte server key, persisted as <code>.session-key</code> with 0600 permissions, or supplied via <code>SESSION_KEY</code> env var. The key never leaves the server; the cookie never leaves your browser.</li>
+            <li><strong>What happens on each request:</strong> the cookie is decrypted in memory, the wallet is derived inside an <code>AsyncLocalStorage</code> context for that one request, then dropped. No globals, no logs.</li>
+            <li><strong>On logout:</strong> the cookie is cleared, the per-process wallet cache entry for this mnemonic is dropped, the page is reset.</li>
+            <li><strong>Verify yourself:</strong> <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/lib/session.js" target="_blank" rel="noopener">lib/session.js</a></li>
+          </ul>
+        </div>
+        <textarea class="import-textarea" id="importInput" placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
         <div class="import-error" id="importError"></div>
         <button class="import-btn" id="importBtn" onclick="doImport()">Import wallet</button>
       </div>
@@ -3742,6 +4094,196 @@ button.fiat-rail-tile:hover {
       <div class="import-note">
         <strong>You will need P2P tokens.</strong> Plan creation costs ~0.5 P2P, linking ~1–2 P2P per node.
         A freshly funded operator wallet with 8 P2P covers the full first-run flow.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Security FAQ modal (toggled from chooser) ─────────────────────── -->
+<div class="security-faq-overlay" id="securityFaqOverlay" role="dialog" aria-modal="true" aria-labelledby="securityFaqTitle" onclick="if(event.target===this)closeSecurityFaq()">
+  <div class="security-faq-panel">
+    <div class="security-faq-head">
+      <div>
+        <h3 id="securityFaqTitle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Security FAQ
+        </h3>
+        <span class="sub">How each sign-in method protects your key — with direct links to the source.</span>
+      </div>
+      <button type="button" class="security-faq-close" onclick="closeSecurityFaq()" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="security-faq-body">
+      <div class="security-faq-grid">
+
+        <!-- Keplr -->
+        <div class="security-faq-card">
+          <div class="security-faq-card-head">
+            <div class="security-faq-card-icon">
+              <svg viewBox="0 0 64 64" aria-hidden="true">
+                <defs>
+                  <linearGradient id="keplrGFaq" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#6f7afe"/>
+                    <stop offset="1" stop-color="#9b6cf3"/>
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#keplrGFaq)"/>
+                <path d="M22 16h6v15.5L40.5 16H48L34 33l14 15h-7.7L28 34.5V48h-6V16z" fill="#fff"/>
+              </svg>
+            </div>
+            <div class="security-faq-card-title">Keplr</div>
+          </div>
+          <dl>
+            <div>
+              <dt>Key custody</dt>
+              <dd>Private key stays inside the Keplr extension. Server never sees a key, mnemonic, or seed.</dd>
+            </div>
+            <div>
+              <dt>Signing flow</dt>
+              <dd>
+                <ul>
+                  <li>Server returns unsigned <code>signDoc</code>.</li>
+                  <li>Keplr signs locally via <code>signDirect</code>.</li>
+                  <li>Server decodes <code>AuthInfo</code>, derives <code>sent1…</code>, rejects mismatched session.</li>
+                </ul>
+              </dd>
+            </div>
+            <div>
+              <dt>Login</dt>
+              <dd>ADR-36 <code>signArbitrary</code> over a one-time nonce. Cookie issued only on signature verify.</dd>
+            </div>
+          </dl>
+          <div class="ref-list">
+            <span class="ref-label">Source</span>
+            <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/server.js" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>server.js · keplr-challenge / keplr-login</a>
+            <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/server.js" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>server.js · /api/tx/broadcast-signed</a>
+          </div>
+        </div>
+
+        <!-- Privy -->
+        <div class="security-faq-card">
+          <div class="security-faq-card-head">
+            <div class="security-faq-card-icon">
+              <svg viewBox="0 0 64 64" aria-hidden="true">
+                <defs>
+                  <linearGradient id="privyGFaq" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#7d5cff"/>
+                    <stop offset="1" stop-color="#a78bfa"/>
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#privyGFaq)"/>
+                <path d="M22 14h13.5c5.8 0 10 4.2 10 10s-4.2 10-10 10H28v16h-6V14zm6 6v8h7.5c2.5 0 4-1.5 4-4s-1.5-4-4-4H28z" fill="#fff"/>
+              </svg>
+            </div>
+            <div class="security-faq-card-title">Email <span class="auth-card-badge powered">Privy</span></div>
+          </div>
+          <dl>
+            <div>
+              <dt>Key custody</dt>
+              <dd>Private key in Privy's embedded-wallet enclave, scoped to your authenticated email. Plan Manager holds only an auth token.</dd>
+            </div>
+            <div>
+              <dt>Signing flow</dt>
+              <dd>
+                <ul>
+                  <li>Server returns unsigned <code>signDoc</code>.</li>
+                  <li>Privy → Cosmos adapter signs under your session.</li>
+                  <li>Same pubkey-derivation check as Keplr.</li>
+                </ul>
+              </dd>
+            </div>
+            <div>
+              <dt>Recovery</dt>
+              <dd>Re-login with the same email. MFA and account-recovery via <a href="https://docs.privy.io" target="_blank" rel="noopener">docs.privy.io</a>.</dd>
+            </div>
+          </dl>
+          <div class="ref-list">
+            <span class="ref-label">Source</span>
+            <a href="https://github.com/Sentinel-Autonomybuilder/blue-js-sdk/pull/23" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>blue-js-sdk #23 · Privy signer adapter</a>
+            <a href="https://github.com/Sentinel-Autonomybuilder/blue-js-sdk/pull/24" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>blue-js-sdk #24 · SentinelClient wiring</a>
+          </div>
+        </div>
+
+        <!-- Recovery phrase -->
+        <div class="security-faq-card">
+          <div class="security-faq-card-head">
+            <div class="security-faq-card-icon">
+              <svg class="stroke" viewBox="0 0 24 24" fill="none" stroke="#3ec77a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                <path d="M7 11V7a5 5 0 0110 0v4"/>
+              </svg>
+            </div>
+            <div class="security-faq-card-title">Recovery phrase</div>
+          </div>
+          <dl>
+            <div>
+              <dt>Encryption</dt>
+              <dd>
+                <ul>
+                  <li><strong>AES-256-GCM</strong>, random 12-byte IV + 16-byte auth tag per session.</li>
+                  <li>32-byte server key from <code>SESSION_KEY</code> env var or <code>.session-key</code> (0600).</li>
+                </ul>
+              </dd>
+            </div>
+            <div>
+              <dt>Cookie</dt>
+              <dd>
+                <ul>
+                  <li><code>spm_sess</code> · <code>HttpOnly</code> · <code>SameSite=Strict</code>.</li>
+                  <li>Origin-scoped. Cookie stays in browser; key stays on server.</li>
+                </ul>
+              </dd>
+            </div>
+            <div>
+              <dt>Per request</dt>
+              <dd>Decrypted in memory inside <code>AsyncLocalStorage</code> for one request, then dropped. No globals, no logs, no disk.</dd>
+            </div>
+          </dl>
+          <div class="ref-list">
+            <span class="ref-label">Source</span>
+            <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/lib/session.js" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>lib/session.js · encrypt / decryptMnemonic</a>
+            <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/lib/session.js" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>lib/session.js · runWithSession</a>
+          </div>
+        </div>
+
+        <!-- Create new wallet -->
+        <div class="security-faq-card">
+          <div class="security-faq-card-head">
+            <div class="security-faq-card-icon">
+              <svg class="stroke" viewBox="0 0 24 24" fill="none" stroke="#1e88e5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </div>
+            <div class="security-faq-card-title">Create new wallet</div>
+          </div>
+          <dl>
+            <div>
+              <dt>Generation</dt>
+              <dd>
+                <ul>
+                  <li>Fresh BIP-39 24-word mnemonic via <code>@cosmjs/crypto</code>.</li>
+                  <li>Shown once for offline backup.</li>
+                  <li>Backup-confirm checkbox required before session finalises.</li>
+                </ul>
+              </dd>
+            </div>
+            <div>
+              <dt>Storage</dt>
+              <dd>Same path as Recovery phrase: AES-256-GCM in the <code>spm_sess</code> HttpOnly cookie.</dd>
+            </div>
+            <div>
+              <dt>Critical</dt>
+              <dd>Lose the 24 words and the wallet — plus any P2P — is gone. Sentinel cannot restore it.</dd>
+            </div>
+          </dl>
+          <div class="ref-list">
+            <span class="ref-label">Source</span>
+            <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/server.js" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>server.js · /api/wallet/generate</a>
+            <a href="https://github.com/Sentinel-Autonomybuilder/plan-manager/blob/master/server.js" target="_blank" rel="noopener"><svg class="gh-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.81.06 1.24.83 1.24.83.72 1.24 1.89.88 2.35.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>server.js · /api/wallet/confirm-backup</a>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -4884,8 +5426,23 @@ async function doWalletSend() {
 // ─── Import / Logout ─────────────────────────────────────────────────────────
 function showImportOverlay() {
   $('importOverlay').classList.remove('hidden');
+  // Always land on the chooser when the overlay first appears so the user
+  // sees the four sign-in options, not whichever pane was last open.
+  showAuthPane('chooserPane');
 }
 function hideImportOverlay() { $('importOverlay').classList.add('hidden'); }
+
+function toggleMnemonicDetails(ev) {
+  const panel = $('mnemonicDetails');
+  const btn = ev && ev.currentTarget;
+  if (!panel) return;
+  const open = panel.hasAttribute('hidden');
+  if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+  if (btn) {
+    btn.setAttribute('aria-expanded', String(open));
+    btn.textContent = open ? 'Hide details' : 'Details';
+  }
+}
 
 // Navigate to a page and wait for its first render to settle while the
 // import overlay is still covering #app. The caller hides the overlay
@@ -4945,25 +5502,188 @@ async function doImport() {
 let _generatedMnemonic = '';
 let _generatedAddress = '';
 
-function switchImportTab(which) {
-  const tabImport = $('tabImport');
-  const tabCreate = $('tabCreate');
-  const paneImport = $('importPane');
-  const paneCreate = $('createPane');
-  if (which === 'create') {
-    tabImport.classList.remove('active');
-    tabCreate.classList.add('active');
-    paneImport.style.display = 'none';
-    paneCreate.style.display = '';
-  } else {
-    tabCreate.classList.remove('active');
-    tabImport.classList.add('active');
-    paneCreate.style.display = 'none';
-    paneImport.style.display = '';
+// ─── Auth pane state machine ─────────────────────────────────────────────────
+// The import overlay hosts four mutually exclusive panes. The chooser is the
+// default; the others are reached via the four cards. backToChooser() always
+// returns the user to the picker so they can switch methods without reload.
+const AUTH_PANES = ['chooserPane', 'privyPane', 'importPane', 'createPane'];
+function showAuthPane(id) {
+  AUTH_PANES.forEach(p => {
+    const el = document.getElementById(p);
+    if (el) el.style.display = (p === id) ? '' : 'none';
+  });
+  // create-step-2 density mode only applies while the create pane is active.
+  if (id !== 'createPane') {
     const form = $('importForm'); if (form) form.removeAttribute('data-mode');
     const overlay = $('importOverlay'); if (overlay) overlay.removeAttribute('data-create-step');
   }
 }
+function openPrivyPane() {
+  showAuthPane('privyPane');
+  mountPrivyWidget();
+}
+
+// Privy widget mount. Talks to the server's /api/wallet/privy-config to
+// decide whether the keys are wired. When configured, loads Privy's vanilla
+// JS SDK from esm.sh and runs an email + OTP flow; on success, exports the
+// embedded-wallet seed once so we can derive the Sentinel cosmos key on the
+// standard m/44'/118'/0'/0/0 path. The seed never reaches the server — the
+// server only receives the resulting access token, sent1 address, and
+// compressed secp256k1 pubkey, and verifies the token before issuing the
+// usual httpOnly client-signs cookie.
+let _privyMounted = false;
+async function mountPrivyWidget() {
+  if (_privyMounted) return;
+  const mount = $('privyMount');
+  const err = $('privyError');
+  if (err) err.textContent = '';
+  if (!mount) return;
+  _privyMounted = true;
+
+  mount.innerHTML = `<div style="padding:14px;color:var(--muted);font-size:13px">Loading email sign-in…</div>`;
+
+  let cfg;
+  try {
+    const r = await fetch('/api/wallet/privy-config', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    cfg = await r.json();
+  } catch (e) {
+    mount.innerHTML = `<div style="padding:18px;border:1px dashed rgba(255,80,80,0.35);border-radius:10px;color:var(--muted);font-size:13px">Could not reach the Privy config endpoint: ${e.message}</div>`;
+    return;
+  }
+
+  if (!cfg?.enabled) {
+    mount.innerHTML = `
+      <div style="padding:18px;border:1px dashed rgba(255,255,255,0.16);border-radius:10px;font-size:13px;line-height:1.55;color:var(--muted)">
+        <strong style="color:var(--text)">Email sign-in is not configured on this server.</strong><br><br>
+        To enable: get a Privy app from
+        <a href="https://dashboard.privy.io" target="_blank" rel="noopener" style="color:var(--accent)">dashboard.privy.io</a>,
+        then set <code>PRIVY_APP_ID</code> and <code>PRIVY_APP_SECRET</code>
+        in <code>.env</code> and restart the server.<br><br>
+        In the meantime, use Keplr, a recovery phrase, or create a new wallet.
+      </div>`;
+    return;
+  }
+
+  // Render the email + OTP form. Wallet derivation runs after Privy auth
+  // succeeds and the user authorises a one-time seed export.
+  mount.innerHTML = `
+    <form id="privyEmailForm" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+      <input id="privyEmail" type="email" autocomplete="email" placeholder="you@example.com" required
+        style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:var(--input-bg);color:var(--text);font-size:14px">
+      <button type="submit" id="privyEmailBtn"
+        style="padding:12px 16px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-weight:600;cursor:pointer">
+        Send code
+      </button>
+    </form>
+    <form id="privyCodeForm" style="display:none;flex-direction:column;gap:10px;margin-top:10px">
+      <input id="privyCode" inputmode="numeric" pattern="[0-9]*" placeholder="Enter the 6-digit code" required
+        style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:var(--input-bg);color:var(--text);font-size:14px;letter-spacing:4px">
+      <button type="submit" id="privyCodeBtn"
+        style="padding:12px 16px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-weight:600;cursor:pointer">
+        Verify and sign in
+      </button>
+    </form>
+    <div id="privyStatus" style="margin-top:10px;color:var(--muted);font-size:12px"></div>
+  `;
+
+  const status = $('privyStatus');
+  let _privy = null;
+  async function loadPrivyClient() {
+    if (_privy) return _privy;
+    status.textContent = 'Loading Privy SDK…';
+    const mod = await import('https://esm.sh/@privy-io/js-sdk-core@0.x');
+    const { Privy } = mod;
+    _privy = new Privy({ appId: cfg.appId, storage: window.localStorage });
+    return _privy;
+  }
+
+  $('privyEmailForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('privyEmailBtn');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    err.textContent = '';
+    try {
+      const privy = await loadPrivyClient();
+      const email = $('privyEmail').value.trim();
+      await privy.auth.email.sendCode(email);
+      status.textContent = `Code sent to ${email}.`;
+      $('privyEmailForm').style.display = 'none';
+      $('privyCodeForm').style.display = 'flex';
+      $('privyCode').focus();
+    } catch (ex) {
+      err.textContent = 'Failed to send code: ' + (ex.message || String(ex));
+      btn.disabled = false; btn.textContent = 'Send code';
+    }
+  });
+
+  $('privyCodeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('privyCodeBtn');
+    btn.disabled = true; btn.textContent = 'Verifying…';
+    err.textContent = '';
+    try {
+      const privy = await loadPrivyClient();
+      const email = $('privyEmail').value.trim();
+      const code = $('privyCode').value.trim();
+      const session = await privy.auth.email.loginWithCode(email, code);
+      const accessToken = session?.accessToken || session?.token || (await privy.getAccessToken?.());
+      if (!accessToken) throw new Error('Privy returned no access token');
+
+      status.textContent = 'Authenticating with the network…';
+
+      // Find or create an embedded wallet, then export the seed once so we
+      // can derive the Cosmos key on m/44'/118'/0'/0/0. The seed stays on
+      // this device; only the resulting addr + pubkey go to the server.
+      const wallets = (session?.user?.linkedAccounts || []).filter(a => a.type === 'wallet' && a.walletClientType === 'privy');
+      if (!wallets.length) {
+        // Ask Privy to provision one.
+        try { await privy.embeddedWallet.create(); } catch {}
+      }
+
+      const exported = await privy.embeddedWallet.exportSeedPhrase().catch(() => null);
+      const mnemonic = exported?.seedPhrase || exported?.mnemonic || exported;
+      if (!mnemonic || typeof mnemonic !== 'string') {
+        throw new Error('Could not export the embedded wallet seed. Open privy.io to grant export permission and try again.');
+      }
+
+      // Derive sent1 address + compressed pubkey from the mnemonic locally.
+      const sdkMod = await import('https://esm.sh/@cosmjs/proto-signing@0.32?bundle');
+      const { DirectSecp256k1HdWallet } = sdkMod;
+      const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic.trim(), { prefix: 'sent' });
+      const [acc] = await wallet.getAccounts();
+      const addr = acc.address;
+      const pubkey = btoa(String.fromCharCode(...acc.pubkey));
+
+      const r = await fetch('/api/wallet/privy-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ accessToken, addr, pubkey }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Login failed');
+
+      status.textContent = 'Signed in. Redirecting…';
+      window.location.reload();
+    } catch (ex) {
+      err.textContent = ex.message || String(ex);
+      btn.disabled = false; btn.textContent = 'Verify and sign in';
+    }
+  });
+}
+function openRecoveryPane() { showAuthPane('importPane'); }
+function openCreatePane() { showAuthPane('createPane'); }
+function backToChooser() { showAuthPane('chooserPane'); }
+
+// ─── Security FAQ modal ──────────────────────────────────────────────────────
+function openSecurityFaq() {
+  const o = $('securityFaqOverlay'); if (o) o.classList.add('show');
+  document.addEventListener('keydown', _securityFaqKey);
+}
+function closeSecurityFaq() {
+  const o = $('securityFaqOverlay'); if (o) o.classList.remove('show');
+  document.removeEventListener('keydown', _securityFaqKey);
+}
+function _securityFaqKey(e) { if (e.key === 'Escape') closeSecurityFaq(); }
 
 async function doGenerateWallet() {
   const btn = $('generateBtn');
@@ -5030,6 +5750,7 @@ async function copyToClipboard(text, btnEl) {
 
 function cancelCreate() {
   resetCreatePane();
+  showAuthPane('chooserPane');
 }
 
 // Full reset of the create pane: clears the in-memory mnemonic, wipes the
@@ -5081,7 +5802,7 @@ async function doConfirmBackup() {
       // is still looking at it, producing a "lag on the Import Wallet
       // page" flicker between success and dashboard render.
       resetCreatePane();
-      switchImportTab('import');
+      showAuthPane('chooserPane');
       toast('Wallet created. Fund it with ~8 P2P to create your first plan.', 'info');
     } else {
       btn.disabled = false;
@@ -5128,14 +5849,13 @@ const SENTINEL_KEPLR_CHAIN = {
 function setKeplrError(msg) { const e = $('keplrError'); if (e) e.textContent = msg || ''; }
 
 async function doKeplrLogin() {
-  const btn = $('keplrBtn');
+  const card = $('authCardKeplr');
   setKeplrError('');
   if (!window.keplr) {
     setKeplrError('Keplr extension not detected. Install it from keplr.app, then reload.');
     return;
   }
-  btn.disabled = true;
-  btn.textContent = 'Connecting...';
+  if (card) { card.disabled = true; card.classList.add('loading'); }
   try {
     try {
       await window.keplr.experimentalSuggestChain(SENTINEL_KEPLR_CHAIN);
@@ -5181,8 +5901,7 @@ async function doKeplrLogin() {
     console.error('[keplr]', e);
     setKeplrError(e.message || 'Keplr connection cancelled');
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Connect with Keplr';
+    if (card) { card.disabled = false; card.classList.remove('loading'); }
   }
 }
 
@@ -5270,7 +5989,7 @@ async function doLogout() {
   // Reset overlay state so the next signin lands on a clean Import tab,
   // not a stuck step-2 "Loading wallet..." Create view from a prior account.
   resetCreatePane();
-  switchImportTab('import');
+  showAuthPane('chooserPane');
   const importInput = $('importInput'); if (importInput) importInput.value = '';
   const importErr = $('importError'); if (importErr) importErr.textContent = '';
   const importBtn = $('importBtn');
@@ -5319,7 +6038,17 @@ async function renderDashboard() {
       </div>
     </div>
 
-    <!-- Security note: seed phrases never touch the server. -->
+    <!-- Security note: seed phrases never touch the server. Hidden for Keplr sessions (no mnemonic to disclose about). -->
+    ${w.kind === 'keplr' ? `
+    <div class="security-strip" role="note">
+      <div class="security-strip-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+      </div>
+      <div class="security-strip-body">
+        <div class="security-strip-title">Connected with Keplr — your private key never leaves the extension.</div>
+        <div class="security-strip-sub">Every transaction is signed inside Keplr and sent to this server only as a pre-signed payload to broadcast. Source: <a href="${OFFICIAL_REPO_URL}/blob/master/server.js" target="_blank" rel="noopener" class="security-strip-link">/api/tx/broadcast-signed</a> · <a href="${OFFICIAL_REPO_URL}" target="_blank" rel="noopener" class="security-strip-link">full repo on GitHub →</a></div>
+      </div>
+    </div>` : `
     <div class="security-strip" role="note">
       <div class="security-strip-icon" aria-hidden="true">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
@@ -5328,7 +6057,7 @@ async function renderDashboard() {
         <div class="security-strip-title">Your seed phrase never leaves this device.</div>
         <div class="security-strip-sub">Mnemonics are encrypted with AES-256-GCM and stored only in an httpOnly cookie scoped to your browser — never written to the server's disk, never shared between users. Verify the source yourself: <a href="${OFFICIAL_REPO_URL}/blob/master/lib/session.js" target="_blank" rel="noopener" class="security-strip-link">lib/session.js</a> · <a href="${OFFICIAL_REPO_URL}" target="_blank" rel="noopener" class="security-strip-link">full repo on GitHub →</a></div>
       </div>
-    </div>
+    </div>`}
 
     ${(!w.provider || lowBal) ? `
     <div class="status-strip" role="status">
