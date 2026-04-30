@@ -1,7 +1,7 @@
 // Bundles browser-only dependencies into self-contained ESM files served from
 // /vendor/. Replaces flaky CDN imports (esm.sh / jsdelivr) so the email-OTP
-// login flow and seed-derivation work even when extensions, proxies, or the
-// CDN itself blocks deep transitive imports.
+// login flow works even when extensions, proxies, or the CDN itself blocks
+// deep transitive imports.
 //
 // Run: node scripts/bundle-vendor.mjs
 import { build } from 'esbuild';
