@@ -3332,17 +3332,17 @@ html:not([data-theme="light"]) .wallet-stats .stat-card::before { display: none;
 
 /* ─── Payment rail picker (On-Chain vs Fiat) ─── */
 .rail-cards {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
-  margin-bottom: 28px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 28px;
+  margin-bottom: 32px;
 }
 .rail-card {
   position: relative;
   display: flex; flex-direction: column;
-  padding: 36px 36px 28px;
-  min-height: 380px;
+  padding: 48px 44px 36px;
+  min-height: 460px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 20px;
   cursor: pointer;
   text-align: left;
   font-family: inherit;
@@ -3366,14 +3366,14 @@ html:not([data-theme="light"]) .wallet-stats .stat-card::before { display: none;
 
 /* Marks: clean centered row of equal-height pills, no fixed min-height. */
 .rail-card-marks {
-  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px;
-  margin-bottom: 24px;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 18px;
+  margin-bottom: 32px;
 }
 .rail-card-mark {
   display: inline-flex; align-items: center; justify-content: center;
-  height: 56px; min-width: 56px;
-  padding: 0 12px;
-  border-radius: 12px;
+  height: 80px; min-width: 80px;
+  padding: 0 16px;
+  border-radius: 14px;
   background: transparent;
   border: none;
   color: var(--text);
@@ -3382,31 +3382,33 @@ html:not([data-theme="light"]) .wallet-stats .stat-card::before { display: none;
 .rail-card-mark-light {
   background: transparent;
   border: none;
-  min-width: 72px;
-  padding: 0 14px;
+  min-width: 100px;
+  padding: 0 18px;
 }
 html[data-theme="light"] .rail-card-mark-light { background: transparent; border: none; }
-.rail-img-mark { width: 40px; height: 40px; object-fit: contain; display: block; }
+.rail-img-mark { width: 60px; height: 60px; object-fit: contain; display: block; }
+.rail-card-mark svg { height: auto; max-height: 56px; width: auto; }
+.rail-card-mark .logo-paypal { font-size: 32px !important; }
 
-.rail-card-heading { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; margin-bottom: 14px; }
+.rail-card-heading { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; margin-bottom: 20px; }
 .rail-card-eyebrow {
-  font-size: 11px; font-weight: 700; color: var(--accent);
-  text-transform: uppercase; letter-spacing: 0.8px;
+  font-size: 13px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.9px;
 }
 .rail-card-title {
-  font-size: 24px; font-weight: 700; line-height: 1.25;
+  font-size: 30px; font-weight: 700; line-height: 1.2;
   color: var(--text);
   margin: 0;
 }
 .rail-card-desc {
-  font-size: 14px; line-height: 1.65; color: var(--text-dim);
+  font-size: 16px; line-height: 1.65; color: var(--text-dim);
   flex: 1;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 .rail-card-cta {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; font-weight: 600; color: var(--accent);
-  padding-top: 12px;
+  font-size: 15px; font-weight: 600; color: var(--accent);
+  padding-top: 16px;
   border-top: 1px solid var(--border);
 }
 @media (max-width: 880px) {
