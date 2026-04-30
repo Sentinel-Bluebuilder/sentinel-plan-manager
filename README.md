@@ -4,7 +4,7 @@
 
 A full-stack web studio for creating on-chain subscription plans, curating node pools, managing subscribers, and issuing fee grants — turning the raw Sentinel protocol into a revenue-generating bandwidth business anyone can run from a laptop.
 
-Built on [**blue-js-sdk**](https://github.com/Sentinel-Autonomybuilder/blue-js-sdk).
+Built on [**blue-js-sdk**](https://github.com/Sentinel-Bluebuilder/blue-js-sdk).
 
 ---
 
@@ -59,7 +59,7 @@ npx sentinel-plan-manager                   # or: node $(npm root -g)/sentinel-p
 ### Option B — git clone (for contributors)
 
 ```bash
-git clone https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager.git
+git clone https://github.com/Sentinel-Bluebuilder/sentinel-plan-manager.git
 cd sentinel-plan-manager
 npm install
 cp .env.example .env    # then edit .env and paste your mnemonic
@@ -244,7 +244,7 @@ For every command and flag, run `plans <group> --help`.
 
 ## Built On blue-js-sdk
 
-This project is a **consumer app** of [**blue-js-sdk**](https://github.com/Sentinel-Autonomybuilder/blue-js-sdk). It is not a fork — it imports SDK modules directly to handle node discovery, disk caching, chain RPC, error taxonomy, and price lookups.
+This project is a **consumer app** of [**blue-js-sdk**](https://github.com/Sentinel-Bluebuilder/blue-js-sdk). It is not a fork — it imports SDK modules directly to handle node discovery, disk caching, chain RPC, error taxonomy, and price lookups.
 
 ### Modules Imported
 
@@ -450,7 +450,7 @@ node server.js      # same, without npm
 ## License & Attribution
 
 - **This project:** MIT — see [LICENSE](./LICENSE).
-- **blue-js-sdk:** MIT — https://github.com/Sentinel-Autonomybuilder/blue-js-sdk
+- **blue-js-sdk:** MIT — https://github.com/Sentinel-Bluebuilder/blue-js-sdk
 - **Sentinel chain:** independent, permissionless — not operated or endorsed by this project.
 
 > *"A protocol without commerce is a library. A protocol with commerce is an economy."* — [MANIFESTO.md](./MANIFESTO.md)

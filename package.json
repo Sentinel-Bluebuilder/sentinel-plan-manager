@@ -29,7 +29,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Sentinel-Autonomybuilder/sentinel-plan-manager.git"
+    "url": "git+https://github.com/Sentinel-Bluebuilder/sentinel-plan-manager.git"
   },
   "keywords": [
     "sentinel",
