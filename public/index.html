@@ -861,8 +861,15 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(10,1
 .sidebar-nav {
   padding: 14px 12px 20px;
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148,163,184,0.55) transparent;
 }
+.sidebar-nav::-webkit-scrollbar { width: 8px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.55); border-radius: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.8); }
 
 .sidebar-section {
   font-size: 14px;
@@ -1471,8 +1478,42 @@ html[data-theme="light"] .chain-badge { background: rgba(10,14,30,0.03); }
 .stat-card-enhanced .stat-label,
 .stat-card-enhanced .stat-value,
 .stat-card-enhanced .stat-sub { text-align: left; }
+.stats-row-centered .stat-card-enhanced {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-items: center;
+  text-align: center;
+  padding: 18px 16px;
+  gap: 6px;
+}
+.stats-row-centered .stat-card-enhanced .stat-icon { margin: 0 auto 4px; }
 .stats-row-centered .stat-card-enhanced .stat-label,
-.stats-row-centered .stat-card-enhanced .stat-value { text-align: center; justify-content: center; }
+.stats-row-centered .stat-card-enhanced .stat-sub {
+  width: 100%;
+  text-align: center;
+  justify-content: center;
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+.stats-row-centered .stat-card-enhanced .stat-label { gap: 6px; }
+/* Value row: align number and unit on the text baseline so "1" and "P2P"
+   sit on the same line instead of being box-centered (which makes the
+   smaller "P2P" float vertically off the digit). gap handles the spacing
+   so the inline span doesn't need its own margin. */
+.stats-row-centered .stat-card-enhanced .stat-value {
+  width: 100%;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+}
+.stats-row-centered .stat-card-enhanced .stat-value > span {
+  color: var(--text-muted);
+  font-weight: 500;
+}
 .provider-status-badge {
   font-size: 18px;
   font-weight: 700;
@@ -2045,6 +2086,11 @@ select.input {
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 32px;
+  color-scheme: light dark;
+}
+select.input option {
+  background: var(--bg-card-solid);
+  color: var(--text);
 }
 
 /* Checkbox toggle (used in fee grants auto-grant) */
@@ -2511,6 +2557,34 @@ html[data-theme="light"] .badge-dim { background: rgba(10,14,30,0.04); }
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
 }
+.node-list-header.has-resource-cols,
+.node-list-row.has-resource-cols {
+  grid-template-columns: 28px minmax(220px, 2fr) 110px 130px 70px 100px 70px 60px 60px;
+}
+.node-list-header.has-resource-cols > :nth-child(7),
+.node-list-header.has-resource-cols > :nth-child(8),
+.node-list-header.has-resource-cols > :nth-child(9),
+.node-list-row.has-resource-cols > :nth-child(7),
+.node-list-row.has-resource-cols > :nth-child(8),
+.node-list-row.has-resource-cols > :nth-child(9) {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.node-list-header .node-list-sort {
+  display: block;
+  width: 100%;
+}
+.node-list-header .node-list-sort:hover { color: var(--text); }
+.node-list-sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.55;
+  transition: opacity 0.12s, color 0.12s;
+}
+.node-list-header .node-list-sort:hover .node-list-sort-arrow { opacity: 1; color: var(--text); }
+.node-list-sort-arrow.active { color: var(--accent); opacity: 1; font-weight: 600; }
 
 .node-list-row {
   display: grid;
@@ -2558,8 +2632,9 @@ html[data-theme="light"] .badge-dim { background: rgba(10,14,30,0.04); }
 
 @media (max-width: 900px) {
   .node-list-header, .node-list-row { grid-template-columns: 28px 1fr 60px 70px; }
-  .node-list-header > :nth-child(5), .node-list-header > :nth-child(6), .node-list-header > :nth-child(7), .node-list-header > :nth-child(8),
-  .node-list-row > :nth-child(5), .node-list-row > :nth-child(6), .node-list-row > :nth-child(7), .node-list-row > :nth-child(8) { display: none; }
+  .node-list-header.has-resource-cols, .node-list-row.has-resource-cols { grid-template-columns: 28px 1fr 60px 70px; }
+  .node-list-header > :nth-child(5), .node-list-header > :nth-child(6), .node-list-header > :nth-child(7), .node-list-header > :nth-child(8), .node-list-header > :nth-child(9),
+  .node-list-row > :nth-child(5), .node-list-row > :nth-child(6), .node-list-row > :nth-child(7), .node-list-row > :nth-child(8), .node-list-row > :nth-child(9) { display: none; }
 }
 
 /* ─── View Toggle ─── */
@@ -2628,6 +2703,197 @@ html[data-theme="light"] .lease-slider-wrap .lease-value { color: var(--text); }
 
 .filters .input { width: auto; min-width: 160px; padding: 8px 12px; font-size: 12px; }
 .filters select.input { min-width: 140px; }
+
+/* Active-filter chips: a horizontal strip above the node list that shows
+   exactly which filters are applied so the user can peel them off one at a
+   time without hunting for the right control. */
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -8px 0 14px 0;
+  align-items: center;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.filter-chip:hover { background: var(--card-hover, var(--card)); border-color: var(--accent); }
+.filter-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+.filter-chip:hover .filter-chip-x { background: var(--red, #ef4444); color: #fff; }
+.filter-chip-clear {
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border-style: dashed;
+}
+.filter-chip-clear:hover { color: var(--text); }
+
+/* ─── Country Panel (Add Nodes) ─── */
+.country-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.country-panel-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+.country-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.06s;
+  user-select: none;
+  white-space: nowrap;
+}
+.country-pill:hover { border-color: var(--accent); transform: translateY(-1px); }
+.country-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.country-pill.active .country-pill-count { color: rgba(255,255,255,0.85); }
+.country-pill-flag { font-size: 14px; line-height: 1; }
+.country-pill-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Country Picker Popup ─── */
+.country-picker-card {
+  max-width: 720px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+.country-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.country-picker-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.country-picker-close:hover { background: var(--bg); color: var(--text); border-color: var(--accent); }
+.country-picker-search {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.country-picker-search .input { width: 100%; }
+.country-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+.country-tile {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.06s;
+  user-select: none;
+  font-family: inherit;
+  width: 100%;
+  min-width: 0;
+}
+.country-tile:hover { border-color: var(--accent); transform: translateY(-1px); }
+.country-tile.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.country-tile.active .country-tile-count { color: rgba(255,255,255,0.85); }
+.country-tile-flag {
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+.country-tile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.country-tile-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  min-width: 32px;
+  text-align: center;
+}
+.country-tile.active .country-tile-count {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.25);
+}
 
 /* ─── Loading ─── */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -3736,6 +4002,8 @@ button.fiat-rail-tile:hover {
 .fg-summary-stat {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 6px;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -3749,14 +4017,14 @@ button.fiat-rail-tile:hover {
   line-height: 1;
   letter-spacing: -0.4px;
 }
-.fg-summary-stat .fg-stat-val.is-green { color: #10b981; }
-.fg-summary-stat .fg-stat-val.is-red { color: var(--red); }
 .fg-summary-stat .fg-stat-lbl {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.8px;
 }
+.fg-summary-stat .fg-stat-lbl.is-green { color: #10b981; }
+.fg-summary-stat .fg-stat-lbl.is-red { color: var(--red); }
 .fg-summary-actions {
   display: flex;
   flex-direction: column;
@@ -4421,7 +4689,7 @@ const S = {
   dvpnPrice: null,
   multiUser: false,
   // Explorer
-  nodes: null, nodePage: 1, nodeFilters: { search: '', country: '', protocol: '', priceSort: '' },
+  nodes: null, nodePage: 1, nodeFilters: { search: '', country: '', protocol: '', priceSort: '', sortKey: '', sortDir: 'desc' },
   countries: [], protocols: [],
   // Manager
   mgrPlanId: '', mgrNodes: null, mgrPage: 1, myPlans: null, myPlansLoading: false,
@@ -4647,21 +4915,49 @@ function showLoading(msg = 'Loading...') {
   // inside the load function will show/hide the Updating badge itself.
 }
 
+// ─── Render coalescing ───────────────────────────────────────────────────────
+// When two onRefresh callbacks fire close together (e.g. Pricing's plan + params
+// both revalidate), they each call renderPricing(). Without coalescing, this
+// produces two paints in the same tick. coalesceRender() collapses repeat calls
+// for the same key into a single rAF-scheduled paint.
+const _pendingRender = new Map();
+function coalesceRender(key, fn) {
+  if (_pendingRender.has(key)) return;
+  _pendingRender.set(key, true);
+  requestAnimationFrame(() => {
+    _pendingRender.delete(key);
+    fn();
+  });
+}
+
 // Flash tracer — instruments every #app.innerHTML write with a caller log so
 // any extra paint is visible in DevTools console. Toggle via window._flashDebug.
-window._flashDebug = true;
+// Also short-circuits identical-content writes so a re-render with the same
+// HTML doesn't trigger a layout/paint flash.
+window._flashDebug = false;
 window._paintCount = 0;
+window._paintSkipped = 0;
 (function installAppPaintTracer() {
   const run = () => {
     const app = document.getElementById('app');
     if (!app) { return setTimeout(run, 50); }
-    const proto = Object.getPrototypeOf(app);
     const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
     if (!desc) return;
+    let _lastHtml = '';
     Object.defineProperty(app, 'innerHTML', {
       configurable: true,
       get() { return desc.get.call(this); },
       set(v) {
+        // Skip identical writes — preserves scroll, focus, and avoids flash.
+        if (typeof v === 'string' && v === _lastHtml && desc.get.call(this).length > 0) {
+          window._paintSkipped++;
+          if (window._flashDebug) {
+            const page = (window.S && window.S.page) || '?';
+            console.log('[PAINT skipped] page=' + page + ' bytes=' + v.length + ' (identical)');
+          }
+          return v;
+        }
+        _lastHtml = typeof v === 'string' ? v : '';
         if (window._flashDebug) {
           window._paintCount++;
           const page = (window.S && window.S.page) || '?';
@@ -4914,6 +5210,30 @@ const _validPages = new Set([
   'subscribers', 'earnings', 'fee-grants', 'wallet', 'cli-install', 'cli-commands',
 ]);
 
+// Navigation epoch — bumped on every navigate(). Async loaders capture the
+// epoch at start and bail if it has advanced by the time they're ready to
+// paint, which prevents stale fetches from clobbering the new page.
+let _navEpoch = 0;
+function _currentNavEpoch() { return _navEpoch; }
+function _navStillCurrent(epoch, expectedPage) {
+  return _navEpoch === epoch && S.page === expectedPage;
+}
+
+// Active SSE connections — closed on navigation so detached DOM is not appended to.
+const _activeSSE = new Set();
+function _registerSSE(es) { _activeSSE.add(es); es.addEventListener('error', () => _activeSSE.delete(es)); }
+function _closeAllSSE() { for (const es of _activeSSE) { try { es.close(); } catch {} } _activeSSE.clear(); }
+
+// Page-scoped AbortController — aborted on every navigate(). Loaders can pass
+// `_pageSignal()` to fetch() / cachedFetch() so departing-page work cancels at
+// the network layer (not just the paint layer). Replaces per-loader bookkeeping.
+let _pageController = new AbortController();
+function _pageSignal() { return _pageController.signal; }
+function _abortPageController() {
+  try { _pageController.abort(); } catch {}
+  _pageController = new AbortController();
+}
+
 function navigate(page, opts = {}) {
   if (S.page === page && !opts._fromPopstate) return; // Don't re-navigate to same page
 
@@ -4922,13 +5242,23 @@ function navigate(page, opts = {}) {
     history.replaceState({ page: S.page, scroll: window.scrollY }, '', '/' + S.page);
   }
 
+  // Bump epoch FIRST so any in-flight loader paint-guards trip on resolve.
+  _navEpoch++;
+
   // Cancel page-specific in-flight requests from the departing page.
   if (_explorerAbort) { _explorerAbort.abort(); _explorerAbort = null; }
   if (_mgrNodesAbort) { _mgrNodesAbort.abort(); _mgrNodesAbort = null; }
   if (_myPlansAbort) { _myPlansAbort.abort(); _myPlansAbort = null; }
+  _mgrNodesInflightUrl = null;
 
   // Cancel stale background revalidates so they don't clobber the new page's data.
   _cancelAllBackgroundRevalidates();
+
+  // Close any open SSE streams from the departing page (their DOM targets are gone).
+  _closeAllSSE();
+
+  // Abort the central page controller so any loader using `_pageSignal()` cancels.
+  _abortPageController();
 
   // Remove floating action bars from previous page.
   const addBar = document.getElementById('addActionBar');
@@ -4946,6 +5276,11 @@ function navigate(page, opts = {}) {
     el.classList.toggle('active', el.dataset.page === page);
   });
   $('pageTitle').textContent = pageTitles[page] || page;
+  // Clear the previous page IMMEDIATELY so the user sees the new page instantly.
+  // Loaders may take seconds; we don't want them to keep the old page visible
+  // while they await data. A skeleton paints right away; loaders fill it in.
+  const _appEl = $('app');
+  if (_appEl) _appEl.innerHTML = `<div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading ${pageTitles[page] || page}...</div></div>`;
   renderPage();
 
   // Restore scroll after render completes: top on new navigation, saved position on back/forward.
@@ -5233,8 +5568,10 @@ const SEND_BECH32_RE = /^sent1[0-9a-z]{38,58}$/;
 const SEND_GAS_HINT = 0.002;
 
 async function loadWalletPage() {
+  const epoch = _currentNavEpoch();
   // Refresh wallet data first so the page header shows the latest balance.
   await loadWallet();
+  if (!_navStillCurrent(epoch, 'wallet')) return;
   renderWalletPage();
 }
 
@@ -5321,10 +5658,11 @@ function renderWalletPage() {
 
   // Load the QR SVG asynchronously.
   if (addr) {
+    const qrEpoch = _currentNavEpoch();
     fetch('/api/wallet/qr')
       .then(r => r.ok ? r.text() : null)
       .then(svg => {
-        if (svg && S.page === 'wallet') {
+        if (svg && _navStillCurrent(qrEpoch, 'wallet')) {
           const el = $('walletQr');
           if (el) {
             el.innerHTML = svg;
@@ -5569,7 +5907,7 @@ async function mountPrivyWidget() {
   mount.innerHTML = `
     <form id="privyEmailForm" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
       <input id="privyEmail" type="email" autocomplete="email" placeholder="you@example.com" required
-        style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:var(--input-bg);color:var(--text);font-size:14px">
+        style="padding:12px 14px;border-radius:10px;border:2px solid var(--accent);background:var(--input-bg);color:var(--text);font-size:14px;outline:none">
       <button type="submit" id="privyEmailBtn"
         style="padding:12px 16px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-weight:600;cursor:pointer">
         Send code
@@ -5577,7 +5915,7 @@ async function mountPrivyWidget() {
     </form>
     <form id="privyCodeForm" style="display:none;flex-direction:column;gap:10px;margin-top:10px">
       <input id="privyCode" inputmode="numeric" pattern="[0-9]*" placeholder="Enter the 6-digit code" required
-        style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:var(--input-bg);color:var(--text);font-size:14px;letter-spacing:4px">
+        style="padding:12px 14px;border-radius:10px;border:2px solid var(--accent);background:var(--input-bg);color:var(--text);font-size:14px;letter-spacing:4px;outline:none">
       <button type="submit" id="privyCodeBtn"
         style="padding:12px 16px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-weight:600;cursor:pointer">
         Verify and sign in
@@ -5591,9 +5929,19 @@ async function mountPrivyWidget() {
   async function loadPrivyClient() {
     if (_privy) return _privy;
     status.textContent = 'Loading Privy SDK…';
-    const mod = await import('https://esm.sh/@privy-io/js-sdk-core@0.x');
-    const { Privy } = mod;
-    _privy = new Privy({ appId: cfg.appId, storage: window.localStorage });
+    // Self-hosted bundle from /vendor/ (built by scripts/bundle-vendor.mjs).
+    // Avoids CDN flakiness, ad-blocker breakage, and corporate proxy issues
+    // that broke the previous esm.sh / jsdelivr imports.
+    const mod = await import('/vendor/privy-sdk.mjs');
+    const Privy = mod.Privy || mod.default?.Privy || mod.default;
+    if (!Privy) throw new Error('Privy export missing from /vendor/privy-sdk.mjs');
+    // Privy expects its own Storage interface (get/put/del/getKeys), not the
+    // raw window.localStorage object. The SDK ships LocalStorage as a wrapper.
+    const StorageImpl = mod.LocalStorage || mod.default?.LocalStorage;
+    if (!StorageImpl) throw new Error('Privy LocalStorage export missing');
+    const privyOpts = { appId: cfg.appId, storage: new StorageImpl() };
+    if (cfg.clientId) privyOpts.clientId = cfg.clientId;
+    _privy = new Privy(privyOpts);
     return _privy;
   }
 
@@ -5647,7 +5995,7 @@ async function mountPrivyWidget() {
       }
 
       // Derive sent1 address + compressed pubkey from the mnemonic locally.
-      const sdkMod = await import('https://esm.sh/@cosmjs/proto-signing@0.32?bundle');
+      const sdkMod = await import('/vendor/cosmjs-proto-signing.mjs');
       const { DirectSecp256k1HdWallet } = sdkMod;
       const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic.trim(), { prefix: 'sent' });
       const [acc] = await wallet.getAccounts();
@@ -6001,6 +6349,7 @@ async function doLogout() {
 // Paints once from cached data; fresh values stream in via targeted DOM updates
 // (no full re-render → no flash). See S3 "First Paint is Final" rule.
 async function renderDashboard() {
+  const epoch = _currentNavEpoch();
   // Kick off wallet load in parallel but DO NOT block first paint on it.
   // If S.wallet is already populated, we render immediately with real data.
   // If not, we paint the skeleton now and re-render once the wallet arrives.
@@ -6008,7 +6357,7 @@ async function renderDashboard() {
   // when the wallet API is slow on first boot.
   let walletPromise = null;
   if (!S.wallet) walletPromise = loadWallet();
-  if (S.page !== 'dashboard') return;
+  if (!_navStillCurrent(epoch, 'dashboard')) return;
 
   // Warm cache for every other page. Fire-and-forget — never blocks.
   prefetchAll();
@@ -6164,7 +6513,7 @@ async function renderDashboard() {
   const cacheFresh = countCache && (Date.now() - countCache.ts) < 60_000;
   if (!cacheFresh) {
     fetch('/api/nodes/chain-count').then(r => r.json()).then(d => {
-      if (S.page !== 'dashboard') return;
+      if (!_navStillCurrent(epoch, 'dashboard')) return;
       if (typeof d.count !== 'number') return;
       _dataCache['/api/nodes/chain-count'] = { data: d, ts: Date.now() };
       const el = document.getElementById('statNodeCount');
@@ -6177,7 +6526,7 @@ async function renderDashboard() {
   // skeleton. Skip if user navigated away in the meantime.
   if (walletPromise) {
     walletPromise.then(() => {
-      if (S.page === 'dashboard') renderDashboard();
+      if (_navStillCurrent(epoch, 'dashboard')) coalesceRender('dashboard', renderDashboard);
     }).catch(() => {});
   }
 }
@@ -6480,6 +6829,7 @@ function getLeaseLabel() {
 let _myPlansAbort = null;
 let _lastMyPlansJson = '';
 async function _ensurePlansLoaded(forPage) {
+  const epoch = _currentNavEpoch();
   if (S.myPlans) {
     if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId, { suppressRender: true });
     return;
@@ -6493,11 +6843,13 @@ async function _ensurePlansLoaded(forPage) {
       _lastMyPlansJson = freshJson;
       S.myPlans = fresh.plans || [];
       if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId, { suppressRender: true });
+      // Only re-dispatch the page handler if the user hasn't navigated away.
+      // Coalesce to one paint per frame in case multiple revalidates land together.
       const handler = { 'add-nodes': loadAddNodes, 'your-nodes': loadYourNodes, pricing: loadPricing, subscribers: loadSubscribers, 'fee-grants': loadFeeGrants };
-      if (handler[S.page]) handler[S.page]();
+      if (handler[S.page] && _navStillCurrent(epoch, S.page)) coalesceRender('plans:' + S.page, handler[S.page]);
     };
     const { data: d } = await cachedFetch('/api/my-plans', 120_000, onRefresh);
-    if (S.page !== forPage) return;
+    if (!_navStillCurrent(epoch, forPage)) return;
     _lastMyPlansJson = JSON.stringify(d);
     S.myPlans = d.plans || [];
   } catch (e) {
@@ -6507,6 +6859,30 @@ async function _ensurePlansLoaded(forPage) {
   S.myPlansLoading = false;
   if (!S.mgrPlanId && S.myPlans && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId, { suppressRender: true });
   prefetchPerPlan();
+}
+
+/** Re-pull /api/my-plans (cache already invalidated by the caller) and re-paint
+ *  the current page so plan-pill counts (totalNodes, totalSubscriptions) reflect
+ *  the post-TX chain state. Retries with backoff because the chain can lag a
+ *  beat after a successful broadcast. */
+async function refetchMyPlans({ attempts = 4, baseMs = 1000 } = {}) {
+  const epoch = _currentNavEpoch();
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await fetch('/api/my-plans');
+      const d = await r.json();
+      if (!d || d.error) throw new Error(d?.error || 'no data');
+      if (!_navStillCurrent(epoch, S.page)) return;
+      _dataCache['/api/my-plans'] = { data: d, ts: Date.now() };
+      _lastMyPlansJson = JSON.stringify(d);
+      S.myPlans = d.plans || [];
+      const handler = { 'add-nodes': loadAddNodes, 'your-nodes': loadYourNodes, pricing: loadPricing, subscribers: loadSubscribers, 'fee-grants': loadFeeGrants };
+      if (handler[S.page]) coalesceRender('plans:' + S.page, handler[S.page]);
+      return;
+    } catch (e) {
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, i)));
+    }
+  }
 }
 
 /** Warm cache for every owned plan so Pricing/Subscribers paint in one frame. */
@@ -6550,6 +6926,7 @@ function selectPlan(id, opts = {}) {
 let _mgrNodesAbort = null;
 let _mgrNodesInflightUrl = null;
 async function loadMgrNodes() {
+  const epoch = _currentNavEpoch();
   if (S.page === 'your-nodes') return;
   // Allow node browsing on add-nodes even without a plan selected.
   // your-nodes still requires a plan because it filters by plan membership.
@@ -6559,6 +6936,10 @@ async function loadMgrNodes() {
   const f = S.nodeFilters;
   const baseParams = { page: S.mgrPage, limit: 50, search: f.search, country: f.country, protocol: f.protocol };
   if (S.mgrPlanId) baseParams.planId = S.mgrPlanId;
+  // Add Nodes is the only consumer of loadMgrNodes() that should hide
+  // already-linked plan nodes — pagination + facet counts depend on the
+  // server applying that exclusion before slicing.
+  if (S.page === 'add-nodes' && S.mgrPlanId) baseParams.excludeInPlan = 'true';
   const params = new URLSearchParams(baseParams);
   const url = '/api/all-nodes?' + params.toString();
   if (_mgrNodesInflightUrl === url) return;
@@ -6566,57 +6947,92 @@ async function loadMgrNodes() {
 
   if (cached && cached.data) {
     S.mgrNodes = cached.data;
-    S.countries = cached.data.countries || S.countries;
-    S.protocols = cached.data.protocols || S.protocols;
-    if (S.page === 'add-nodes') renderAddNodes();
+    if (Array.isArray(cached.data.countries) && cached.data.countries.length) S.countries = cached.data.countries;
+    if (Array.isArray(cached.data.protocols) && cached.data.protocols.length) S.protocols = cached.data.protocols;
+    if (_navStillCurrent(epoch, 'add-nodes')) renderAddNodes();
     const prevJson = JSON.stringify(cached.data);
     fetch(url).then(r => r.json()).then(d => {
       if (!d || d.error) return;
       _dataCache[url] = { data: d, ts: Date.now() };
       if (JSON.stringify(d) === prevJson) return;
-      if (S.page !== 'add-nodes') return;
+      if (!_navStillCurrent(epoch, 'add-nodes')) return;
       S.mgrNodes = d;
-      S.countries = d.countries || S.countries;
-      S.protocols = d.protocols || S.protocols;
-      renderAddNodes();
+      if (Array.isArray(d.countries) && d.countries.length) S.countries = d.countries;
+      if (Array.isArray(d.protocols) && d.protocols.length) S.protocols = d.protocols;
+      coalesceRender('add-nodes', renderAddNodes);
     }).catch(() => {});
     return;
   }
 
   S.mgrNodes = null;
-  const appEmpty = !$('app').firstElementChild;
+  const appEl = $('app');
+  // Treat a bare loading-state spinner as "empty" so we paint chrome
+  // immediately instead of leaving the spinner up for the 200-2000ms fetch.
+  const onlyLoading = appEl.firstElementChild &&
+    appEl.firstElementChild.classList?.contains('loading-state') &&
+    appEl.children.length === 1;
+  const appEmpty = !appEl.firstElementChild || onlyLoading;
   if (appEmpty) {
-    if (S.page === 'add-nodes') renderAddNodes();
+    if (_navStillCurrent(epoch, 'add-nodes')) renderAddNodes();
   } else {
     showUpdating();
   }
   _mgrNodesInflightUrl = url;
-  try {
-    if (_mgrNodesAbort) _mgrNodesAbort.abort();
-    _mgrNodesAbort = new AbortController();
-    const r = await fetch(url, { signal: _mgrNodesAbort.signal });
-    const d = await r.json();
-    S.mgrNodes = d;
-    S.countries = d.countries || S.countries;
-    S.protocols = d.protocols || S.protocols;
-    _dataCache[url] = { data: d, ts: Date.now() };
-  } catch (e) {
-    if (e.name === 'AbortError') { _mgrNodesInflightUrl = null; return; }
-    toast('Failed to load nodes', 'error');
+  // Retry transient failures (network blip, slow LCD) with exponential backoff.
+  // Country list comes from this response, so a single failed call leaves the
+  // filter dropdown empty — keep trying until the user navigates away or it
+  // succeeds. AbortError from page navigation breaks the loop immediately.
+  const maxAttempts = 4;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (_mgrNodesAbort) _mgrNodesAbort.abort();
+      _mgrNodesAbort = new AbortController();
+      const r = await fetch(url, { signal: _mgrNodesAbort.signal });
+      const d = await r.json();
+      if (!_navStillCurrent(epoch, 'add-nodes')) { _mgrNodesInflightUrl = null; return; }
+      if (d && d.error) throw new Error(d.error);
+      S.mgrNodes = d;
+      // Empty-array means server enrichment hasn't completed yet — keep the
+      // previous lists so the country dropdown / picker don't go blank mid-flight.
+      if (Array.isArray(d.countries) && d.countries.length) S.countries = d.countries;
+      if (Array.isArray(d.protocols) && d.protocols.length) S.protocols = d.protocols;
+      _dataCache[url] = { data: d, ts: Date.now() };
+      lastErr = null;
+      break;
+    } catch (e) {
+      if (e.name === 'AbortError') { _mgrNodesInflightUrl = null; return; }
+      lastErr = e;
+      if (attempt < maxAttempts) {
+        const wait = 500 * Math.pow(2, attempt - 1);
+        console.warn(`[loadMgrNodes] attempt ${attempt}/${maxAttempts} failed (${e.message}); retrying in ${wait}ms`);
+        await new Promise(r => setTimeout(r, wait));
+        if (!_navStillCurrent(epoch, 'add-nodes')) { _mgrNodesInflightUrl = null; return; }
+      }
+    }
   }
+  if (lastErr) toast('Failed to load nodes — retrying in background', 'error');
   _mgrNodesAbort = null;
   _mgrNodesInflightUrl = null;
   hideUpdating();
-  if (S.page === 'add-nodes') renderAddNodes();
+  if (_navStillCurrent(epoch, 'add-nodes')) renderAddNodes();
+  // If we still have no data after the in-line retries, schedule one more
+  // pass so the country dropdown eventually populates without user action.
+  if (lastErr && !S.mgrNodes && _navStillCurrent(epoch, 'add-nodes')) {
+    setTimeout(() => {
+      if (_navStillCurrent(epoch, 'add-nodes') && !S.mgrNodes) loadMgrNodes();
+    }, 5000);
+  }
 }
 
 // ─── Add Nodes Page ──────────────────────────────────────────────────────────
 let _explorerAbort = null;
 
 async function loadAddNodes() {
+  const epoch = _currentNavEpoch();
   if (!S.mgrNodes && !S.mgrPlanId) showLoading('Loading plans...');
   await _ensurePlansLoaded('add-nodes');
-  if (S.page !== 'add-nodes') return;
+  if (!_navStillCurrent(epoch, 'add-nodes')) return;
   // Always render nodes — with or without a plan. Without a plan, the UI
   // shows the data read-only with a "create a plan first" warning.
   if (!S.mgrNodes) {
@@ -6652,28 +7068,68 @@ function renderAddNodes() {
       <div class="lease-dur-total" id="leaseDisplay">${S.leaseHours} hours total</div>
     </div>` : '';
 
+  // Country counts (from server's countryCounts tally over browseable nodes).
+  // Powers both the dropdown and the popup picker. The server only returns the
+  // FULL country tally on unfiltered requests — when a country filter is active,
+  // counts collapse to that one country. Cache the full tally on S and reuse
+  // it so the dropdown / picker / Reset button don't go blank mid-filter.
+  let countryCounts = (d && d.countryCounts) ? d.countryCounts : null;
+  if (countryCounts && Object.keys(countryCounts).length > 1) {
+    S._countryCountsFull = countryCounts;
+  } else if (S._countryCountsFull) {
+    countryCounts = S._countryCountsFull;
+  } else {
+    countryCounts = countryCounts || {};
+  }
+  const countryList = (S.countries || []).filter(c => countryCounts[c]);
+  const totalBrowseable = countryList.reduce((s, c) => s + countryCounts[c], 0);
+
   // Filters — always rendered so users can browse the network without a plan.
-  // Counter shows plan-membership info only when a plan is selected.
-  const filtersHtml = `
+  // Country dropdown for quick selection + "Browse by country" button opens
+  // the popup picker (flags, names, counts, click-to-filter).
+  const countryOptions = countryList
+    .slice()
+    .sort((a, b) => countryCounts[b] - countryCounts[a])
+    .map(c => `<option value="${escapeHtml(c)}" ${S.nodeFilters.country===c?'selected':''}>${escapeHtml(c)} (${fmt(countryCounts[c])})</option>`)
+    .join('');
+  const filtersBarHtml = `
     <div class="filters">
       <input class="input input-mono" placeholder="Search address..." value="${S.nodeFilters.search}" oninput="S.nodeFilters.search=this.value" onkeydown="if(event.key==='Enter'){S.mgrPage=1;loadMgrNodes()}">
-      <select class="input" onchange="S.nodeFilters.country=this.value;S.mgrPage=1;loadMgrNodes()">
-        <option value="">All Countries</option>
-        ${S.countries.map(c => `<option value="${c}" ${S.nodeFilters.country===c?'selected':''}>${c}</option>`).join('')}
+      <select class="input" onchange="setCountryFilter(this.value)">
+        <option value="">All Countries${totalBrowseable ? ` (${fmt(totalBrowseable)})` : ''}</option>
+        ${countryOptions}
       </select>
       <select class="input" onchange="S.nodeFilters.protocol=this.value;S.mgrPage=1;loadMgrNodes()">
         <option value="">All Protocols</option>
         ${S.protocols.map(p => `<option value="${p}" ${S.nodeFilters.protocol===p?'selected':''}>${p}</option>`).join('')}
       </select>
-      <select class="input" onchange="S.nodeFilters.priceSort=this.value;renderMgr()">
+      <select class="input" onchange="S.nodeFilters.priceSort=this.value;loadMgrNodes()">
         <option value="">Sort: Default</option>
         <option value="asc" ${S.nodeFilters.priceSort==='asc'?'selected':''}>Price: Low → High</option>
         <option value="desc" ${S.nodeFilters.priceSort==='desc'?'selected':''}>Price: High → Low</option>
       </select>
-      <button class="btn btn-ghost btn-sm" onclick="S.nodeFilters={search:'',country:'',protocol:'',priceSort:''};S.mgrPage=1;loadMgrNodes()">Reset</button>
-      ${viewToggleHtml()}
+      <button class="btn btn-ghost btn-sm" onclick="openCountryPicker()" ${countryList.length === 0 ? 'disabled' : ''}>
+        <span style="margin-right:6px">🌐</span>Browse by country${countryList.length ? ` (${countryList.length})` : ''}
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick="resetNodeFilters()" ${(!S.nodeFilters.search && !S.nodeFilters.country && !S.nodeFilters.protocol && !S.nodeFilters.priceSort && !S.nodeFilters.sortKey) ? 'disabled' : ''}>Reset</button>
       ${hasData ? `<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${fmt(d.total)} nodes${S.mgrPlanId && d.planNodesCount > 0 ? ` &middot; ${fmt(d.planNodesCount)} paid hidden` : ''}</span>` : ''}
     </div>`;
+  const chipsInnerHtml = (() => {
+    const chips = [];
+    if (S.nodeFilters.search) chips.push({ key: 'search', label: `Search: "${escapeHtml(S.nodeFilters.search)}"` });
+    if (S.nodeFilters.country) chips.push({ key: 'country', label: `${countryFlag(S.nodeFilters.country) || '🌐'} ${escapeHtml(S.nodeFilters.country)}` });
+    if (S.nodeFilters.protocol) chips.push({ key: 'protocol', label: `Protocol: ${escapeHtml(S.nodeFilters.protocol)}` });
+    if (S.nodeFilters.priceSort) chips.push({ key: 'priceSort', label: `Price: ${S.nodeFilters.priceSort === 'asc' ? 'Low → High' : 'High → Low'}` });
+    if (S.nodeFilters.sortKey) chips.push({ key: 'sortKey', label: `Sort: ${escapeHtml(S.nodeFilters.sortKey)} ${S.nodeFilters.sortDir === 'asc' ? '↑' : '↓'}` });
+    if (chips.length === 0) return '';
+    return `<div class="active-filter-chips">
+      ${chips.map(c => `<button type="button" class="filter-chip" onclick="clearOneFilter('${c.key}')" title="Remove filter"><span>${c.label}</span><span class="filter-chip-x">×</span></button>`).join('')}
+      ${chips.length > 1 ? `<button type="button" class="filter-chip filter-chip-clear" onclick="resetNodeFilters()">Clear all</button>` : ''}
+    </div>`;
+  })();
+  const filtersHtml = `<div id="addNodesFilters">${filtersBarHtml}</div><div id="addNodesChips">${chipsInnerHtml}</div>`;
+  // Stash data the popup needs — read by openCountryPicker().
+  S._countryPickerData = { counts: countryCounts, list: countryList, total: totalBrowseable };
 
   // No-plan warning: nodes still render but adding is locked. Distinguish
   // "no plans exist yet" (offer create) from "have plans but none picked".
@@ -6716,8 +7172,38 @@ function renderAddNodes() {
   if (!hasData) {
     contentHtml = '<div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Loading nodes...</div></div>';
   } else {
-    let nodes = (d.nodes || []).filter(n => !n.inPlan);
-    if (S.nodeFilters.priceSort === 'asc' || S.nodeFilters.priceSort === 'desc') {
+    // Server already excludes inPlan rows when planId+excludeInPlan are set.
+    // Belt-and-suspenders: if a plan is selected, drop any inPlan that slipped
+    // through (e.g., a stale cached payload from before the user picked a plan).
+    let nodes = S.mgrPlanId ? (d.nodes || []).filter(n => !n.inPlan) : (d.nodes || []);
+    if (S.nodeFilters.sortKey) {
+      const key = S.nodeFilters.sortKey;
+      const dir = S.nodeFilters.sortDir === 'asc' ? 1 : -1;
+      const numKey = (n) => {
+        if (key === 'price') return n.hrPriceUdvpn == null ? null : Number(n.hrPriceUdvpn);
+        if (key === 'speed') return n.speedMbps == null ? null : Number(n.speedMbps);
+        if (key === 'cpu') return n.cpu == null ? null : Number(n.cpu);
+        if (key === 'ram') return n.ram == null ? null : Number(n.ram);
+        return null;
+      };
+      const strKey = (n) => {
+        if (key === 'country') return (n.country || '').toLowerCase();
+        if (key === 'city') return (n.city || '').toLowerCase();
+        if (key === 'protocol') return (n.protocol || '').toLowerCase();
+        return '';
+      };
+      const isNumeric = ['price', 'speed', 'cpu', 'ram'].includes(key);
+      nodes = [...nodes].sort((a, b) => {
+        if (isNumeric) {
+          const av = numKey(a), bv = numKey(b);
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          return (av - bv) * dir;
+        }
+        return strKey(a).localeCompare(strKey(b)) * dir;
+      });
+    } else if (S.nodeFilters.priceSort === 'asc' || S.nodeFilters.priceSort === 'desc') {
       const dir = S.nodeFilters.priceSort === 'asc' ? 1 : -1;
       nodes = [...nodes].sort((a, b) => {
         const ap = a.hrPriceUdvpn == null ? Infinity : Number(a.hrPriceUdvpn);
@@ -6730,7 +7216,7 @@ function renderAddNodes() {
     if (nodes.length === 0) {
       contentHtml = '<div style="padding:40px;text-align:center;color:var(--text-muted);font-size:13px">No nodes found matching filters</div>';
     } else {
-      const isList = S.viewMode === 'list';
+      const isList = true; // Add Nodes is list-only; card view removed.
       const cardsHtml = nodes.map((n) => {
         if (n.hrPriceUdvpn != null) S.nodePriceCache[n.address] = n.hrPriceUdvpn;
         const inPlan = n.inPlan;
@@ -6745,21 +7231,22 @@ function renderAddNodes() {
         const usdHr = dvpnToUsdHr(n.hrPriceUdvpn);
 
         if (isList) {
-          return `<div class="node-list-row ${selClass}" ${onclick} id="acard_${n.address.slice(-12)}">
+          return `<div class="node-list-row has-resource-cols ${selClass}" ${onclick} id="acard_${n.address.slice(-12)}">
             <span class="node-list-flag">${flag}</span>
             <div class="node-list-info">
               <span class="node-list-addr">${shortAddr(n.address)} ${explorerLink('node', n.address, '↗', 'class="explorer-link-icon" title="View node on explorer"')}</span>
               ${n.moniker ? `<span class="node-list-moniker" title="${escapeAttr(n.moniker)}">${escapeHtml(n.moniker.length > 60 ? n.moniker.slice(0, 60) + '…' : n.moniker)}</span>` : ''}
             </div>
-            <span>${escapeHtml(n.country) || '??'}</span>
+            <span>${flag ? flag + ' ' : ''}${escapeHtml(n.country) || '??'}</span>
             <span class="node-list-city" title="${escapeAttr(n.city || '')}">${n.city ? escapeHtml(n.city) : '<span style="color:var(--text-muted)">—</span>'}</span>
             <span>${protocolBadge(n.protocol)}</span>
             <div class="node-list-price">
-              <span>${fmtDvpn(n.hrPriceUdvpn)} P2P</span>
-              ${usdHr !== null ? `<span class="node-list-usd">${fmtUsd(usdHr)}/hr</span>` : ''}
+              <span>${usdHr !== null ? fmtUsd(usdHr * 730) + '/mo' : '<span style="color:var(--text-muted)">—</span>'}</span>
+              <span class="node-list-usd">${fmtDvpn(n.hrPriceUdvpn)} P2P/hr</span>
             </div>
             <span style="color:${speedColor}">${speed}</span>
-            <span class="node-card-select ${selBadge}" style="font-size:10px">${selText}</span>
+            <span class="node-list-cpu" style="color:var(--text-muted)">${n.cpu != null ? escapeHtml(String(n.cpu)) : '—'}</span>
+            <span class="node-list-ram" style="color:var(--text-muted)">${n.ram != null ? escapeHtml(String(n.ram)) : '—'}</span>
           </div>`;
         }
 
@@ -6784,7 +7271,12 @@ function renderAddNodes() {
         </div>`;
       }).join('');
 
-      const listHeader = isList ? `<div class="node-list-header"><span></span><span>Node</span><span>Country</span><span>City</span><span>Protocol</span><span>Price/hr</span><span>Speed</span><span>Status</span></div>` : '';
+      const sk = S.nodeFilters.sortKey, sd = S.nodeFilters.sortDir;
+      const arrow = (k) => sk === k
+        ? `<span class="node-list-sort-arrow active">${sd === 'desc' ? '↓' : '↑'}</span>`
+        : '<span class="node-list-sort-arrow">⇅</span>';
+      const sortable = (k, label) => `<span class="node-list-sort" onclick="setNodeSort('${k}')" title="Click to sort by ${label.toLowerCase()}" style="cursor:pointer;user-select:none;${sk===k?'color:var(--text)':''}">${label}${arrow(k)}</span>`;
+      const listHeader = isList ? `<div class="node-list-header has-resource-cols"><span></span><span>Node</span>${sortable('country','Country')}${sortable('city','City')}${sortable('protocol','Protocol')}${sortable('price','Price/mo')}${sortable('speed','Speed')}${sortable('cpu','CPU')}${sortable('ram','RAM')}</div>` : '';
       const containerClass = isList ? 'node-list-view' : 'node-cards-grid';
       contentHtml = `
         ${listHeader}
@@ -6806,7 +7298,7 @@ function renderAddNodes() {
       ${addActionBarCenterHtml()}
       <div class="action-bar-right">
         <span style="font-size:12px;color:var(--text-dim)">${getLeaseLabel()} lease</span>
-        <button class="btn btn-ghost btn-sm" onclick="S.addSet.clear();renderAddNodes()">Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearAddSelection()">Clear</button>
         <button class="btn btn-primary" id="batchLinkBtn" onclick="linkBatch()">Add ${addCount} to Plan</button>
       </div>
     </div>` : '';
@@ -6818,6 +7310,36 @@ function renderAddNodes() {
       <div class="page-hero-sub">Browse every live node on the Sentinel network and add the ones you want to offer your subscribers. Once a node is part of your plan, your subscribers can use it as part of their subscription — no extra payment needed.</div>
     </div>`;
 
+  // Partial-update fast path: if the chrome is already mounted (same plan,
+  // same page), only swap the filters bar, chip strip, and content. This
+  // avoids the full-page flash when the user changes a filter — the hero,
+  // plan picker, lease slider, and banners stay in the DOM.
+  const filtersHost = document.getElementById('addNodesFilters');
+  const chipsHost = document.getElementById('addNodesChips');
+  const contentHost = document.getElementById('addNodesContent');
+  const sameChrome = filtersHost && chipsHost && contentHost
+    && S.page === 'add-nodes'
+    && contentHost.dataset.planId === (S.mgrPlanId || '');
+  if (sameChrome) {
+    // Preserve focus + caret on the search input across the partial swap so
+    // pressing Enter mid-search doesn't yank the cursor away.
+    const activeEl = document.activeElement;
+    const wasSearch = activeEl && activeEl.tagName === 'INPUT' && activeEl.placeholder === 'Search address...';
+    const caret = wasSearch ? activeEl.selectionStart : null;
+    filtersHost.innerHTML = filtersBarHtml;
+    chipsHost.innerHTML = chipsInnerHtml;
+    contentHost.innerHTML = contentHtml;
+    if (wasSearch) {
+      const newSearch = filtersHost.querySelector('input.input-mono');
+      if (newSearch) {
+        newSearch.focus();
+        if (caret != null) try { newSearch.setSelectionRange(caret, caret); } catch (_) {}
+      }
+    }
+    refreshAddActionBar();
+    return;
+  }
+
   $('app').innerHTML = `<div class="page${!S.mgrPlanId ? ' page-locked' : ''}" style="${addCount > 0 ? 'padding-bottom:80px' : ''}">
     ${heroHtml}
     ${planPicker}
@@ -6825,8 +7347,125 @@ function renderAddNodes() {
     ${paidBannerHtml}
     ${leaseSliderHtml}
     ${filtersHtml}
-    ${contentHtml}
+    <div id="addNodesContent" data-plan-id="${S.mgrPlanId || ''}">${contentHtml}</div>
   </div>${actionBarHtml}`;
+}
+
+// Country pill click — refilter and reload page 1.
+function setCountryFilter(country) {
+  S.nodeFilters.country = country || '';
+  S.mgrPage = 1;
+  closeCountryPicker();
+  loadMgrNodes();
+}
+
+// Single source of truth for "clear all filters" so every reset path —
+// header button, empty-state CTA, post-action cleanup — produces the same
+// state. Page resets to 1, sort resets to default, search input value is
+// cleared. The render is forced through loadMgrNodes() so the URL key
+// changes and the cache hit (or miss) is for the unfiltered payload.
+function resetNodeFilters() {
+  S.nodeFilters = { search: '', country: '', protocol: '', priceSort: '', sortKey: '', sortDir: 'desc' };
+  S.mgrPage = 1;
+  loadMgrNodes();
+}
+
+// Clear one filter at a time — used by the active-filter chips so a user can
+// peel off a single facet without losing the rest.
+function clearOneFilter(key) {
+  if (!(key in S.nodeFilters)) return;
+  if (key === 'sortKey') {
+    S.nodeFilters.sortKey = '';
+    S.nodeFilters.sortDir = 'desc';
+  } else {
+    S.nodeFilters[key] = '';
+  }
+  S.mgrPage = 1;
+  loadMgrNodes();
+}
+
+function setNodeSort(key) {
+  if (S.nodeFilters.sortKey === key) {
+    S.nodeFilters.sortDir = S.nodeFilters.sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    S.nodeFilters.sortKey = key;
+    S.nodeFilters.sortDir = 'desc';
+  }
+  loadMgrNodes();
+}
+
+// ─── Country Picker Popup ────────────────────────────────────────────────────
+// Renders the full country grid (flag + name + count) inside a modal so the
+// filter bar stays compact. Data comes from S._countryPickerData stashed by
+// renderMgr().
+function openCountryPicker() {
+  const data = S._countryPickerData || { counts: {}, list: [], total: 0 };
+  const list = data.list || [];
+  if (list.length === 0) return;
+  // Alphabetical (case-insensitive, locale-aware) so the grid scans top-to-bottom.
+  const sorted = list.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  const tile = (label, val, count, active, flag = '') => {
+    // The button is inline-handlered with a single-quoted JS string inside a
+    // double-quoted HTML attribute. Country names contain apostrophes
+    // ("Côte d'Ivoire"), so we encode the JS string as a Base64 payload and
+    // decode at click time. This survives both the HTML parser and the JS
+    // string parser without needing quote-aware escaping.
+    const enc = btoa(unescape(encodeURIComponent(val || '')));
+    return `<button type="button" class="country-tile ${active ? 'active' : ''}" onclick="setCountryFilter(decodeURIComponent(escape(atob('${enc}'))))" title="${escapeHtml(label)}">
+      <span class="country-tile-flag">${flag || '🌐'}</span>
+      <span class="country-tile-name">${escapeHtml(label)}</span>
+      <span class="country-tile-count">${count != null ? fmt(count) : ''}</span>
+    </button>`;
+  };
+  const allTile = tile('All countries', '', data.total || null, !S.nodeFilters.country, '🌐');
+  const tiles = sorted.map(c => tile(c, c, data.counts[c], S.nodeFilters.country === c, countryFlag(c))).join('');
+
+  const existing = $('countryPickerOverlay');
+  if (existing) existing.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'countryPickerOverlay';
+  backdrop.onclick = (e) => { if (e.target === backdrop) closeCountryPicker(); };
+  backdrop.innerHTML = `
+    <div class="modal-card country-picker-card" role="dialog" aria-modal="true" aria-labelledby="cpkTitle">
+      <div class="country-picker-header">
+        <div>
+          <div class="modal-title" id="cpkTitle" style="text-align:left;padding:0;margin:0">Browse by country</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${fmt(list.length)} ${list.length === 1 ? 'country' : 'countries'} · ${fmt(data.total)} nodes</div>
+        </div>
+        <button type="button" class="country-picker-close" onclick="closeCountryPicker()" aria-label="Close">×</button>
+      </div>
+      <div class="country-picker-search">
+        <input type="text" id="countryPickerSearch" class="input" placeholder="Search countries..." oninput="filterCountryPickerPills(this.value)" autofocus>
+      </div>
+      <div class="country-picker-grid" id="countryPickerGrid">
+        ${allTile}
+        ${tiles}
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  document.addEventListener('keydown', _countryPickerKeyHandler);
+}
+
+function closeCountryPicker() {
+  const overlay = $('countryPickerOverlay');
+  if (overlay) overlay.remove();
+  document.removeEventListener('keydown', _countryPickerKeyHandler);
+}
+
+function _countryPickerKeyHandler(e) {
+  if (e.key === 'Escape') closeCountryPicker();
+}
+
+function filterCountryPickerPills(q) {
+  const needle = (q || '').trim().toLowerCase();
+  const grid = $('countryPickerGrid');
+  if (!grid) return;
+  grid.querySelectorAll('.country-tile').forEach(btn => {
+    const txt = btn.textContent.trim().toLowerCase();
+    btn.style.display = !needle || txt.includes(needle) ? '' : 'none';
+  });
 }
 
 // Toggle a node card on the Add Nodes page — surgical DOM update
@@ -6844,6 +7483,29 @@ function toggleAddCard(addr) {
     }
   }
   refreshAddActionBar();
+}
+
+// Clear all selected nodes on Add Nodes — deselect cards, remove the action bar,
+// then re-render to keep state and DOM aligned even if a revalidate is in flight.
+function clearAddSelection() {
+  S.addSet.clear();
+  document.querySelectorAll('.node-list-row.selected').forEach(row => {
+    row.classList.remove('selected');
+    const badge = row.querySelector('.node-card-select');
+    if (badge) { badge.className = 'node-card-select sel-empty'; badge.textContent = ' '; }
+  });
+  refreshAddActionBar();
+}
+
+// Same for Your Nodes — surgical deselect, remove the remove-bar.
+function clearRemoveSelection() {
+  S.removeSet.clear();
+  document.querySelectorAll('.node-list-row.selected').forEach(row => {
+    row.classList.remove('selected');
+    const badge = row.querySelector('.node-card-select');
+    if (badge) { badge.className = 'node-card-select sel-empty'; badge.textContent = ' '; }
+  });
+  refreshRemoveActionBar();
 }
 
 // Sum the selected nodes' hourly price (udvpn) * lease hours. Returns { p2p, known, unknown }.
@@ -6884,7 +7546,7 @@ function refreshAddActionBar() {
       ${addActionBarCenterHtml()}
       <div class="action-bar-right">
         <span style="font-size:12px;color:var(--text-dim)">${getLeaseLabel()} lease</span>
-        <button class="btn btn-ghost btn-sm" onclick="S.addSet.clear();renderAddNodes()">Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearAddSelection()">Clear</button>
         <button class="btn btn-primary" id="batchLinkBtn" onclick="linkBatch()">Add ${count} to Plan</button>
       </div>`;
     $('app').parentElement.appendChild(bar);
@@ -6906,27 +7568,29 @@ function adjustPagePadding(hasBar) {
 // ─── Your Nodes Page ─────────────────────────────────────────────────────────
 let _lastYourNodesJson = '';
 async function loadYourNodes() {
+  const epoch = _currentNavEpoch();
   if (!S._yourNodes) showLoading('Loading your plans...');
   await _ensurePlansLoaded('your-nodes');
-  if (S.page !== 'your-nodes') return;
+  if (!_navStillCurrent(epoch, 'your-nodes')) return;
   if (S.mgrPlanId) {
     const url = `/api/all-nodes?page=1&limit=500&planId=${S.mgrPlanId}&inPlanOnly=true`;
     try {
       const { data } = await cachedFetch(url, 60_000, (fresh) => {
-        if (S.page !== 'your-nodes') return;
+        if (!_navStillCurrent(epoch, 'your-nodes')) return;
         const freshJson = JSON.stringify(fresh);
         if (freshJson === _lastYourNodesJson) return;
         _lastYourNodesJson = freshJson;
         S._yourNodes = fresh;
         renderYourNodes();
       });
+      if (!_navStillCurrent(epoch, 'your-nodes')) return;
       _lastYourNodesJson = JSON.stringify(data);
       S._yourNodes = data;
     } catch (e) {
       toast('Failed to load plan nodes', 'error');
     }
   }
-  if (S.page === 'your-nodes') renderYourNodes();
+  if (_navStillCurrent(epoch, 'your-nodes')) renderYourNodes();
 }
 
 function renderYourNodes() {
@@ -6949,7 +7613,7 @@ function renderYourNodes() {
 
   // Stats cards
   const statsHtml = S.mgrPlanId ? `
-    <div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+    <div class="stats-row stats-row-centered" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
       <div class="stat-card-enhanced">
         <div class="stat-icon blue">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -7124,7 +7788,7 @@ function renderYourNodes() {
     <div class="action-bar" id="removeActionBar">
       <div class="action-bar-count">${remCount} node${remCount > 1 ? 's' : ''} selected for removal</div>
       <div class="action-bar-right">
-        <button class="btn btn-ghost btn-sm" onclick="S.removeSet.clear();renderYourNodes()">Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearRemoveSelection()">Clear</button>
         <button class="btn btn-red" id="batchUnlinkBtn" onclick="unlinkBatch()">Remove ${remCount} from Plan</button>
       </div>
     </div>` : '';
@@ -7171,7 +7835,7 @@ function refreshRemoveActionBar() {
     bar.id = 'removeActionBar';
     bar.innerHTML = `<div class="action-bar-count">${count} node${count > 1 ? 's' : ''} selected for removal</div>
       <div class="action-bar-right">
-        <button class="btn btn-ghost btn-sm" onclick="S.removeSet.clear();renderYourNodes()">Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearRemoveSelection()">Clear</button>
         <button class="btn btn-red" id="batchUnlinkBtn" onclick="unlinkBatch()">Remove ${count} from Plan</button>
       </div>`;
     $('app').parentElement.appendChild(bar);
@@ -7258,12 +7922,19 @@ async function linkBatch() {
         }
         S.mgrNodes.planNodesCount = (S.mgrNodes.planNodesCount || 0) + count;
       }
+      // Optimistic plan-pill bump so the count reflects the new nodes immediately,
+      // then refetch to reconcile with chain truth.
+      if (!d.alreadyLinked && S.myPlans) {
+        const p = S.myPlans.find(pl => String(pl.planId) === String(S.mgrPlanId));
+        if (p) p.totalNodes = (p.totalNodes || 0) + count;
+      }
       S.addSet.clear();
       invalidateCache(/^\/api\/all-nodes/);
       if (S.mgrPlanId) invalidateCache('/api/plans/' + S.mgrPlanId);
       invalidateCache('/api/my-plans');
       if (S.page === 'add-nodes') renderAddNodes();
       if (S.page === 'your-nodes') renderYourNodes();
+      refetchMyPlans();
     } else {
       toast(friendlyError(d.error || d.rawLog), 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
@@ -7289,7 +7960,8 @@ async function unlinkBatch() {
       body: JSON.stringify({ planId: parseInt(S.mgrPlanId), nodeAddresses: addrs }),
     });
     if (d.ok) {
-      toast((d.unlinked || addrs.length) + ' nodes removed in 1 TX', 'success');
+      const count = d.unlinked || addrs.length;
+      toast(count + ' nodes removed in 1 TX', 'success');
       if (S.mgrNodes && S.mgrNodes.nodes) {
         for (const addr of addrs) {
           const node = S.mgrNodes.nodes.find(n => n.address === addr);
@@ -7297,12 +7969,18 @@ async function unlinkBatch() {
         }
         S.mgrNodes.planNodesCount = Math.max(0, (S.mgrNodes.planNodesCount || 0) - addrs.length);
       }
+      // Optimistic plan-pill decrement, then refetch.
+      if (S.myPlans) {
+        const p = S.myPlans.find(pl => String(pl.planId) === String(S.mgrPlanId));
+        if (p) p.totalNodes = Math.max(0, (p.totalNodes || 0) - count);
+      }
       S.removeSet.clear();
       invalidateCache(/^\/api\/all-nodes/);
       if (S.mgrPlanId) invalidateCache('/api/plans/' + S.mgrPlanId);
       invalidateCache('/api/my-plans');
       if (S.page === 'add-nodes') renderAddNodes();
       if (S.page === 'your-nodes') renderYourNodes();
+      refetchMyPlans();
     } else {
       toast(friendlyError(d.error || d.rawLog), 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
@@ -7951,7 +8629,12 @@ function setTriggerTab(tab) {
         </div>
       </div>`;
     // Initial snippet paint after the DOM exists.
-    setTimeout(() => { S._trigLang = S._trigLang || 'curl'; renderTrigSnippet(); }, 0);
+    const trigEpoch = _currentNavEpoch();
+    setTimeout(() => {
+      if (_navEpoch !== trigEpoch) return;
+      S._trigLang = S._trigLang || 'curl';
+      renderTrigSnippet();
+    }, 0);
   } else {
     content.innerHTML = `
       <div class="card-body">
@@ -8260,12 +8943,14 @@ async function authorizeBulk() {
 }
 
 async function loadPricing() {
+  const epoch = _currentNavEpoch();
   showLoading('Loading plans...');
   await _ensurePlansLoaded('pricing');
-  if (S.page === 'pricing') renderPricing();
+  if (_navStillCurrent(epoch, 'pricing')) renderPricing();
 }
 
 async function renderPricing() {
+  const epoch = _currentNavEpoch();
   const plans = S.myPlans || [];
   const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadPricing()");
   const heroHtml = `
@@ -8310,10 +8995,10 @@ async function renderPricing() {
 
   try {
     const [planRes, paramsRes] = await Promise.all([
-      cachedFetch(planUrl, 60_000, () => { if (S.page === 'pricing') renderPricing(); }),
-      cachedFetch(paramsUrl, 600_000, () => { if (S.page === 'pricing') renderPricing(); }),
+      cachedFetch(planUrl, 60_000, () => { if (_navStillCurrent(epoch, 'pricing')) coalesceRender('pricing', renderPricing); }),
+      cachedFetch(paramsUrl, 600_000, () => { if (_navStillCurrent(epoch, 'pricing')) coalesceRender('pricing', renderPricing); }),
     ]);
-    if (S.page !== 'pricing') return;
+    if (!_navStillCurrent(epoch, 'pricing')) return;
     const planData = planRes.data;
     const paramsData = paramsRes.data;
 
@@ -8539,21 +9224,24 @@ async function renderPricing() {
     // tab is visible, but harmless either way — element lookup just no-ops).
     setTimeout(() => setTriggerTab(S._triggerTab || 'payment'), 0);
 
+    if (!_navStillCurrent(epoch, 'pricing')) return;
     $('app').innerHTML = `<div class="page">${!railTab ? heroHtml : ''}${railTab ? planPicker : ''}${pricingHtml}</div>`;
   } catch (e) {
-    if (S.page !== 'pricing') return;
+    if (!_navStillCurrent(epoch, 'pricing')) return;
     $('app').innerHTML = `<div class="page">${planPicker}<div class="empty-state" style="color:var(--red)">Failed to load pricing: ${escapeHtml(e.message)}</div></div>`;
   }
 }
 
 // ─── Subscribers Page ─────────────────────────────────────────────────────────
 async function loadSubscribers() {
+  const epoch = _currentNavEpoch();
   showLoading('Loading plans...');
   await _ensurePlansLoaded('subscribers');
-  if (S.page === 'subscribers') renderSubscribers();
+  if (_navStillCurrent(epoch, 'subscribers')) renderSubscribers();
 }
 
 async function renderSubscribers() {
+  const epoch = _currentNavEpoch();
   const plans = S.myPlans || [];
   const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadSubscribers()");
   const heroHtml = `
@@ -8585,8 +9273,8 @@ async function renderSubscribers() {
   }
 
   try {
-    const res = await cachedFetch(subsUrl, 60_000, () => { if (S.page === 'subscribers') renderSubscribers(); });
-    if (S.page !== 'subscribers') return;
+    const res = await cachedFetch(subsUrl, 60_000, () => { if (_navStillCurrent(epoch, 'subscribers')) coalesceRender('subscribers', renderSubscribers); });
+    if (!_navStillCurrent(epoch, 'subscribers')) return;
     const d = res.data;
     const ownAddr = S.wallet?.address;
     const subs = (d.subscriptions || []).filter(s => s.acc_address !== ownAddr);
@@ -8611,7 +9299,7 @@ async function renderSubscribers() {
     const monthlyRevDvpn = activeCt * subPriceDvpn * (30 / durationDays);
     const monthlyRevUsd = S.dvpnPrice ? monthlyRevDvpn * S.dvpnPrice : null;
 
-    const statsHtml = `<div class="stats-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+    const statsHtml = `<div class="stats-row stats-row-centered" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
       <div class="stat-card-enhanced">
         <div class="stat-icon green"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
         <div class="stat-label">Active Subscribers</div>
@@ -8723,6 +9411,7 @@ async function renderSubscribers() {
       </div>`;
     }
 
+    if (!_navStillCurrent(epoch, 'subscribers')) return;
     $('app').innerHTML = `<div class="page">
       ${heroHtml}
       ${planPicker}
@@ -8739,7 +9428,7 @@ async function renderSubscribers() {
       ${tableHtml}
     </div>`;
   } catch (e) {
-    if (S.page !== 'subscribers') return;
+    if (!_navStillCurrent(epoch, 'subscribers')) return;
     $('app').innerHTML = `<div class="page">${heroHtml}${planPicker}<div class="empty-state" style="color:var(--red)">Failed to load subscribers: ${escapeHtml(e.message)}</div></div>`;
   }
 }
@@ -8747,9 +9436,10 @@ async function renderSubscribers() {
 // ─── Fee Grants (Fee Abstraction) ────────────────────────────────────────────
 
 async function loadFeeGrants() {
+  const epoch = _currentNavEpoch();
   showLoading('Loading fee grants...');
   await _ensurePlansLoaded('fee-grants');
-  if (S.page === 'fee-grants') renderFeeGrants();
+  if (_navStillCurrent(epoch, 'fee-grants')) renderFeeGrants();
 }
 
 let _fgRendering = false;
@@ -8759,6 +9449,7 @@ async function renderFeeGrants() {
   try { return await _renderFeeGrantsInner(); } finally { _fgRendering = false; }
 }
 async function _renderFeeGrantsInner() {
+  const epoch = _currentNavEpoch();
   const plans = S.myPlans || [];
   const planPicker = buildPlanPicker("S.myPlans=null;S.myPlansLoading=false;loadFeeGrants()");
 
@@ -8774,12 +9465,12 @@ async function _renderFeeGrantsInner() {
         <div class="fg-stat-lbl">Total subscribers</div>
       </div>
       <div class="fg-summary-stat">
-        <div class="fg-stat-val is-green" id="fgGrantedCount">--</div>
-        <div class="fg-stat-lbl">Have fee grant</div>
+        <div class="fg-stat-val" id="fgGrantedCount">--</div>
+        <div class="fg-stat-lbl is-green">Have fee grant</div>
       </div>
       <div class="fg-summary-stat">
-        <div class="fg-stat-val is-red" id="fgUngrantedCount">--</div>
-        <div class="fg-stat-lbl">Without grant</div>
+        <div class="fg-stat-val" id="fgUngrantedCount">--</div>
+        <div class="fg-stat-lbl is-red">Without grant</div>
       </div>
       <div class="fg-summary-actions">
         <button class="btn btn-primary" onclick="streamGrantAll()" id="fgGrantAllBtn" ${!S.mgrPlanId ? 'disabled' : ''}>
@@ -8812,8 +9503,8 @@ async function _renderFeeGrantsInner() {
           <div id="fgAutoGrantThumb" style="position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>
         </div>
         <div class="toggle-body">
-          <div class="toggle-title">Auto-add</div>
-          <div class="toggle-sub">Grant on page load</div>
+          <div class="toggle-title">Auto-grant new subscribers</div>
+          <div class="toggle-sub">Default ON — runs on page load</div>
         </div>
       </label>
     </div>
@@ -8886,9 +9577,9 @@ async function _renderFeeGrantsInner() {
 
   // Fetch grants with stale-while-revalidate caching
   try {
-    const reRender = () => { if (S.page === 'fee-grants') renderFeeGrants(); };
+    const reRender = () => { if (_navStillCurrent(epoch, 'fee-grants')) coalesceRender('fee-grants', renderFeeGrants); };
     const { data: d } = await cachedFetch('/api/feegrant/grants', 60_000, reRender);
-    if (S.page !== 'fee-grants') return;
+    if (!_navStillCurrent(epoch, 'fee-grants')) return;
     if (d.error) throw new Error(d.error);
     const rawGrants = d.allowances || [];
 
@@ -8899,17 +9590,20 @@ async function _renderFeeGrantsInner() {
     });
     const drainedCount = rawGrants.length - grants.length;
 
-    // Subscribers for the selected plan (for Coverage %)
+    // Subscribers for the selected plan (for Coverage %) — go through cachedFetch
+    // so the response is shared with subscribers/pricing pages and a navigation
+    // away mid-flight discards the result instead of clobbering the new page.
     let subscriberAddrs = new Set();
     if (S.mgrPlanId) {
       try {
-        const sr = await fetch('/api/plans/' + S.mgrPlanId + '/subscriptions?limit=500');
-        const sd = await sr.json();
+        const { data: sd } = await cachedFetch('/api/plans/' + S.mgrPlanId + '/subscriptions?limit=500', 60_000);
+        if (!_navStillCurrent(epoch, 'fee-grants')) return;
         const now = new Date();
         (sd.subscriptions || []).forEach(s => {
           if (s.status === 'active' && new Date(s.inactive_at) > now) subscriberAddrs.add(s.acc_address);
         });
       } catch (err) {
+        if (!_navStillCurrent(epoch, 'fee-grants')) return;
         console.error('Failed to fetch plan subscribers:', err.message);
       }
     }
@@ -8920,8 +9614,11 @@ async function _renderFeeGrantsInner() {
     const ownedPlans = S.myPlans || [];
     try {
       const responses = await Promise.all(ownedPlans.map(p =>
-        fetch('/api/plans/' + p.planId + '/subscriptions?limit=500').then(r => r.json()).catch(() => ({ subscriptions: [] }))
+        cachedFetch('/api/plans/' + p.planId + '/subscriptions?limit=500', 60_000)
+          .then(r => r.data)
+          .catch(() => ({ subscriptions: [] }))
       ));
+      if (!_navStillCurrent(epoch, 'fee-grants')) return;
       const now = new Date();
       responses.forEach(sd => {
         (sd.subscriptions || []).forEach(s => {
@@ -8929,6 +9626,7 @@ async function _renderFeeGrantsInner() {
         });
       });
     } catch (err) {
+      if (!_navStillCurrent(epoch, 'fee-grants')) return;
       console.error('Failed to union subscribers across plans:', err.message);
     }
     // Fall back to current-plan set if we have no owned-plan info
@@ -8960,7 +9658,7 @@ async function _renderFeeGrantsInner() {
     const staleCleanBtn = staleCount > 0
       ? `<button class="btn btn-sm btn-danger" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="cleanupStaleGrants()">Clean up</button>`
       : '';
-    const statsHtml = `<div class="stats-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:16px">
+    const statsHtml = `<div class="stats-row stats-row-centered" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:16px">
       <div class="stat-card stat-card-enhanced">
         <div class="stat-icon blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
         <div class="stat-label">Active allowances on wallet</div>
@@ -8969,7 +9667,7 @@ async function _renderFeeGrantsInner() {
       </div>
       <div class="stat-card stat-card-enhanced">
         <div class="stat-icon green"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
-        <div class="stat-label">Coverage</div>
+        <div class="stat-label" style="color:#10b981">Coverage</div>
         <div class="stat-value">${coveragePct}%</div>
         <div class="stat-sub">${fmt(subsWithGrant)} of ${fmt(subscriberAddrs.size)} subs</div>
       </div>
@@ -8981,20 +9679,20 @@ async function _renderFeeGrantsInner() {
       </div>
       <div class="stat-card stat-card-enhanced">
         <div class="stat-icon" style="background:rgba(239,68,68,0.1);color:#ef4444"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div>
-        <div class="stat-label">Stale grants</div>
+        <div class="stat-label" style="color:#ef4444">Stale grants</div>
         <div class="stat-value">${fmt(staleCount)}</div>
         <div class="stat-sub">no longer subscribed</div>
         ${staleCleanBtn}
       </div>
       <div class="stat-card stat-card-enhanced">
         <div class="stat-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div>
-        <div class="stat-label">Auto-added</div>
+        <div class="stat-label" style="color:#10b981">Auto-added</div>
         <div class="stat-value">${fmt(_autoGrantSessionCount)}</div>
         <div class="stat-sub">this session</div>
       </div>
       <div class="stat-card stat-card-enhanced">
         <div class="stat-icon red"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-        <div class="stat-label">With expiry</div>
+        <div class="stat-label" style="color:var(--red)">With expiry</div>
         <div class="stat-value">${fmt(withExpiry)}</div>
         <div class="stat-sub">${fmt(totalGrants - withExpiry)} permanent</div>
       </div>
@@ -9058,14 +9756,17 @@ async function _renderFeeGrantsInner() {
         ${paginationHtml}`;
     }
 
-    document.getElementById('fgTableArea').innerHTML = tableHtml;
+    if (!_navStillCurrent(epoch, 'fee-grants')) return;
+    const tableArea = document.getElementById('fgTableArea');
+    if (tableArea) tableArea.innerHTML = tableHtml;
 
     // Initialize auto-grant toggle + load gas costs in parallel
     initAutoGrant();
     loadGasCosts();
   } catch (e) {
-    if (S.page !== 'fee-grants') return;
-    document.getElementById('fgTableArea').innerHTML = `<div class="empty-state" style="padding:30px;color:var(--red)">Failed to load grants: ${escapeHtml(e.message)}</div>`;
+    if (!_navStillCurrent(epoch, 'fee-grants')) return;
+    const tableArea = document.getElementById('fgTableArea');
+    if (tableArea) tableArea.innerHTML = `<div class="empty-state" style="padding:30px;color:var(--red)">Failed to load grants: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -9137,6 +9838,7 @@ let _gasCostData = null;
 let _gasCostPeriod = 'month';
 
 async function loadGasCosts() {
+  const epoch = _currentNavEpoch();
   if (!S.mgrPlanId) {
     const area = $('fgGasCostArea');
     if (area) area.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center">Select a plan to view gas costs</div>';
@@ -9144,10 +9846,13 @@ async function loadGasCosts() {
   }
   try {
     const r = await fetch(`/api/feegrant/gas-costs?planId=${S.mgrPlanId}`);
+    if (!_navStillCurrent(epoch, 'fee-grants')) return;
     _gasCostData = await r.json();
     if (_gasCostData.error) throw new Error(_gasCostData.error);
+    if (!_navStillCurrent(epoch, 'fee-grants')) return;
     renderGasCosts();
   } catch (err) {
+    if (!_navStillCurrent(epoch, 'fee-grants')) return;
     const area = $('fgGasCostArea');
     if (area) area.innerHTML = `<div style="padding:20px;color:var(--red);text-align:center">Failed to load gas costs: ${escapeHtml(err.message)}</div>`;
   }
@@ -9270,6 +9975,7 @@ function streamGrantAll() {
 
   const params = new URLSearchParams({ planId: S.mgrPlanId, spendLimitDvpn: spendLimit, expirationDays: expDays });
   const es = new EventSource(`/api/feegrant/grant-subscribers-stream?${params}`);
+  _registerSSE(es);
 
   es.onmessage = (ev) => {
     try {
@@ -9293,6 +9999,7 @@ function streamGrantAll() {
           appendLog(`Done: ${d.granted} granted, ${d.skipped} already had grants${d.errors ? ', ' + d.errors.length + ' errors' : ''}`, '#10b981');
           toast(`Granted: ${d.granted}, skipped: ${d.skipped || 0}${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
           es.close();
+          _activeSSE.delete(es);
           resetGrantBtn();
           if (S.page === 'fee-grants') renderFeeGrants();
           break;
@@ -9300,6 +10007,7 @@ function streamGrantAll() {
           appendLog(`Error: ${d.msg}`, 'var(--red)');
           toast('Grant failed: ' + d.msg, 'error');
           es.close();
+          _activeSSE.delete(es);
           resetGrantBtn();
           break;
       }

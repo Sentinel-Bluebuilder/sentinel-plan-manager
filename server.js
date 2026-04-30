@@ -11,6 +11,8 @@ import { dirname, join } from 'path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import {
   listNodes,
+  fetchAllNodes as sdkFetchAllChainNodes,
+  enrichNodes as sdkEnrichNodes,
   nodeStatusV3,
   registerCleanupHandlers,
   disconnect,
@@ -38,6 +40,7 @@ import {
   rpcQueryNodesForPlan,
   rpcQuerySessionsForAccount,
   rpcQuerySubscriptionsForPlan,
+  rpcQueryFeeGrants,
   rpcQueryFeeGrantsIssued,
   rpcQueryPlan,
   rpcQueryProvider,
@@ -120,7 +123,12 @@ app.use((req, res, next) => {
 });
 
 // ─── Static Files (FIX 1) — serves only public/ ──────────────────────────────
-app.use(express.static(join(__dirname, 'public')));
+app.use(express.static(join(__dirname, 'public'), {
+  setHeaders(res, path) {
+    // Browsers refuse to evaluate .mjs files unless the MIME type says JS.
+    if (path.endsWith('.mjs')) res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  },
+}));
 
 // ─── Per-Request Session Middleware ───────────────────────────────────────
 // Decrypts the httpOnly session cookie (if present) into a wallet and runs
@@ -380,19 +388,24 @@ loadNodeCacheFromDisk();
 // Always kick a fresh scan on startup so the disk seed is replaced with on-chain truth ASAP.
 runNodeScan().catch(err => console.error('Initial node scan failed:', err.message));
 
+// Adapter: handles both shapes simultaneously —
+//   chain catalog (snake_case: gigabyte_prices, remote_url, no country)
+//   probe-enriched (camelCase: gigabytePrices, remoteUrl, country, city, etc.)
 function nodeCacheToAllNodes(raw) {
   return raw.map(n => {
-    const gbPrice = (n.gigabytePrices || []).find(p => p.denom === 'udvpn');
-    const hrPrice = (n.hourlyPrices || []).find(p => p.denom === 'udvpn');
+    const gbPrices = n.gigabytePrices || n.gigabyte_prices || [];
+    const hrPrices = n.hourlyPrices || n.hourly_prices || [];
+    const gbPrice = gbPrices.find(p => p.denom === 'udvpn');
+    const hrPrice = hrPrices.find(p => p.denom === 'udvpn');
     return {
       address: n.address,
-      remoteUrl: n.remoteUrl || '',
+      remoteUrl: n.remoteUrl || n.remote_url || '',
       gbPriceUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
       hrPriceUdvpn: hrPrice ? parseInt(hrPrice.quote_value) : 0,
       status: 'active',
       protocol: n.serviceType || null,
-      country: n.country || null,
-      city: n.city || null,
+      country: n.country || n.location?.country || null,
+      city: n.city || n.location?.city || null,
       moniker: n.moniker || null,
       speedMbps: null,
       pass15: false,
@@ -402,22 +415,95 @@ function nodeCacheToAllNodes(raw) {
   });
 }
 
+// Two-phase scan:
+//   Phase 1 (fast): chain catalog via fetchAllNodes — every active node on chain.
+//                   Cache populated with truth immediately. No probe filtering.
+//   Phase 2 (background): probe-enrich for country/city/protocol on top of catalog.
+//                   Successful probes overlay enrichment fields; failures keep chain entry.
 async function runNodeScan() {
   if (nodeCache.scanning) return;
   nodeCache.scanning = true;
   scanProgress = { total: 0, probed: 0, online: 0 };
-  console.log('Starting node scan via SDK...');
+  console.log('Starting node scan: phase 1 (chain catalog)...');
   try {
-    const nodes = await listNodes({
-      maxNodes: 2000, serviceType: null, concurrency: 30,
-      onNodeProbed: (p) => { scanProgress = p; },
+    // Pull the full chain catalog via RPC directly. SDK's fetchAllNodes()
+    // hardcodes limit=500 via fetchActiveNodes default — that's why we were
+    // missing half the network. Go straight to rpcQueryNodes with limit=10000.
+    const rpc = await getRpcClient();
+    const rawNodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
+    // Resolve remote URLs and filter to nodes that accept udvpn.
+    const catalog = rawNodes
+      .map(n => {
+        const addrs = n.remote_addrs || [];
+        const first = addrs[0];
+        n.remote_url = first ? (first.startsWith('http') ? first : `https://${first}`) : null;
+        return n;
+      })
+      .filter(n => n.remote_url && (n.gigabyte_prices || []).some(p => p.denom === 'udvpn'));
+    // Preserve prior enrichment (country/city/moniker/serviceType) across catalog
+    // refreshes — otherwise the country dropdown empties for the duration of phase 2.
+    const priorByAddr = new Map((nodeCache.nodes || []).map(n => [n.address, n]));
+    const seeded = catalog.map(n => {
+      const prior = priorByAddr.get(n.address);
+      if (!prior) return n;
+      return {
+        ...n,
+        gigabytePrices: prior.gigabytePrices || prior.gigabyte_prices,
+        hourlyPrices: prior.hourlyPrices || prior.hourly_prices,
+        serviceType: prior.serviceType,
+        country: prior.country,
+        city: prior.city,
+        moniker: prior.moniker,
+        peers: prior.peers,
+      };
     });
-    nodeCache = { nodes, ts: Date.now(), scanning: false };
-    saveNodeCacheToDisk(nodes);
-    console.log(`Node scan complete: ${nodes.length} nodes cached`);
+    nodeCache = { nodes: seeded, ts: Date.now(), scanning: false };
+    saveNodeCacheToDisk(seeded);
+    console.log(`Phase 1 complete: ${catalog.length} chain nodes cached (truth, unfiltered).`);
+
+    // Phase 2: best-effort enrichment for country/protocol labels.
+    // Runs in background; successful probes are merged into the cache as they complete.
+    enrichNodeCacheInBackground(catalog).catch(err => {
+      console.error('Phase 2 enrichment failed:', err.message);
+    });
   } catch (e) {
     console.error('Node scan failed:', e.message);
     nodeCache.scanning = false;
+  }
+}
+
+let _enrichInflight = false;
+async function enrichNodeCacheInBackground(catalog) {
+  if (_enrichInflight) return;
+  _enrichInflight = true;
+  console.log('Starting node scan: phase 2 (background enrichment)...');
+  try {
+    const enriched = await sdkEnrichNodes(catalog, {
+      concurrency: 30,
+      onProgress: (p) => { scanProgress = { total: p.total, probed: p.done, online: p.enriched }; },
+    });
+    // Merge: chain catalog stays as base; enriched entries overlay country/serviceType/etc.
+    const enrichedByAddr = new Map(enriched.map(e => [e.address, e]));
+    const merged = catalog.map(n => {
+      const e = enrichedByAddr.get(n.address);
+      if (!e) return n;
+      return {
+        ...n,
+        gigabytePrices: e.gigabytePrices || n.gigabyte_prices,
+        hourlyPrices: e.hourlyPrices || n.hourly_prices,
+        serviceType: e.serviceType,
+        country: e.country,
+        city: e.city,
+        moniker: e.moniker,
+        peers: e.peers,
+      };
+    });
+    nodeCache.nodes = merged;
+    nodeCache.ts = Date.now();
+    saveNodeCacheToDisk(merged);
+    console.log(`Phase 2 complete: ${enriched.length}/${catalog.length} nodes enriched with country/protocol.`);
+  } finally {
+    _enrichInflight = false;
   }
 }
 
@@ -504,8 +590,33 @@ async function getUniqueWallets(planId) {
   return wallets.size;
 }
 
+// Retry a thunk up to `attempts` times with exponential backoff.
+// Used by getPlanStats so a transient RPC/LCD blip doesn't silently
+// drop a plan from the my-plans response.
+async function _retry(thunk, { attempts = 3, baseMs = 400, label = 'op' } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await thunk();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        const wait = baseMs * Math.pow(2, i);
+        console.log(`[retry] ${label} attempt ${i + 1}/${attempts} failed (${err.message}); retrying in ${wait}ms`);
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function getPlanStats(planId) {
-  return cached(`planStats:${planId}`, 120_000, () => _getPlanStatsImpl(planId));
+  // Cache only successful results — retry transient failures up to 3x before
+  // giving up. Otherwise a single RPC blip caches a null for 2 minutes and
+  // the plan disappears from the UI even after the chain recovers.
+  return cached(`planStats:${planId}`, 120_000, () =>
+    _retry(() => _getPlanStatsImpl(planId), { attempts: 3, baseMs: 500, label: `getPlanStats(${planId})` })
+  );
 }
 
 async function _getPlanStatsImpl(planId) {
@@ -513,10 +624,26 @@ async function _getPlanStatsImpl(planId) {
   let rpc = null;
   try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
 
-  const [subsData, nodesData, latestSubs, planRecord] = await Promise.all([
-    // count_total — LCD is the only way to get pagination.total; keep LCD.
-    lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`),
-    // Plan nodes — RPC-first, fall back to LCD.
+  // Single RPC call replaces two LCD calls (count_total + reverse-paginated 200).
+  // Pulls up to 10000 subs in one shot; we derive total + sample from that array.
+  // Falls back to LCD only if RPC fails or is unavailable.
+  const [subsResult, nodesData, planRecord] = await Promise.all([
+    (async () => {
+      if (rpc) {
+        try {
+          const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+          return { source: 'rpc', subs };
+        } catch (err) {
+          console.log(`[RPC] _getPlanStatsImpl subs(${planId}) failed: ${err.message} — LCD fallback`);
+        }
+      }
+      // LCD fallback: two calls — count_total + reverse sample.
+      const [countD, latestD] = await Promise.all([
+        lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`).catch(() => ({})),
+        lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=200&pagination.reverse=true`).catch(() => ({})),
+      ]);
+      return { source: 'lcd', countTotal: parseInt(countD.pagination?.total || '0'), subs: latestD.subscriptions || [] };
+    })(),
     (async () => {
       if (rpc) {
         try {
@@ -528,10 +655,6 @@ async function _getPlanStatsImpl(planId) {
       }
       return lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=500`).catch(() => ({ nodes: [] }));
     })(),
-    // RPC doesn't expose reverse pagination — LCD only.
-    lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=200&pagination.reverse=true`),
-    // Plan record (RPC-first, LCD fallback) — authoritative source for price &
-    // duration. Subscription samples can't be used for plans with zero subs.
     (async () => {
       if (rpc) {
         try {
@@ -548,10 +671,22 @@ async function _getPlanStatsImpl(planId) {
     })(),
   ]);
 
-  const totalSubs = parseInt(subsData.pagination?.total || '0');
+  // Normalize RPC sub fields to match LCD-shaped consumers downstream.
+  // RPC: status=1 (int, 1=active), renewal_price_policy=int. LCD: 'active' / 'no'|'yes'.
+  const normSubs = (subsResult.subs || []).map(s => ({
+    ...s,
+    status: typeof s.status === 'number' ? (s.status === 1 ? 'active' : 'inactive') : s.status,
+    renewal_price_policy: typeof s.renewal_price_policy === 'number'
+      ? (s.renewal_price_policy === 1 ? 'no' : s.renewal_price_policy === 2 ? 'yes' : 'unknown')
+      : (s.renewal_price_policy || 'unknown'),
+  }));
+  // Sort newest-first by start_at to mirror reverse-pagination semantics.
+  normSubs.sort((a, b) => new Date(b.start_at || 0) - new Date(a.start_at || 0));
+
+  const totalSubs = subsResult.source === 'rpc' ? normSubs.length : (subsResult.countTotal || 0);
   const totalNodes = (nodesData.nodes || []).length;
 
-  const allSampleSubs = latestSubs.subscriptions || [];
+  const allSampleSubs = normSubs.slice(0, 200);
   const sampleSubs = allSampleSubs.filter(s => s.acc_address !== getAddr());
   const sampleWallets = new Set(sampleSubs.map(s => s.acc_address));
   const ownSubs = allSampleSubs.length - sampleSubs.length;
@@ -1138,6 +1273,7 @@ app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req,
 // server never holds the key, client signs, server broadcasts via TxRaw.
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID || '';
 const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET || '';
+const PRIVY_CLIENT_ID = process.env.PRIVY_CLIENT_ID || '';
 let _privyClientPromise = null;
 async function getPrivyClient() {
   if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) return null;
@@ -1151,7 +1287,11 @@ async function getPrivyClient() {
 }
 
 app.get('/api/wallet/privy-config', (req, res) => {
-  res.json({ enabled: !!(PRIVY_APP_ID && PRIVY_APP_SECRET), appId: PRIVY_APP_ID || null });
+  res.json({
+    enabled: !!(PRIVY_APP_ID && PRIVY_APP_SECRET),
+    appId: PRIVY_APP_ID || null,
+    clientId: PRIVY_CLIENT_ID || null,
+  });
 });
 
 app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req, res) => {
@@ -1499,22 +1639,56 @@ app.get('/api/my-plans', async (req, res) => {
     // we never try to broadcast a doomed link/unlink/status TX.
     const planIds = await filterOwnedPlanIds(rawPlanIds);
 
-    const [bal, ...myPlans] = await Promise.all([
+    const [bal, ...myPlanResults] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
         const client = await getSigningClient();
         return client.getBalance(getAddr(), 'udvpn');
       }),
-      ...planIds.map(id => getPlanStats(id).catch(err => {
-        console.error(`Failed to get stats for plan ${id}:`, err.message);
-        return null;
-      })),
+      // Resolve to {ok, planId, stats?, err?} so we never silently drop a
+      // plan when stats fail. The UI gets a stub row with the planId so the
+      // user sees the plan exists; a refresh later will fill in details.
+      ...planIds.map(async (id) => {
+        try {
+          const stats = await getPlanStats(id);
+          return { ok: true, planId: Number(id), stats };
+        } catch (err) {
+          console.error(`Failed to get stats for plan ${id} (after retry): ${err.message}`);
+          return { ok: false, planId: Number(id), err: err.message };
+        }
+      }),
     ]);
 
-    const plans = myPlans.filter(Boolean).sort((a, b) => b.planId - a.planId);
+    // Build the plans array. Successful plans get full stats; failures get
+    // a stub so the operator can still see the plan and select it.
+    const plans = myPlanResults
+      .map(r => {
+        if (r.ok && r.stats) return r.stats;
+        return {
+          planId: r.planId,
+          totalSubscriptions: 0,
+          totalNodes: 0,
+          uniqueWalletsSample: 0,
+          price: { denom: 'udvpn', quoteValue: '0', baseValue: '0', dvpnAmount: null },
+          renewalPolicy: 'unknown',
+          activeSubs: 0,
+          inactiveSubs: 0,
+          sampleSize: 0,
+          durationDays: null,
+          earliestStart: null,
+          latestStart: null,
+          estimatedTotalP2p: null,
+          _statsUnavailable: true,
+          _error: r.err,
+        };
+      })
+      .sort((a, b) => b.planId - a.planId);
+
+    const failedCount = myPlanResults.filter(r => !r.ok).length;
     res.json({
       address: getAddr(),
       balance: (parseInt(bal.amount) / 1e6).toFixed(2),
       plans,
+      ...(failedCount > 0 ? { partialFailures: failedCount } : {}),
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
@@ -1639,6 +1813,34 @@ app.post('/api/plan/status', async (req, res) => {
   }
 });
 
+// Find an active fee-grant *received* by the current signer. When a grantor
+// exists we pass it to safeBroadcast so the chain charges the grantor's
+// account for the TX gas — this is what makes the "operator pays subscriber's
+// gas" flow actually work (subscribe / start-session). Returns null if no
+// usable grant is found, so callers fall back to self-paid gas. RPC-first per
+// project rule; LCD is not used here because rpcQueryFeeGrants already has
+// SDK-side LCD fallback at the chain client.
+async function pickActiveGrantor(grantee) {
+  if (!grantee) return null;
+  try {
+    const rpc = await getRpcClient();
+    if (!rpc) return null;
+    const grants = await rpcQueryFeeGrants(rpc, grantee);
+    if (!grants || !grants.length) return null;
+    const now = Date.now();
+    const usable = grants.find((g) => {
+      const exp = g.allowance?.basic?.expiration || g.allowance?.expiration;
+      if (!exp) return true;
+      const t = typeof exp === 'string' ? Date.parse(exp) : Number(exp);
+      return !isFinite(t) || t > now;
+    });
+    return usable ? usable.granter : null;
+  } catch (e) {
+    console.log(`[FeeGrant] pickActiveGrantor failed for ${grantee}: ${e.message}`);
+    return null;
+  }
+}
+
 app.post('/api/plan/subscribe', async (req, res) => {
   if (!requireWallet(req, res)) return;
   try {
@@ -1656,8 +1858,9 @@ app.post('/api/plan/subscribe', async (req, res) => {
       },
     };
 
-    console.log(`Subscribing to plan ${planId} (v3)...`);
-    const result = await safeBroadcast([msg]);
+    const feeGranter = await pickActiveGrantor(getAddr());
+    console.log(`Subscribing to plan ${planId} (v3)${feeGranter ? ` — gas paid by grant from ${feeGranter}` : ''}...`);
+    const result = await safeBroadcast([msg], undefined, feeGranter ? { feeGranter } : undefined);
     const resp = txResponse(result);
     if (resp.ok) {
       let subscriptionId = null;
@@ -1700,8 +1903,9 @@ app.post('/api/plan/start-session', async (req, res) => {
       },
     };
 
-    console.log(`Starting session on subscription ${subscriptionId} with node ${nodeAddress} (v3)...`);
-    const result = await safeBroadcast([msg]);
+    const feeGranter = await pickActiveGrantor(getAddr());
+    console.log(`Starting session on subscription ${subscriptionId} with node ${nodeAddress} (v3)${feeGranter ? ` — gas paid by grant from ${feeGranter}` : ''}...`);
+    const result = await safeBroadcast([msg], undefined, feeGranter ? { feeGranter } : undefined);
     const resp = txResponse(result);
     if (resp.ok) {
       let sessionId = null;
@@ -1777,6 +1981,11 @@ app.get('/api/all-nodes', async (req, res) => {
     const country = (req.query.country || '').toLowerCase();
     const protocol = (req.query.protocol || '').toLowerCase();
     const inPlanOnly = req.query.inPlanOnly === 'true';
+    // Default behaviour for the Add Nodes browser: hide nodes already linked to
+    // the current plan so the user never has to scroll past rows they can't act
+    // on. The client opts in via excludeInPlan=true; legacy callers (your-nodes,
+    // pricing tab) get the old behaviour.
+    const excludeInPlan = req.query.excludeInPlan === 'true';
 
     const all = await fetchAllNodes();
 
@@ -1792,8 +2001,18 @@ app.get('/api/all-nodes', async (req, res) => {
     }
 
     let filtered = all;
+    // Hide already-linked plan nodes BEFORE other filters so pagination /
+    // counts / country tally all reflect the browseable set the user actually
+    // sees. Without this, page 1 could be half-empty after the client strips
+    // inPlan rows post-fetch.
+    if (excludeInPlan && planNodeMap.size) {
+      filtered = filtered.filter(n => !planNodeMap.has(n.address));
+    }
     if (search) filtered = filtered.filter(n => n.address.toLowerCase().includes(search) || (n.moniker || '').toLowerCase().includes(search));
-    if (country) filtered = filtered.filter(n => (n.country || '').toLowerCase().includes(country));
+    // Exact country match — `.includes()` matches "Korea" against both Koreas
+    // and "Guinea" against "Equatorial Guinea". The dropdown sends full names,
+    // so an exact compare is correct and avoids surprise hits.
+    if (country) filtered = filtered.filter(n => (n.country || '').toLowerCase() === country);
     if (protocol) filtered = filtered.filter(n => (n.protocol || '').toLowerCase() === protocol);
     if (inPlanOnly && planId) {
       const cachedAddrs = new Set(filtered.map(n => n.address));
@@ -1842,8 +2061,21 @@ app.get('/api/all-nodes', async (req, res) => {
       return { ...n, inPlan: !!planNode, leaseExpiresAt: planNode?.inactiveAt || null };
     });
 
-    const countries = [...new Set(all.map(n => n.country).filter(Boolean))].sort();
-    const protocols = [...new Set(all.map(n => n.protocol).filter(Boolean))].sort();
+    // Country/protocol facets reflect the *browseable* set so the dropdown
+    // never offers a country that has zero rows to show. When excludeInPlan is
+    // on we drop plan-linked nodes from the facet pool too. Search/country
+    // selections are NOT applied here — that would empty the dropdowns once a
+    // user picks a value.
+    const facetPool = (excludeInPlan && planNodeMap.size)
+      ? all.filter(n => !planNodeMap.has(n.address))
+      : all;
+    const countries = [...new Set(facetPool.map(n => n.country).filter(Boolean))].sort();
+    const protocols = [...new Set(facetPool.map(n => n.protocol).filter(Boolean))].sort();
+    const countryCounts = {};
+    for (const n of facetPool) {
+      if (!n.country) continue;
+      countryCounts[n.country] = (countryCounts[n.country] || 0) + 1;
+    }
 
     const start = (page - 1) * limit;
     const paged = withStatus.slice(start, start + limit);
@@ -1855,6 +2087,7 @@ app.get('/api/all-nodes', async (req, res) => {
       totalPages: Math.ceil(filtered.length / limit),
       planNodesCount: planNodeMap.size,
       countries,
+      countryCounts,
       protocols,
     });
   } catch (err) {
@@ -2965,7 +3198,7 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
   }
 });
 
-let _autoGrantSettings = { enabled: false, spendLimitDvpn: 10, expirationDays: 30 };
+let _autoGrantSettings = { enabled: true, spendLimitDvpn: 10, expirationDays: 30 };
 
 app.get('/api/feegrant/auto-grant', (req, res) => {
   res.json(_autoGrantSettings);

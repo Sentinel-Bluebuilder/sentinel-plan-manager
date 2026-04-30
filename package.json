@@ -8,7 +8,11 @@
   },
   "scripts": {
     "start": "node server.js",
-    "cli": "node cli.js"
+    "cli": "node cli.js",
+    "build:vendor": "node scripts/bundle-vendor.mjs",
+    "postinstall": "node scripts/bundle-vendor.mjs",
+    "test:e2e": "node scripts/test-e2e.mjs",
+    "test:universal": "node scripts/universal-test.mjs"
   },
   "files": [
     "cli.js",
@@ -38,8 +42,9 @@
   "license": "MIT",
   "dependencies": {
     "@cosmjs/encoding": "^0.38.1",
-    "@cosmjs/proto-signing": "^0.38.1",
+    "@cosmjs/proto-signing": "^0.32.4",
     "@cosmjs/stargate": "^0.38.1",
+    "@privy-io/js-sdk-core": "^0.61.1",
     "@privy-io/server-auth": "^1.32.5",
     "@scure/bip32": "^2.0.1",
     "@scure/bip39": "^2.0.1",
@@ -51,5 +56,8 @@
   "overrides": {
     "protobufjs": "^7.5.5",
     "elliptic": "^6.6.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
   }
 }
