@@ -82,7 +82,7 @@ app.use((req, res, next) => {
     "script-src 'self' 'unsafe-inline'; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data:; " +
-    "connect-src 'self' https://lcd.sentinel.co https://api.sentinel.quokkastake.io https://sentinel-api.polkachu.com https://sentinel.api.trivium.network:1317; " +
+    "connect-src 'self' https://lcd.sentinel.co https://api.sentinel.quokkastake.io https://sentinel-api.polkachu.com https://sentinel.api.trivium.network:1317 https://auth.privy.io https://*.privy.io https://*.rpc.privy.systems; " +
     "object-src 'none'; " +
     "base-uri 'self'; " +
     "frame-ancestors 'none'"
@@ -159,7 +159,12 @@ app.use(async (req, res, next) => {
   if (keplrToken) {
     const parsed = parseKeplrToken(keplrToken);
     if (parsed) {
-      const session = keplrSessionFromAddress(parsed.addr, parsed.pubkeyB64);
+      // Same cookie shape is reused for Privy logins (server-custody cosmos
+      // wallet); look the address up in privy-wallets.json to mark the
+      // session kind correctly so the UI can show "Privy (email)" instead of
+      // "Keplr extension" and so the right signing path is taken later.
+      const kind = lookupPrivyWalletByAddr(parsed.addr) ? 'privy' : 'keplr';
+      const session = keplrSessionFromAddress(parsed.addr, parsed.pubkeyB64, kind);
       return runWithSession(session, () => next());
     }
     console.warn('[session] Rejecting Keplr cookie (HMAC mismatch)');
@@ -351,6 +356,48 @@ async function filterOwnedPlanIds(planIds) {
     }
     return kept.sort((a, b) => a - b);
   });
+}
+
+// ─── Privy Cosmos Wallet Persistence ──────────────────────────────────────────
+// Maps Privy userId → { walletId, pubkeyB64, sent1Addr } so repeat logins from
+// the same email reuse the same Privy server-custody cosmos wallet (and
+// therefore the same sent1 address) instead of provisioning a fresh one each
+// session. Stored on disk via DATA_DIR; safe to commit no secrets here — the
+// privkey lives inside Privy's enclave.
+const PRIVY_WALLETS_FILE = join(DATA_DIR, 'privy-wallets.json');
+
+function readPrivyWalletStore() {
+  try {
+    if (!existsSync(PRIVY_WALLETS_FILE)) return {};
+    const parsed = JSON.parse(readFileSync(PRIVY_WALLETS_FILE, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (err) {
+    console.error('Failed to load privy-wallets.json:', err.message);
+    return {};
+  }
+}
+
+function lookupPrivyWallet(userId) {
+  if (!userId) return null;
+  const store = readPrivyWalletStore();
+  return store[userId] || null;
+}
+
+function lookupPrivyWalletByAddr(sent1Addr) {
+  if (!sent1Addr) return null;
+  const store = readPrivyWalletStore();
+  for (const [userId, entry] of Object.entries(store)) {
+    if (entry?.sent1Addr === sent1Addr) return { userId, ...entry };
+  }
+  return null;
+}
+
+function savePrivyWallet(userId, entry) {
+  if (!userId || !entry?.walletId) return;
+  const store = readPrivyWalletStore();
+  store[userId] = entry;
+  try { writeFileSync(PRIVY_WALLETS_FILE, JSON.stringify(store), 'utf8'); }
+  catch (err) { console.error('Failed to save privy-wallets.json:', err.message); }
 }
 
 // ─── Node Cache (SDK scan) ────────────────────────────────────────────────────
@@ -1264,16 +1311,24 @@ app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req,
   }
 });
 
-// ─── Privy Login (custody-preserving embedded wallet) ────────────────────────
-// Privy holds the secp256k1 key inside its enclave. The browser asks Privy for
-// the user's Cosmos pubkey + access token, then POSTs them here. We verify the
-// access token via @privy-io/server-auth, derive the sent1 address from the
-// pubkey, assert it matches what the browser claimed, and reuse the Keplr
-// session shape (kind === 'keplr' from the cookie's POV) — same custody model:
-// server never holds the key, client signs, server broadcasts via TxRaw.
+// ─── Privy Login (server-custody Cosmos wallet) ──────────────────────────────
+// Privy issues a "Tier 2" Cosmos wallet for the authenticated user; the
+// privkey lives inside Privy's enclave, never on this server, never in the
+// browser. Flow:
+//   1. Browser runs the email + OTP login against Privy and forwards the
+//      resulting access token here.
+//   2. We verify the token via @privy-io/server-auth, then look up (or
+//      provision) a `chain_type: 'cosmos'` wallet for this userId via Privy's
+//      REST API. Privy returns a compressed secp256k1 public_key; we re-bech32
+//      it with the `sent` prefix to produce the user's sent1 address.
+//   3. We persist `userId → {walletId, pubkey, sent1Addr}` so repeat logins
+//      reuse the same wallet (same address) and we issue the standard Keplr
+//      session cookie. /api/tx/privy-sign-and-broadcast then proxies signing
+//      through Privy raw_sign for any TX path.
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID || '';
 const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET || '';
 const PRIVY_CLIENT_ID = process.env.PRIVY_CLIENT_ID || '';
+const PRIVY_API_BASE = 'https://api.privy.io/v1';
 let _privyClientPromise = null;
 async function getPrivyClient() {
   if (!PRIVY_APP_ID || !PRIVY_APP_SECRET) return null;
@@ -1284,6 +1339,75 @@ async function getPrivyClient() {
     })();
   }
   return _privyClientPromise;
+}
+
+// HTTP Basic auth header for Privy's REST API. Used by raw_sign and by the
+// cosmos wallet create call (the typed walletApi.createWallet only supports
+// ethereum/solana; cosmos requires direct REST per Privy's docs).
+function privyAuthHeaders() {
+  const basic = Buffer.from(`${PRIVY_APP_ID}:${PRIVY_APP_SECRET}`).toString('base64');
+  return {
+    'Authorization': `Basic ${basic}`,
+    'privy-app-id': PRIVY_APP_ID,
+    'Content-Type': 'application/json',
+  };
+}
+
+async function privyCreateCosmosWallet(_userId) {
+  // owner_id is omitted: Privy requires a cuid2-shaped id created via its Owners
+  // API, not the did:privy:... userId. We persist the userId→walletId binding
+  // in privy-wallets.json instead, which is sufficient for our recovery model.
+  const r = await fetch(`${PRIVY_API_BASE}/wallets`, {
+    method: 'POST',
+    headers: privyAuthHeaders(),
+    body: JSON.stringify({ chain_type: 'cosmos' }),
+  });
+  const text = await r.text();
+  let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  if (!r.ok) {
+    throw new Error(`Privy wallet create failed (${r.status}): ${body.error || body.message || text}`);
+  }
+  return body; // { id, address, public_key, chain_type, ... }
+}
+
+async function privyRawSign(walletId, hashHex) {
+  const r = await fetch(`${PRIVY_API_BASE}/wallets/${walletId}/rpc`, {
+    method: 'POST',
+    headers: privyAuthHeaders(),
+    body: JSON.stringify({
+      method: 'raw_sign',
+      params: { hash: hashHex.startsWith('0x') ? hashHex : `0x${hashHex}` },
+    }),
+  });
+  const text = await r.text();
+  let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  if (!r.ok) {
+    throw new Error(`Privy raw_sign failed (${r.status}): ${body.error || body.message || text}`);
+  }
+  return body?.data?.signature || body?.signature;
+}
+
+// Re-derive the sent1 address from a Privy-supplied compressed secp256k1
+// pubkey (or fall back to re-bech32-ing the cosmos1 address Privy returns;
+// they share the same RIPEMD160 hash, only the HRP differs).
+async function deriveSent1FromPrivy({ publicKey, address }) {
+  const { fromBech32, fromHex, toBech32: toBech, toBase64 } = await import('@cosmjs/encoding');
+  const { Sha256, ripemd160 } = await import('@cosmjs/crypto');
+  if (publicKey) {
+    const cleaned = publicKey.startsWith('0x') ? publicKey.slice(2) : publicKey;
+    const pubkeyBytes = fromHex(cleaned);
+    if (pubkeyBytes.length !== 33) {
+      throw new Error(`Privy returned non-compressed secp256k1 pubkey (len=${pubkeyBytes.length})`);
+    }
+    const sha = new Sha256(pubkeyBytes).digest();
+    const sent1 = toBech('sent', ripemd160(sha));
+    return { sent1, pubkeyB64: toBase64(pubkeyBytes) };
+  }
+  if (address) {
+    const { data } = fromBech32(address);
+    return { sent1: toBech('sent', data), pubkeyB64: null };
+  }
+  throw new Error('Privy wallet response missing public_key and address');
 }
 
 app.get('/api/wallet/privy-config', (req, res) => {
@@ -1300,15 +1424,12 @@ app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req,
     if (!privy) {
       return res.status(503).json({ error: 'Privy not configured. Set PRIVY_APP_ID and PRIVY_APP_SECRET in .env.' });
     }
-    const { accessToken, addr, pubkey } = req.body || {};
-    if (!accessToken || !addr || !pubkey) {
-      return res.status(400).json({ error: 'accessToken, addr, pubkey required' });
-    }
-    if (typeof addr !== 'string' || !addr.startsWith('sent1')) {
-      return res.status(400).json({ error: 'Invalid Sentinel address' });
+    const { accessToken } = req.body || {};
+    if (!accessToken) {
+      return res.status(400).json({ error: 'accessToken required' });
     }
 
-    // Verify the Privy access token. Throws if invalid/expired.
+    // Verify the Privy access token. Throws on invalid/expired.
     let verified;
     try {
       verified = await privy.verifyAuthToken(accessToken);
@@ -1319,30 +1440,40 @@ app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req,
       return res.status(401).json({ error: 'Privy token missing userId' });
     }
 
-    // Derive sent1 from the supplied compressed secp256k1 pubkey and assert it
-    // matches the address the browser claimed. Without this, a logged-in
-    // Privy user could submit anyone else's address into our session.
-    const { fromBase64, toBech32: toBech } = await import('@cosmjs/encoding');
-    const { Sha256, ripemd160 } = await import('@cosmjs/crypto');
-    let pubkeyBytes;
-    try { pubkeyBytes = fromBase64(pubkey); } catch { return res.status(400).json({ error: 'pubkey must be base64' }); }
-    if (pubkeyBytes.length !== 33) {
-      return res.status(400).json({ error: 'pubkey must be 33-byte compressed secp256k1' });
-    }
-    const sha = new Sha256(pubkeyBytes).digest();
-    const derivedAddr = toBech('sent', ripemd160(sha));
-    if (derivedAddr !== addr) {
-      return res.status(403).json({ error: 'pubkey does not derive to the supplied address' });
+    // Reuse the user's existing cosmos wallet if we've provisioned one before;
+    // otherwise create one bound to this Privy userId. Same userId → same
+    // wallet → same sent1 address forever, recoverable via Privy auth alone.
+    let entry = lookupPrivyWallet(verified.userId);
+    if (!entry?.walletId) {
+      let wallet;
+      try {
+        wallet = await privyCreateCosmosWallet(verified.userId);
+      } catch (createErr) {
+        console.error('[privy-login] cosmos wallet create failed:', createErr.message);
+        return res.status(502).json({ error: 'Privy cosmos wallet creation failed: ' + createErr.message });
+      }
+      const { sent1, pubkeyB64 } = await deriveSent1FromPrivy({
+        publicKey: wallet.public_key,
+        address: wallet.address,
+      });
+      entry = { walletId: wallet.id, pubkeyB64, sent1Addr: sent1, cosmosAddr: wallet.address || null };
+      savePrivyWallet(verified.userId, entry);
     }
 
-    const session = keplrSessionFromAddress(addr, pubkey);
+    const session = keplrSessionFromAddress(entry.sent1Addr, entry.pubkeyB64 || '', 'privy');
     const token = buildKeplrToken(session.addr, session.pubkeyB64);
     res.setHeader('Set-Cookie', [
       buildClearCookie({ secure: req.secure }),
       buildSetKeplrCookie(token, { secure: req.secure }),
     ]);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.json({ ok: true, address: session.addr, provAddress: session.provAddr, mode: 'privy', userId: verified.userId });
+    res.json({
+      ok: true,
+      address: session.addr,
+      provAddress: session.provAddr,
+      mode: 'privy',
+      userId: verified.userId,
+    });
   } catch (err) {
     console.error('Privy login error:', err.message);
     res.status(500).json({ error: 'Privy login failed: ' + err.message });
@@ -1416,11 +1547,128 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
   }
 });
 
+// ─── Privy server-side signed broadcast ──────────────────────────────────────
+// Browser builds {bodyBytes, authInfoBytes} for the user's TX, POSTs them
+// here. We compute SHA256(signDocBytes) per SIGN_MODE_DIRECT, hand the digest
+// to Privy raw_sign (the Cosmos privkey lives in Privy's enclave), then wrap
+// the returned signature into a TxRaw and broadcast via the standard RPC
+// failover. Same custody story as Keplr but the "wallet" is the user's
+// server-custody Privy wallet rather than a browser extension.
+app.post('/api/tx/privy-sign-and-broadcast', async (req, res) => {
+  if (!requireWallet(req, res)) return;
+  try {
+    const { bodyBytes, authInfoBytes, signDocBytes, accountNumber, chainId } = req.body || {};
+    if (!bodyBytes || !authInfoBytes) {
+      return res.status(400).json({ error: 'bodyBytes and authInfoBytes required' });
+    }
+
+    const entry = lookupPrivyWalletByAddr(getAddr());
+    if (!entry?.walletId) {
+      return res.status(403).json({ error: 'Active session has no Privy cosmos wallet on file' });
+    }
+
+    const { fromBase64, toBase64, toBech32: toBech, fromHex } = await import('@cosmjs/encoding');
+    const { Sha256, ripemd160 } = await import('@cosmjs/crypto');
+    const { TxRaw, AuthInfo, SignDoc } = await import('cosmjs-types/cosmos/tx/v1beta1/tx');
+    const { PubKey } = await import('cosmjs-types/cosmos/crypto/secp256k1/keys');
+
+    // Verify the signer pubkey baked into authInfoBytes derives to the
+    // session's bech32 address. Same defense as broadcast-signed: don't relay
+    // arbitrary signed payloads even after auth.
+    const authInfo = AuthInfo.decode(fromBase64(authInfoBytes));
+    const signerInfo = authInfo.signerInfos?.[0];
+    if (!signerInfo?.publicKey?.value) {
+      return res.status(400).json({ error: 'authInfoBytes missing signer publicKey' });
+    }
+    if (signerInfo.publicKey.typeUrl !== '/cosmos.crypto.secp256k1.PubKey') {
+      return res.status(400).json({ error: `Unsupported signer key type: ${signerInfo.publicKey.typeUrl}` });
+    }
+    const signerPubKey = PubKey.decode(signerInfo.publicKey.value).key;
+    if (signerPubKey.length !== 33) {
+      return res.status(400).json({ error: 'Invalid secp256k1 pubkey length' });
+    }
+    const sha = new Sha256(signerPubKey).digest();
+    const derivedAddr = toBech('sent', ripemd160(sha));
+    if (derivedAddr !== getAddr()) {
+      console.warn('[privy-sign-and-broadcast] addr mismatch: derived=%s session=%s', derivedAddr, getAddr());
+      return res.status(403).json({ error: 'Signed TX wallet does not match session wallet' });
+    }
+
+    // Build signDocBytes server-side (don't trust browser's framing) when the
+    // browser supplied chainId/accountNumber. Falls back to client-supplied
+    // signDocBytes only if the explicit fields are absent — useful for tests.
+    let signDocBytesBuf;
+    if (chainId && (accountNumber !== undefined && accountNumber !== null)) {
+      const sd = SignDoc.fromPartial({
+        bodyBytes: fromBase64(bodyBytes),
+        authInfoBytes: fromBase64(authInfoBytes),
+        chainId,
+        accountNumber: BigInt(accountNumber),
+      });
+      signDocBytesBuf = SignDoc.encode(sd).finish();
+    } else if (signDocBytes) {
+      signDocBytesBuf = fromBase64(signDocBytes);
+    } else {
+      return res.status(400).json({ error: 'chainId+accountNumber or signDocBytes required' });
+    }
+
+    const digest = new Sha256(signDocBytesBuf).digest();
+    const digestHex = Buffer.from(digest).toString('hex');
+
+    let signatureHex;
+    try {
+      signatureHex = await privyRawSign(entry.walletId, digestHex);
+    } catch (signErr) {
+      console.error('[privy-sign-and-broadcast] raw_sign failed:', signErr.message);
+      return res.status(502).json({ error: 'Privy signing failed: ' + signErr.message });
+    }
+    if (!signatureHex) {
+      return res.status(502).json({ error: 'Privy raw_sign returned no signature' });
+    }
+    const cleaned = signatureHex.startsWith('0x') ? signatureHex.slice(2) : signatureHex;
+    let sigBytes = fromHex(cleaned);
+    // Cosmos SIGN_MODE_DIRECT expects 64 bytes (R||S, no recovery byte).
+    // Privy's raw_sign returns either 64 or 65 (with recovery id) — strip it.
+    if (sigBytes.length === 65) sigBytes = sigBytes.slice(0, 64);
+    if (sigBytes.length !== 64) {
+      return res.status(502).json({ error: `Privy returned unexpected signature length: ${sigBytes.length}` });
+    }
+
+    const txRaw = TxRaw.encode(TxRaw.fromPartial({
+      bodyBytes: fromBase64(bodyBytes),
+      authInfoBytes: fromBase64(authInfoBytes),
+      signatures: [sigBytes],
+    })).finish();
+    const result = await broadcastSignedTx(toBase64(txRaw));
+    if (result.code !== 0) {
+      return res.json({ ok: false, error: parseChainError(result.rawLog || 'Broadcast failed'), errorCode: 'tx-failed', txHash: result.transactionHash });
+    }
+    cacheInvalidate(`balance:${getAddr()}`);
+    return res.json({
+      ok: true,
+      txHash: result.transactionHash,
+      height: result.height,
+      gasUsed: result.gasUsed,
+      gasWanted: result.gasWanted,
+      pending: result.pending || false,
+    });
+  } catch (err) {
+    console.error('[privy-sign-and-broadcast] error:', err.message);
+    res.status(500).json({ ok: false, error: parseChainError(err.message), errorCode: 'broadcast-error' });
+  }
+});
+
 app.get('/api/wallet', async (req, res) => {
   if (!requireWallet(req, res)) return;
   try {
     const [bal, dvpnPrice, provider] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
+        // Read-only — go straight to the RPC query client so Keplr/Privy
+        // sessions (which have no signing client; getClient() throws
+        // 'client-signs') can still fetch their balance. Falls back to the
+        // signing client if RPC is unavailable.
+        const rpc = await getRpcClient();
+        if (rpc) return rpcQueryBalance(rpc, getAddr(), 'udvpn');
         const client = await getSigningClient();
         return client.getBalance(getAddr(), 'udvpn');
       }),

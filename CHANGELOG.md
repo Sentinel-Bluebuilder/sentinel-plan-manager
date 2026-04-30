@@ -6,6 +6,32 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Payment page browsable without a plan
+
+- **Payment page no longer gated on `S.mgrPlanId`.** Operators can now
+  read every rail explainer, integration walkthrough, and code sample
+  before publishing their first plan. Previously `renderPricing()`
+  short-circuited to "Select a plan above to view pricing" when no plan
+  was selected, hiding all the educational content behind a click that
+  required a plan to exist.
+- **`/api/plans/{id}` fetch is now conditional.** Only fired when a
+  plan is actually selected. `/api/params` (chain accepted-denoms list)
+  is always fetched since it has no plan dependency.
+- **Placeholder pricing card.** When no plan is selected, the on-chain
+  "Plan Pricing" card renders with dashed-border placeholder tiles for
+  Price / Duration / Denom / Nodes / Subs and an info banner that
+  reads either "Select a plan above to see live pricing" (when plans
+  exist) or "Publish your first plan…" (when the operator has none).
+- **Code-sample placeholder.** `buildFiatDetailHtml()` now receives
+  `'YOUR_PLAN_ID'` as the planId when none is selected, so Stripe /
+  PayPal / BTCPay / ETH / SOL reference handlers render with
+  `planId: YOUR_PLAN_ID` instead of `planId: 0` — clearly marked as
+  the operator's substitution point.
+- **Plan picker stays visible on the rail-card landing screen too.**
+  Previously only shown after picking a rail; now persists at the top
+  whenever the operator has at least one plan, so live data is one
+  click away from any view on the page.
+
 ### Added — Privy email login (browser)
 
 - **`PRIVY_CLIENT_ID` env var.** Required by `@privy-io/js-sdk-core` in the
@@ -115,6 +141,55 @@ versions follow [SemVer](https://semver.org/).
 - **"NetworkError when attempting to fetch resource" on email send.** Caused
   by missing `clientId` in `new Privy({ appId, storage })`. Fixed by piping
   `PRIVY_CLIENT_ID` through `/api/wallet/privy-config` to the constructor.
+- **"Failed to send code: Failed to fetch" on Privy login.** Root cause was
+  our own server's CSP `connect-src` blocking Privy fetches. Added
+  `https://auth.privy.io https://*.privy.io https://*.rpc.privy.systems`
+  to the whitelist in `server.js`.
+- **"No embedded Ethereum wallet on this Privy account" / Privy Cosmos Tier 2
+  flow adopted.** The previous workaround derived a cosmos key from an
+  embedded EVM wallet by hashing a `personal_sign` signature; it depended on
+  the dashboard auto-creating an EVM wallet and on an undocumented derivation
+  scheme. Replaced with the documented Privy Tier 2 cosmos wallet flow:
+  - Server creates a `chain_type: 'cosmos'` Privy wallet bound to the Privy
+    `userId` via `POST https://api.privy.io/v1/wallets` (HTTP Basic
+    `appId:appSecret` + `privy-app-id` header). The typed
+    `@privy-io/server-auth` `walletApi.createWallet()` only supports
+    ethereum / solana, so we call the REST endpoint directly.
+  - `userId → { walletId, pubkeyB64, sent1Addr }` is persisted to
+    `privy-wallets.json` (via `DATA_DIR`) so the same Privy login always
+    resolves to the same sent1 address across devices and restarts.
+  - sent1 is derived from the wallet's compressed secp256k1 public key
+    (SHA-256 → RIPEMD-160 → bech32 with HRP `sent`). Cosmos and Sentinel
+    addresses share the same RIPEMD-160 hash; only the HRP differs, so
+    re-bech32-ing Privy's returned `cosmos1…` address yields the same result.
+  - Browser drops the entire EVM derivation path: after OTP success it just
+    POSTs `{ accessToken }` to `/api/wallet/privy-login`. No `personal_sign`,
+    no `cosmos-from-eth.mjs` import, no client-side key material.
+
+### Build / tooling — Privy cosmos wallet (server-side)
+
+- **`privy-wallets.json` persistence (server).** New `DATA_DIR`-rooted
+  store with `readPrivyWalletStore()`, `lookupPrivyWallet(userId)`,
+  `lookupPrivyWalletByAddr(sent1Addr)`, and `savePrivyWallet(userId,
+  entry)` helpers. Keyed by Privy `userId`; reverse-lookup by sent1 used
+  by the broadcast path to find the wallet ID for the active session.
+- **REST helpers (`server.js`).** `privyAuthHeaders()` builds the HTTP
+  Basic + `privy-app-id` header pair; `privyCreateCosmosWallet(ownerId)`
+  POSTs `{ chain_type: 'cosmos', owner_id }` to `/v1/wallets`;
+  `privyRawSign(walletId, hashHex)` POSTs `{ method: 'raw_sign', params:
+  { hash: '0x…' } }` to `/v1/wallets/{id}/rpc`;
+  `deriveSent1FromPrivy({ publicKey, address })` produces a sent1 address
+  from either Privy's returned public_key or its `cosmos1…` address.
+- **`POST /api/tx/privy-sign-and-broadcast`.** Server-side signing endpoint:
+  reverse-looks up the wallet by session sent1 addr, verifies the signer
+  pubkey in `authInfoBytes` derives back to the session addr, builds a
+  `SignDoc` from `{ bodyBytes, authInfoBytes, chainId, accountNumber }`,
+  SHA-256s it, calls `raw_sign`, strips the recovery byte if Privy
+  returned 65 bytes, wraps into `TxRaw`, and broadcasts via the existing
+  `broadcastSignedTx` path. Browser never holds a key.
+- **Removed**: `src/cosmos-from-eth.js`, `public/vendor/cosmos-from-eth.mjs`,
+  and the `cosmos-from-eth` target in `scripts/bundle-vendor.mjs`. The
+  EVM-derivation helper is no longer reachable from any code path.
 - **Page flash when clicking a filter on Add Nodes.** Caused by full-page
   re-render on every state change. Fixed via partial DOM swap with stable
   container IDs.
