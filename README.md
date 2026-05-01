@@ -47,20 +47,31 @@ See [PLANS.md](./PLANS.md) for the full breakdown: plan lifecycle, plan-based vs
 
 > **This tool operates on Sentinel mainnet. Every transaction costs real P2P tokens. There is no testnet mode.**
 
-### Option A — npm (recommended, one-shot)
+### Just want to look around?
 
-```bash
-npm install -g sentinel-plan-manager
-plans --help                                # verify install
-echo "MNEMONIC=word1 word2 ... word24" > .env
-npx sentinel-plan-manager                   # or: node $(npm root -g)/sentinel-plan-manager/server.js
-```
-
-### Option B — git clone (for contributors)
+Boot a read-only demo mounted on any operator address — no wallet, no tokens, no commitment. Every TX-broadcasting endpoint returns 403 so nothing can be signed by accident.
 
 ```bash
 git clone https://github.com/Sentinel-Bluebuilder/sentinel-plan-manager.git
 cd sentinel-plan-manager
+npm install
+DEMO=true DEMO_ADDR=sent1...operator-address... npm start
+# → http://localhost:3003 with a demo banner across the top
+```
+
+Pick any plan-creating operator address from a chain explorer, paste it into `DEMO_ADDR`, and the dashboard renders that operator's plans, nodes, and subscribers.
+
+### Run your own — Option A: clone
+
+```bash
+# Without git history (fastest):
+npx degit Sentinel-Bluebuilder/sentinel-plan-manager plan-manager
+cd plan-manager
+
+# Or with full git history:
+git clone https://github.com/Sentinel-Bluebuilder/sentinel-plan-manager.git
+cd sentinel-plan-manager
+
 npm install
 cp .env.example .env    # then edit .env and paste your mnemonic
 npm start
@@ -70,7 +81,7 @@ npm start
 
 Open http://localhost:3003.
 
-### Option C — Docker
+### Run your own — Option B: Docker
 
 ```bash
 # one-liner
@@ -83,13 +94,13 @@ docker run -d --name plan-manager \
   sentinel-plan-manager
 
 # or with compose (includes named volume + auto-restart)
-echo "MNEMONIC=word1 word2 ... word24" > .env
+cp .env.example .env    # then edit .env and paste your mnemonic
 docker compose up -d
 ```
 
 State (`.wallet.json`, `my-plans.json`, `nodes-cache.json`) lives in the `/data` volume so it survives container recreations. Leave `MNEMONIC` unset to create a wallet from the UI on first boot instead.
 
-### Option D — Multi-user deploy (public domain)
+### Option C — Multi-user deploy (public domain)
 
 Want to deploy this to a domain and let anyone sign in with their own mnemonic? Set `MULTI_USER=true`:
 
