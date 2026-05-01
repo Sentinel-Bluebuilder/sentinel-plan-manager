@@ -70,8 +70,13 @@ initSession(DATA_DIR);
 // Read-only browse: any visitor sees the UI mounted on a watch-only address
 // without supplying a mnemonic. Every TX-broadcasting endpoint returns 403.
 // Set DEMO_ADDR to any sent1... operator address you want visitors to view.
+// Curated default operator: owns mainnet plans 36 & 41 (47 active subs, 731
+// linked nodes at time of writing). Override with env DEMO_ADDR for any other
+// sent1... address. Picked so `DEMO=true npm start` works zero-config and
+// shows a populated dashboard, not an empty operator with nothing to render.
+const DEFAULT_DEMO_ADDR = 'sent1t0xjyflrah5n36rfkpfeuw6pz6vl2g27x2793l';
 const DEMO_MODE = String(process.env.DEMO || '').toLowerCase() === 'true';
-const DEMO_ADDR = (process.env.DEMO_ADDR || '').trim();
+const DEMO_ADDR = (process.env.DEMO_ADDR || '').trim() || (DEMO_MODE ? DEFAULT_DEMO_ADDR : '');
 if (DEMO_MODE) {
   if (!DEMO_ADDR || !DEMO_ADDR.startsWith('sent1')) {
     console.error('[demo] DEMO=true requires DEMO_ADDR=sent1... (operator address to display).');
@@ -88,6 +93,24 @@ if (DEMO_MODE) {
     process.exit(1);
   }
   console.log(`[demo] Read-only mode enabled — mounted on ${DEMO_ADDR}. Writes return 403.`);
+}
+
+// ─── Boot Pre-flight ──────────────────────────────────────────────────────────
+// Warn about partial Privy config at boot — the email login card mounts but
+// /api/wallet/privy-login returns 503, leaving users stuck staring at "send
+// code did nothing" with no clue why. Catch it here, in the startup log,
+// where ops actually look.
+{
+  const privyVars = [
+    ['PRIVY_APP_ID', process.env.PRIVY_APP_ID],
+    ['PRIVY_APP_SECRET', process.env.PRIVY_APP_SECRET],
+    ['PRIVY_CLIENT_ID', process.env.PRIVY_CLIENT_ID],
+  ];
+  const set = privyVars.filter(([, v]) => v && v.trim());
+  if (set.length > 0 && set.length < 3) {
+    const missing = privyVars.filter(([, v]) => !v || !v.trim()).map(([k]) => k).join(', ');
+    console.warn(`[privy] Partial config: ${set.length}/3 vars set. Missing: ${missing}. Email login will fail until all three are set or all three are empty.`);
+  }
 }
 
 const app = express();
@@ -3778,6 +3801,16 @@ const HOST = process.env.HOST || '0.0.0.0';
 const server = app.listen(PORT, HOST, () => {
   const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
   console.log(`Plan Manager running on http://${displayHost}:${PORT} (bound to ${HOST})`);
+});
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[boot] Port ${PORT} is already in use.`);
+    console.error('       Another Plan Manager (or unrelated process) is bound to that port.');
+    console.error(`       Fix: stop the other process, or set PORT=<free port> in .env, then retry.`);
+    process.exit(1);
+  }
+  console.error('[boot] Server failed to start:', err);
+  process.exit(1);
 });
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
