@@ -810,7 +810,8 @@ async function _getPlanStatsImpl(planId) {
   // Subscription samples are only used as a last-resort fallback when the plan
   // record didn't load — pricing must NOT silently fall back to zero just
   // because the plan has no subscribers yet.
-  const planPrice = Array.isArray(planRecord?.prices) ? planRecord.prices[0] : null;
+  const planPrices = Array.isArray(planRecord?.prices) ? planRecord.prices : [];
+  const planPrice = planPrices[0] || null;
   const price = planPrice
     ? { denom: planPrice.denom, quote_value: planPrice.quote_value, base_value: planPrice.base_value }
     : (sample?.price || { denom: 'udvpn', quote_value: '0', base_value: '0' });
@@ -856,6 +857,12 @@ async function _getPlanStatsImpl(planId) {
       baseValue: price.base_value,
       dvpnAmount: price.denom === 'udvpn' ? (quoteNum / 1e6) : null,
     },
+    prices: planPrices.map(p => ({
+      denom: p.denom,
+      quoteValue: p.quote_value,
+      baseValue: p.base_value,
+      dvpnAmount: p.denom === 'udvpn' ? (parseInt(p.quote_value || '0') / 1e6) : null,
+    })),
     renewalPolicy,
     activeSubs,
     inactiveSubs,
@@ -2018,8 +2025,42 @@ app.get('/api/my-plans', async (req, res) => {
 app.post('/api/plan/create', async (req, res) => {
   if (!requireWallet(req, res)) return;
   try {
-    const { durationSeconds, gigabytes, priceDenom, priceQuoteValue, priceBaseValue, isPrivate } = req.body;
+    const {
+      durationSeconds,
+      gigabytes,
+      // New shape: prices is an array of {denom, amount} in micro units
+      prices: pricesIn,
+      // Legacy single-denom params (still supported)
+      priceDenom, priceQuoteValue, priceBaseValue,
+      isPrivate,
+    } = req.body;
     if (!durationSeconds || !gigabytes) return res.status(400).json({ error: 'durationSeconds and gigabytes required' });
+
+    // Build the Coin array the chain expects:
+    //   { denom, base_value, quote_value }
+    // base_value is the per-byte rate the chain uses for partial settlements;
+    // we keep the v3 default ("0.003…") unless an explicit override is passed.
+    const DEFAULT_BASE = '0.003000000000000000';
+    let prices;
+    if (Array.isArray(pricesIn) && pricesIn.length > 0) {
+      prices = pricesIn.map(p => {
+        if (!p || !p.denom || p.amount == null) {
+          throw new Error('each prices[] entry needs {denom, amount}');
+        }
+        return {
+          denom: String(p.denom),
+          base_value: String(p.base_value || DEFAULT_BASE),
+          quote_value: String(p.amount),
+        };
+      });
+    } else {
+      // Legacy fallback path
+      prices = [{
+        denom: priceDenom || 'udvpn',
+        base_value: priceBaseValue || DEFAULT_BASE,
+        quote_value: String(priceQuoteValue || '1000000'),
+      }];
+    }
 
     const bytesStr = String(BigInt(gigabytes) * 1000000000n);
 
@@ -2030,16 +2071,13 @@ app.post('/api/plan/create', async (req, res) => {
         from: getProvAddr(),
         bytes: bytesStr,
         duration: parseInt(durationSeconds),
-        prices: [{
-          denom: priceDenom || 'udvpn',
-          base_value: priceBaseValue || '0.003000000000000000',
-          quote_value: String(priceQuoteValue || '1000000'),
-        }],
+        prices,
         isPrivate: isPrivate || false,
       },
     };
 
-    console.log(`Creating plan (v3): ${gigabytes}GB (${bytesStr} bytes), ${durationSeconds}s, quote=${priceQuoteValue} ${priceDenom || 'udvpn'}...`);
+    const priceSummary = prices.map(p => `${p.quote_value}${p.denom}`).join(',');
+    console.log(`Creating plan (v3): ${gigabytes}GB (${bytesStr} bytes), ${durationSeconds}s, prices=[${priceSummary}]...`);
     const result = await safeBroadcast([msg]);
     const resp = txResponse(result);
     if (!resp.ok) {
