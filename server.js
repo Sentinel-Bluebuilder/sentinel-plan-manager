@@ -66,6 +66,30 @@ const DATA_DIR = process.env.DATA_DIR || __dirname;
 try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 initSession(DATA_DIR);
 
+// ─── Demo Mode ────────────────────────────────────────────────────────────────
+// Read-only browse: any visitor sees the UI mounted on a watch-only address
+// without supplying a mnemonic. Every TX-broadcasting endpoint returns 403.
+// Set DEMO_ADDR to any sent1... operator address you want visitors to view.
+const DEMO_MODE = String(process.env.DEMO || '').toLowerCase() === 'true';
+const DEMO_ADDR = (process.env.DEMO_ADDR || '').trim();
+if (DEMO_MODE) {
+  if (!DEMO_ADDR || !DEMO_ADDR.startsWith('sent1')) {
+    console.error('[demo] DEMO=true requires DEMO_ADDR=sent1... (operator address to display).');
+    process.exit(1);
+  }
+  // Validate bech32 checksum so a typo fails fast at boot instead of crashing
+  // on first request (keplrSessionFromAddress throws on invalid checksum).
+  try {
+    const { fromBech32 } = await import('@cosmjs/encoding');
+    const { prefix } = fromBech32(DEMO_ADDR);
+    if (prefix !== 'sent') throw new Error(`expected sent prefix, got ${prefix}`);
+  } catch (err) {
+    console.error(`[demo] DEMO_ADDR is not a valid sentinel address: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`[demo] Read-only mode enabled — mounted on ${DEMO_ADDR}. Writes return 403.`);
+}
+
 const app = express();
 app.use(express.json({ limit: '32kb' }));
 // Suppress fingerprinting header.
@@ -135,10 +159,19 @@ app.use(express.static(join(__dirname, 'public'), {
 // the rest of the request chain inside that session's AsyncLocalStorage
 // context. Handlers call `getAddr()` / `getSigningClient()` as before;
 // those helpers automatically resolve to the per-request wallet.
+//
+// In DEMO_MODE, every request without a real auth cookie is mounted on the
+// configured DEMO_ADDR as a watch-only session (kind: 'demo'). The write
+// gate below rejects POST/PUT/DELETE before any TX can be broadcast.
 app.use(async (req, res, next) => {
   const cookies = parseCookies(req.headers.cookie);
   const mnemonicToken = cookies[COOKIE_NAME];
   const keplrToken = cookies[KEPLR_COOKIE_NAME];
+
+  if (DEMO_MODE && !mnemonicToken && !keplrToken) {
+    const session = keplrSessionFromAddress(DEMO_ADDR, null, 'demo');
+    return runWithSession(session, () => next());
+  }
 
   if (mnemonicToken) {
     try {
@@ -172,6 +205,15 @@ app.use(async (req, res, next) => {
   }
 
   next();
+});
+
+// ─── Demo Write Gate ──────────────────────────────────────────────────────────
+// Demo sessions can read but not write. Reject any state-changing method
+// (POST/PUT/DELETE/PATCH) with a clear 403 so the UI can surface a banner.
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  if (currentSession()?.kind !== 'demo') return next();
+  return res.status(403).json({ error: 'Demo mode is read-only — clone the repo and set MNEMONIC to make transactions.', demo: true });
 });
 
 // ─── Plan ID Persistence ──────────────────────────────────────────────────────
@@ -1089,7 +1131,13 @@ setInterval(() => {
 }, 60_000).unref();
 
 app.get('/api/wallet/status', (req, res) => {
-  res.json({ loaded: !!getAddr(), address: getAddr() || null, multiUser: isMultiUser() });
+  const isDemo = currentSession()?.kind === 'demo';
+  res.json({
+    loaded: !!getAddr(),
+    address: getAddr() || null,
+    multiUser: isMultiUser(),
+    demo: isDemo,
+  });
 });
 
 app.post('/api/wallet/generate', rateLimit('wgen', 10, 60_000), async (req, res) => {

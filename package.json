@@ -40,6 +40,9 @@
     "rpc"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@cosmjs/encoding": "^0.38.1",
     "@cosmjs/proto-signing": "^0.32.4",

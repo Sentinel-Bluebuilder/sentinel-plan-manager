@@ -1222,6 +1222,31 @@ html[data-theme="light"] .explorer-link { border-bottom-color: rgba(10,14,30,0.1
 }
 html[data-theme="light"] .topbar { background: rgba(246, 247, 251, 0.82); }
 
+.demo-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 28px;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.06));
+  border-bottom: 1px solid rgba(245, 158, 11, 0.32);
+  font-size: 13px; color: var(--text);
+}
+.demo-banner-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+  flex: 0 0 auto;
+}
+.demo-banner-text { flex: 1; min-width: 0; line-height: 1.5; }
+.demo-banner-text code {
+  background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 4px;
+  font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+html[data-theme="light"] .demo-banner-text code { background: rgba(0,0,0,0.06); }
+.demo-banner-cta {
+  flex: 0 0 auto;
+  font-size: 13px; font-weight: 600; color: #f59e0b;
+  text-decoration: none; white-space: nowrap;
+}
+.demo-banner-cta:hover { text-decoration: underline; }
+
 .topbar-title {
   font-size: 16px;
   font-weight: 600;
@@ -4801,6 +4826,13 @@ button.fiat-rail-tile:hover {
         </button>
       </div>
     </header>
+    <div id="demoBanner" class="demo-banner" style="display:none">
+      <div class="demo-banner-dot"></div>
+      <div class="demo-banner-text">
+        <strong>Demo mode</strong> — read-only preview on a public operator. Clone the repo and set <code>MNEMONIC</code> in <code>.env</code> to run your own.
+      </div>
+      <a class="demo-banner-cta" href="https://github.com/Sentinel-Bluebuilder/sentinel-plan-manager" target="_blank" rel="noopener">Get the source →</a>
+    </div>
     <div id="app">
       <div class="loading-state"><div class="loading-spinner"></div><div class="loading-text">Connecting to Sentinel network...</div></div>
     </div>
@@ -5668,6 +5700,8 @@ async function loadWallet() {
       S.wallet = d;
       S.dvpnPrice = d.dvpnPriceUsd;
       if (typeof d.multiUser === 'boolean') S.multiUser = d.multiUser;
+      const demoBanner = $('demoBanner');
+      if (demoBanner) demoBanner.style.display = d.kind === 'demo' ? 'flex' : 'none';
       walletAddress = d.address || '';
       ADDR_SHORT = walletAddress ? walletAddress.slice(0, 10) + '...' + walletAddress.slice(-6) : '?';
       if (walletAddress) {

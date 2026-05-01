@@ -5,11 +5,16 @@ wallet.json
 .session-key
 my-plans.json
 nodes-cache.json
+privy-wallets.json
 sellers.json
 an.json
 server.log
 boot.log
 *.log
+.servererr.txt
+.serverlog.txt
+.serverlog.err.txt
+social/
 *.jpg
 *.png
 CLAUDE.md
