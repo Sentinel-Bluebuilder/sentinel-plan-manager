@@ -49,17 +49,19 @@ See [PLANS.md](./PLANS.md) for the full breakdown: plan lifecycle, plan-based vs
 
 ### Just want to look around?
 
-Boot a read-only demo mounted on any operator address — no wallet, no tokens, no commitment. Every TX-broadcasting endpoint returns 403 so nothing can be signed by accident.
+Boot a read-only demo mounted on a real mainnet operator — no wallet, no tokens, no commitment. Every TX-broadcasting endpoint returns 403 so nothing can be signed by accident.
 
 ```bash
 git clone https://github.com/Sentinel-Bluebuilder/sentinel-plan-manager.git
 cd sentinel-plan-manager
 npm install
-DEMO=true DEMO_ADDR=sent1...operator-address... npm start
+npm run demo
 # → http://localhost:3003 with a demo banner across the top
 ```
 
-Pick any plan-creating operator address from a chain explorer, paste it into `DEMO_ADDR`, and the dashboard renders that operator's plans, nodes, and subscribers.
+`npm run demo` mounts a curated default operator (47 active subscribers, 731 linked nodes) so the dashboard renders fully populated out of the box. To inspect a different operator, set `DEMO_ADDR=sent1...` from any chain explorer and re-run.
+
+Stuck? Run `npm run doctor` for an environment health check.
 
 ### Run your own — Option A: clone
 

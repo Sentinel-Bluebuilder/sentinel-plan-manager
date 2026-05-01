@@ -9,6 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "cli": "node cli.js",
+    "demo": "node scripts/demo.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "build:vendor": "node scripts/bundle-vendor.mjs",
     "postinstall": "node scripts/bundle-vendor.mjs",
     "test:e2e": "node scripts/test-e2e.mjs",
