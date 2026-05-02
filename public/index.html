@@ -1730,24 +1730,38 @@ html[data-theme="light"] .plan-card:hover {
 .your-plans-empty {
   background: var(--surface);
   border: 1px dashed var(--border);
-  border-radius: 16px;
-  padding: 56px 24px;
+  border-radius: 22px;
+  padding: 88px 32px;
   text-align: center;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  max-width: 540px; margin: 0 auto;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  max-width: 760px; margin: 56px auto 0;
 }
 .your-plans-empty-icon {
-  width: 64px; height: 64px; border-radius: 16px;
+  width: 96px; height: 96px; border-radius: 24px;
   display: flex; align-items: center; justify-content: center;
   background: var(--accent-dim); color: var(--accent);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
+.your-plans-empty-icon svg { width: 52px; height: 52px; }
 .your-plans-empty-title {
-  font-size: 18px; font-weight: 700; color: var(--text);
+  font-size: 26px; font-weight: 700; letter-spacing: -0.4px; color: var(--text);
 }
 .your-plans-empty-sub {
-  font-size: 13.5px; color: var(--text-muted); max-width: 380px;
+  font-size: 15.5px; line-height: 1.55; color: var(--text-muted); max-width: 520px;
 }
+
+/* Scaled-up Register Provider card */
+.provider-register-scope .card-header { padding: 22px 24px; }
+.provider-register-scope .card-body { padding: 24px; }
+.provider-register-scope .card-title { font-size: 19px; }
+.provider-register-scope .step-circle { width: 30px; height: 30px; font-size: 14px; }
+.provider-register-scope .mono-tag { font-size: 12px; padding: 5px 10px; }
+.provider-register-scope .input-group { margin-bottom: 16px; }
+.provider-register-scope .input-label { font-size: 13.5px; margin-bottom: 7px; }
+.provider-register-scope .input { font-size: 15px; padding: 12px 14px; }
+.provider-register-scope .btn-primary { font-size: 15px; padding: 14px 22px; }
+.provider-register-scope .btn-cost { font-size: 12.5px; }
+.provider-register-scope .btn-foot { font-size: 13px; margin-top: 10px; }
 
 @media (max-width: 1080px) {
   .your-plans-summary { grid-template-columns: repeat(2, 1fr); }
@@ -2586,7 +2600,7 @@ html[data-theme="light"] .plan-card:hover {
   align-items: flex-start;
   gap: 14px;
   padding: 12px 16px;
-  margin: 0 0 14px;
+  margin: 48px 0 14px;
   background: rgba(0, 200, 83, 0.06);
   border: 1px solid rgba(0, 200, 83, 0.28);
   border-radius: var(--radius-sm);
@@ -3966,14 +3980,14 @@ html[data-theme="light"] .modal-backdrop { background: rgba(230, 233, 243, 0.7);
   filter: blur(8px);
 }
 .identity-required-icon {
-  width: 56px; height: 56px;
-  border-radius: 16px;
-  margin: 0 auto 14px;
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  margin: 0 auto 10px;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent) 6%, transparent));
   color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 4px 12px -6px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .identity-required-eyebrow {
   font-size: 11px;
@@ -3984,33 +3998,33 @@ html[data-theme="light"] .modal-backdrop { background: rgba(230, 233, 243, 0.7);
   margin-bottom: 8px;
 }
 .identity-required-title {
-  font-size: 22px;
+  font-size: 17px;
   font-weight: 700;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.3px;
   color: var(--text);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .identity-required-lead {
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text-dim);
-  max-width: 440px;
-  margin: 0 auto 20px;
+  max-width: 380px;
+  margin: 0 auto 14px;
 }
 .identity-required-chips {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
-  margin-bottom: 24px;
+  gap: 6px;
+  margin-bottom: 16px;
 }
 .identity-required-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 5px;
+  padding: 4px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--text-dim);
   background: var(--bg);
@@ -4021,11 +4035,12 @@ html[data-theme="light"] .modal-backdrop { background: rgba(230, 233, 243, 0.7);
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 20px;
+  padding: 9px 18px;
+  font-size: 13.5px;
 }
 .identity-required-meta {
-  margin-top: 14px;
-  font-size: 12px;
+  margin-top: 10px;
+  font-size: 11.5px;
   color: var(--text-dim);
   opacity: 0.8;
 }
@@ -7754,7 +7769,7 @@ function renderProvider() {
         : 'A one-time on-chain identity for your operator account. Required before you can publish subscription plans.'}</div>
     </div>
 
-    <div class="page-create-grid" style="display:grid;grid-template-columns:minmax(0,1fr);gap:14px;max-width:640px;margin:0 auto">
+    <div class="page-create-grid provider-register-scope" style="display:grid;grid-template-columns:minmax(0,1fr);gap:14px;max-width:760px;margin:56px auto 0">
       <div class="card">
         <div class="card-header">
           <div style="display:flex;align-items:center;gap:10px">
@@ -7840,14 +7855,14 @@ function renderCreate() {
         <div class="page-hero-eyebrow">Plan Manager · Plan Creation</div>
         <div class="page-hero-title">Register your provider first</div>
       </div>
-      <div class="card identity-required-card" style="max-width:580px;margin:0 auto;text-align:center;position:relative;overflow:hidden">
+      <div class="card identity-required-card" style="max-width:460px;margin:48px auto 0;text-align:center;position:relative;overflow:hidden">
         <div class="identity-required-glow" aria-hidden="true"></div>
-        <div class="card-body" style="padding:34px 28px 30px;position:relative">
+        <div class="card-body" style="padding:56px 22px 28px;position:relative">
           <div class="identity-required-icon" aria-hidden="true">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           </div>
           <div class="identity-required-title">Provider Identity required</div>
-          <p class="identity-required-lead">Set your operator name, description, and contact — this is the public face subscribers see in apps that browse Sentinel plans.</p>
+          <p class="identity-required-lead">Set your operator name, description, and contact — the public face subscribers see when browsing Sentinel plans.</p>
           <div class="identity-required-chips" role="list">
             <span class="identity-required-chip" role="listitem">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
