@@ -494,7 +494,7 @@ body.boot-pending::before {
 .import-note strong { color: var(--text-dim); font-weight: 600; }
 
 /* ─── Privy email pane ─────────────────────────────────────────────────── */
-#privyPane { padding-top: 48px; }
+#privyPane .privy-header { margin-top: 40px; }
 .privy-header {
   display: flex; align-items: center; gap: 12px;
   margin-bottom: 14px;
@@ -5619,9 +5619,9 @@ button.fiat-rail-tile:hover {
       <!-- Create pane -->
       <div id="createPane" style="display:none">
         <!-- Step 1: generate -->
-        <div id="createStep1">
-          <div class="import-form-title">Create a new account</div>
-          <div class="import-form-sub">
+        <div id="createStep1" style="text-align:center">
+          <div class="import-form-title" style="margin-top:16px">Create a new account</div>
+          <div class="import-form-sub" style="max-width:440px;margin-left:auto;margin-right:auto">
             We'll generate a 24-word mnemonic for your account. The phrase is encrypted with AES-256-GCM and stored in an httpOnly cookie scoped to your browser — it is never written to the server's disk. <strong>Write the phrase down before you continue.</strong> If you lose it, the wallet and any funds are gone forever.
           </div>
           <button class="import-btn" id="generateBtn" onclick="doGenerateWallet()">Generate 24-word mnemonic</button>
