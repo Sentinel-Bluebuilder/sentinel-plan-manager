@@ -493,6 +493,111 @@ body.boot-pending::before {
 }
 .import-note strong { color: var(--text-dim); font-weight: 600; }
 
+/* ─── Privy email pane ─────────────────────────────────────────────────── */
+.privy-header {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 14px;
+}
+.privy-header-icon {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px;
+  background: rgba(30,136,229,0.10);
+  border: 1px solid rgba(30,136,229,0.22);
+  color: var(--accent);
+}
+.privy-header-icon svg { width: 20px; height: 20px; }
+.privy-header-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.privy-header-title {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.1px; line-height: 1.25;
+}
+.privy-header-sub {
+  font-size: 11.5px; color: var(--text-dim); line-height: 1.5;
+}
+.privy-step-row {
+  display: flex; gap: 10px;
+  padding: 10px 12px; margin-bottom: 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.privy-step {
+  flex: 1; display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11px; color: var(--text-dim); line-height: 1.4;
+}
+.privy-step-num {
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: rgba(30,136,229,0.14); color: var(--accent);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  margin-top: 1px;
+}
+.privy-mount-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  background: var(--bg-card-solid, var(--bg-input));
+}
+.privy-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 12px;
+  font-size: 10.5px; color: var(--text-muted);
+  font-family: var(--font-mono); letter-spacing: 0.04em;
+}
+.privy-footer-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+.privy-footer-badge svg { width: 11px; height: 11px; }
+.privy-footer-link { color: var(--text-dim); text-decoration: none; }
+.privy-footer-link:hover { color: var(--accent); }
+
+/* ─── Cost-info card (replaces dense .import-note paragraph) ──────────── */
+.cost-card {
+  display: grid; grid-template-columns: auto 1fr; gap: 10px 12px;
+  align-items: start;
+  padding: 12px 14px;
+  margin-top: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.cost-card-icon {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: rgba(30,136,229,0.10);
+  border: 1px solid rgba(30,136,229,0.22);
+  color: var(--accent);
+}
+.cost-card-icon svg { width: 14px; height: 14px; }
+.cost-card-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cost-card-title {
+  font-family: var(--font-display);
+  font-size: 12px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.1px;
+}
+.cost-card-list {
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 11px; color: var(--text-dim); line-height: 1.5;
+}
+.cost-card-row { display: flex; justify-content: space-between; gap: 12px; }
+.cost-card-row span:first-child { color: var(--text-muted); }
+.cost-card-row span:last-child { color: var(--text-dim); font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; }
+.cost-card-foot {
+  font-size: 10.5px; color: var(--text-muted); line-height: 1.45;
+  padding-top: 6px; border-top: 1px dashed var(--border);
+}
+.cost-card-foot strong { color: var(--text-dim); font-weight: 600; }
+
 /* ─── Auth-method chooser (4 cards) ───────────────────────────────────── */
 .auth-chooser {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
@@ -5446,12 +5551,36 @@ button.fiat-rail-tile:hover {
       <!-- Privy / email pane -->
       <div id="privyPane" style="display:none">
         <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
-        <div class="import-form-title">Sign in with email</div>
-        <div class="import-form-sub">
-          Enter your email. Privy will send a one-time code, then create or unlock an embedded Sentinel wallet for your account. Powered by <a href="https://privy.io" target="_blank" rel="noopener" style="color:var(--accent)">Privy</a>.
+
+        <div class="privy-header">
+          <div class="privy-header-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
+          </div>
+          <div class="privy-header-text">
+            <div class="privy-header-title">Sign in with email</div>
+            <div class="privy-header-sub">An embedded Sentinel wallet is created or unlocked for your account.</div>
+          </div>
         </div>
-        <div id="privyMount"></div>
+
+        <div class="privy-step-row" role="list">
+          <div class="privy-step" role="listitem"><span class="privy-step-num">1</span><span>Enter email</span></div>
+          <div class="privy-step" role="listitem"><span class="privy-step-num">2</span><span>Receive a one-time code</span></div>
+          <div class="privy-step" role="listitem"><span class="privy-step-num">3</span><span>Wallet ready</span></div>
+        </div>
+
+        <div class="privy-mount-wrap">
+          <div id="privyMount"></div>
+        </div>
+
         <div class="import-error" id="privyError"></div>
+
+        <div class="privy-footer">
+          <span class="privy-footer-badge" title="Embedded wallet provider">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Powered by Privy
+          </span>
+          <a class="privy-footer-link" href="https://privy.io" target="_blank" rel="noopener">privy.io ↗</a>
+        </div>
       </div>
 
       <!-- Recovery phrase pane (was: Import pane) -->
@@ -5523,9 +5652,20 @@ button.fiat-rail-tile:hover {
         </div>
       </div>
 
-      <div class="import-note">
-        <strong>You will need P2P tokens.</strong> Plan creation costs ~0.5 P2P, linking ~1–2 P2P per node.
-        A freshly funded operator wallet with 8 P2P covers the full first-run flow.
+      <div class="cost-card" role="note" aria-label="Wallet funding requirements">
+        <div class="cost-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10"/><path d="M9 10h4.5a1.5 1.5 0 0 1 0 3H9"/><path d="M9 13h5a1.5 1.5 0 0 1 0 3H9"/></svg>
+        </div>
+        <div class="cost-card-body">
+          <div class="cost-card-title">You will need P2P tokens</div>
+          <div class="cost-card-list">
+            <div class="cost-card-row"><span>Create a plan</span><span>~0.5 P2P</span></div>
+            <div class="cost-card-row"><span>Link a node</span><span>~1–2 P2P</span></div>
+          </div>
+          <div class="cost-card-foot">
+            <strong>8 P2P</strong> covers a typical first-run flow.
+          </div>
+        </div>
       </div>
     </div>
   </div>
