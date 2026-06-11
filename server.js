@@ -1745,11 +1745,16 @@ app.get('/api/wallet', async (req, res) => {
         // Read-only — go straight to the RPC query client so Keplr/Privy
         // sessions (which have no signing client; getClient() throws
         // 'client-signs') can still fetch their balance. Falls back to the
-        // signing client if RPC is unavailable.
-        const rpc = await getRpcClient();
-        if (rpc) return rpcQueryBalance(rpc, getAddr(), 'udvpn');
-        const client = await getSigningClient();
-        return client.getBalance(getAddr(), 'udvpn');
+        // LCD if RPC is unavailable.
+        try {
+          const rpc = await getRpcClient();
+          if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
+        } catch (e) {
+          console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
+        }
+        const data = await lcd(`/cosmos/bank/v1beta1/balances/${getAddr()}`);
+        const bal = data.balances?.find(b => b.denom === 'udvpn');
+        return { denom: 'udvpn', amount: bal ? bal.amount : '0' };
       }),
       getDvpnPrice(),
       cached(`provider:${getAddr()}`, 600_000, async () => {
@@ -1968,8 +1973,15 @@ app.get('/api/my-plans', async (req, res) => {
 
     const [bal, ...myPlanResults] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
-        const client = await getSigningClient();
-        return client.getBalance(getAddr(), 'udvpn');
+        try {
+          const rpc = await getRpcClient();
+          if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
+        } catch (e) {
+          console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
+        }
+        const data = await lcd(`/cosmos/bank/v1beta1/balances/${getAddr()}`);
+        const bal = data.balances?.find(b => b.denom === 'udvpn');
+        return { denom: 'udvpn', amount: bal ? bal.amount : '0' };
       }),
       // Resolve to {ok, planId, stats?, err?} so we never silently drop a
       // plan when stats fail. The UI gets a stub row with the planId so the
@@ -2065,7 +2077,6 @@ app.post('/api/plan/create', async (req, res) => {
 
     const bytesStr = String(BigInt(gigabytes) * 1000000000n);
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_CREATE_PLAN_TYPE,
       value: {
@@ -2148,7 +2159,6 @@ app.post('/api/plan/status', async (req, res) => {
     const ownErr = await assertPlanOwnership(planId);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_UPDATE_PLAN_STATUS_TYPE,
       value: { from: getProvAddr(), id: BigInt(planId), status: parseInt(status) },
@@ -2205,7 +2215,6 @@ app.post('/api/plan/subscribe', async (req, res) => {
     const { planId, denom, renewalPolicy } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_START_SUBSCRIPTION_TYPE,
       value: {
@@ -2251,7 +2260,6 @@ app.post('/api/plan/start-session', async (req, res) => {
     const { subscriptionId, nodeAddress } = req.body;
     if (!subscriptionId || !nodeAddress) return res.status(400).json({ error: 'subscriptionId and nodeAddress required' });
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_SUB_START_SESSION_TYPE,
       value: {
@@ -2492,7 +2500,6 @@ app.post('/api/plan-manager/link', async (req, res) => {
     const ownErr = await assertPlanOwnership(planId);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
-    await getSigningClient();
     const linkMsg = {
       typeUrl: C.MSG_LINK_TYPE,
       value: { from: getProvAddr(), id: BigInt(planId), nodeAddress },
@@ -2569,7 +2576,6 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     const addrs = [...new Set(nodeAddresses)];
     console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
 
-    await getSigningClient();
 
     const linkMsgs = addrs.map(addr => ({
       typeUrl: C.MSG_LINK_TYPE,
@@ -2650,7 +2656,6 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
     const ownErr = await assertPlanOwnership(planId);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_UNLINK_TYPE,
       value: { from: getProvAddr(), id: BigInt(planId), nodeAddress },
@@ -2698,7 +2703,6 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
     const addrs = [...new Set(nodeAddresses)];
     console.log(`\n[BATCH-UNLINK] ${addrs.length} nodes from plan ${planId}`);
 
-    await getSigningClient();
     const msgs = addrs.map(addr => ({
       typeUrl: C.MSG_UNLINK_TYPE,
       value: { from: getProvAddr(), id: BigInt(planId), nodeAddress: addr },
@@ -2755,7 +2759,6 @@ app.post('/api/lease/start', async (req, res) => {
     const quoteValue = String(nodePrice.quote_value ?? nodePrice.quoteValue);
     console.log(`[LEASE] Node price: ${nodePrice.denom} base=${baseValue} quote=${quoteValue}`);
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_START_LEASE_TYPE,
       value: {
@@ -2805,7 +2808,6 @@ app.post('/api/lease/end', async (req, res) => {
     const { leaseId } = req.body;
     if (!leaseId) return res.status(400).json({ error: 'leaseId required' });
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_END_LEASE_TYPE,
       value: { from: getProvAddr(), id: BigInt(leaseId) },
@@ -2846,7 +2848,6 @@ app.post('/api/provider/register', async (req, res) => {
     const { name, identity, website, description } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
 
-    await getSigningClient();
 
     let alreadyExists = false;
     // RPC-first: direct lookup by sentprov address — exact match, no substring heuristic.
@@ -2935,7 +2936,6 @@ app.post('/api/provider/status', async (req, res) => {
     const { status } = req.body;
     if (!status) return res.status(400).json({ error: 'status required (1=active, 2=inactive_pending, 3=inactive)' });
 
-    await getSigningClient();
     const msg = {
       typeUrl: C.MSG_UPDATE_PROVIDER_STATUS_TYPE,
       value: { from: getProvAddr(), status: parseInt(status) },
