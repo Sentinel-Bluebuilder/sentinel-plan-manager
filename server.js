@@ -44,6 +44,7 @@ import {
   rpcQueryFeeGrants,
   rpcQueryFeeGrantsIssued,
   rpcQueryPlan,
+  rpcQueryPlansForProvider,
   rpcQueryProvider,
   rpcQueryBalance,
   KeplrSignRequiredError,
@@ -421,6 +422,46 @@ async function filterOwnedPlanIds(planIds) {
       dropMyPlanIds(foreign);
     }
     return kept.sort((a, b) => a - b);
+  });
+}
+
+// ─── Chain-Side Plan Discovery ────────────────────────────────────────────────
+// my-plans.json only learns about plans created through THIS app. Plans the
+// wallet created elsewhere (CLI, another Plan Manager install) would be
+// invisible after login, so on every /api/my-plans read we also ask the chain
+// for ALL plans under our provider address (active + inactive — a wallet can
+// manage many) and merge any unknown IDs into the local ledger. Linked nodes
+// then flow automatically: getPlanStats resolves them per plan ID via
+// rpcQueryNodesForPlan. RPC-first, LCD fallback, and never fatal — on total
+// failure the route still serves the local ledger.
+async function discoverChainPlans() {
+  const myProv = getProvAddr();
+  if (!myProv) return [];
+  return cached(`planDiscovery:${myProv}`, 60_000, async () => {
+    let plans = null;
+    try {
+      const client = await getRpcClient();
+      if (client) plans = await rpcQueryPlansForProvider(client, myProv);
+    } catch (e) {
+      console.warn(`[discovery] RPC plans-for-provider failed: ${e.message}`);
+    }
+    if (!plans) {
+      try {
+        const data = await lcd(`/sentinel/plan/v3/providers/${myProv}/plans?pagination.limit=1000`);
+        plans = data.plans || [];
+      } catch (e) {
+        console.warn(`[discovery] LCD plans-for-provider failed: ${e.message} — using local ledger only`);
+        return [];
+      }
+    }
+    const ids = plans.map((p) => Number(p.id)).filter(Number.isFinite);
+    const known = new Set(loadMyPlanIds().map(Number));
+    const fresh = ids.filter((id) => !known.has(id));
+    if (fresh.length) {
+      console.log(`[discovery] Found ${fresh.length} on-chain plan(s) not in my-plans.json for ${myProv}: ${fresh.join(', ')}`);
+      fresh.forEach(saveMyPlanId);
+    }
+    return ids;
   });
 }
 
@@ -1963,6 +2004,9 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
 app.get('/api/my-plans', async (req, res) => {
   if (!requireWallet(req, res)) return;
   try {
+    // Merge plans created outside this app (chain is the source of truth)
+    // into my-plans.json before reading the ledger. Cached 60s; never throws.
+    await discoverChainPlans();
     const rawPlanIds = loadMyPlanIds();
     // RPC ownership filter: drop any plan whose `prov_address` ≠ our
     // current sentprov address. Stale entries (e.g. plans created from a
