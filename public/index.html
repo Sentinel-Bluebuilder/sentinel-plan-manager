@@ -6503,6 +6503,25 @@ window.addEventListener('popstate', (e) => {
   }
 });
 
+// ─── Foreground balance refresh ──────────────────────────────────────────────
+// The on-chain balance can move while the tab is hidden (sends from Keplr,
+// subscriptions from other apps). When the page returns to the foreground,
+// bypass the wallet cache and re-read the chain so every balance surface —
+// sidebar, topbar pill, wallet page — shows the current figure.
+let _lastForegroundRefreshTs = 0;
+function refreshBalanceOnForeground() {
+  if (document.visibilityState !== 'visible') return;
+  if (!S.wallet || !S.wallet.address) return; // not logged in — nothing to refresh
+  const now = Date.now();
+  if (now - _lastForegroundRefreshTs < 5_000) return; // debounce rapid tab flips
+  _lastForegroundRefreshTs = now;
+  invalidateCache('/api/wallet');
+  loadWallet().catch((e) => console.warn('[foreground] balance refresh failed:', e.message));
+}
+document.addEventListener('visibilitychange', refreshBalanceOnForeground);
+// Alt-tab between apps often leaves visibilityState 'visible'; focus catches it.
+window.addEventListener('focus', refreshBalanceOnForeground);
+
 // ─── Delegated navigation click handler ──────────────────────────────────────
 // Replaces all inline onclick="navigate('x')" attributes.
 document.addEventListener('click', (e) => {
@@ -6762,6 +6781,17 @@ async function loadWallet() {
           pill.style.display = 'none';
         }
       }
+      // Wallet-page figures refresh in place — re-rendering the whole page
+      // here would wipe a half-typed send form on a foreground refresh.
+      if (S.page === 'wallet') {
+        const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+        set('wpBalP2p', fmtExact(d.balanceDvpn));
+        set('wpBalUsd', d.balanceUsd ? fmtUsd(d.balanceUsd) : '—');
+        set('wpSendSrcBal', fmtExact(d.balanceDvpn) + ' P2P');
+        set('wpDetailBalP2p', fmtExact(d.balanceDvpn) + ' P2P');
+        set('wpDetailBalUsd', d.balanceUsd ? fmtUsd(d.balanceUsd) : '');
+        set('wpDetailBalUdvpn', d.balanceUdvpn != null ? Number(d.balanceUdvpn).toLocaleString() : '—');
+      }
     };
     const { data: d } = await cachedFetch('/api/wallet', 30_000, (fresh) => { updateUI(fresh); });
     updateUI(d);
@@ -6796,14 +6826,14 @@ function renderWalletPage() {
   const balUdvpn = w.balanceUdvpn != null ? Number(w.balanceUdvpn).toLocaleString() : '—';
   const copyIconSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
   const detailsRow = (label, value, opts = {}) => {
-    const { mono = false, copy = null, sub = '' } = opts;
+    const { mono = false, copy = null, sub = '', id = null, subId = null } = opts;
     const valHtml = value
-      ? `<span class="${mono ? 'mono-inline' : ''}" style="word-break:break-all">${escapeHtml(value)}</span>`
+      ? `<span${id ? ` id="${id}"` : ''} class="${mono ? 'mono-inline' : ''}" style="word-break:break-all">${escapeHtml(value)}</span>`
         + (copy ? `<button class="wallet-addr-copy" title="Copy" onclick="copyToClipboard('${escapeAttr(copy)}', this)">${copyIconSvg}</button>` : '')
       : '<span style="color:var(--text-dim)">—</span>';
     return `<div class="wallet-detail-row">
       <div class="wallet-detail-label">${label}</div>
-      <div class="wallet-detail-value">${valHtml}${sub ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(sub)}</div>` : ''}</div>
+      <div class="wallet-detail-value">${valHtml}${sub ? `<div${subId ? ` id="${subId}"` : ''} style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(sub)}</div>` : ''}</div>
     </div>`;
   };
 
@@ -6817,8 +6847,8 @@ function renderWalletPage() {
     <div class="wallet-stats">
       <div class="stat-card">
         <div class="stat-label">Available balance</div>
-        <div class="stat-value">${fmtExact(balDvpn)} <span style="font-size:13px;color:var(--text-dim);font-weight:500;margin-left:4px">P2P</span></div>
-        <div class="stat-card-sub">${balUsd || '—'}</div>
+        <div class="stat-value"><span id="wpBalP2p">${fmtExact(balDvpn)}</span> <span style="font-size:13px;color:var(--text-dim);font-weight:500;margin-left:4px">P2P</span></div>
+        <div class="stat-card-sub" id="wpBalUsd">${balUsd || '—'}</div>
       </div>
       <div class="stat-card wallet-addr-card">
         <div class="stat-label">Address</div>
@@ -6843,8 +6873,8 @@ function renderWalletPage() {
           ${detailsRow('Provider address', provAddr, { mono: true, copy: provAddr, sub: provAddr ? '' : 'Register a provider to publish nodes under your account.' })}
           ${detailsRow('Signing method', kindLabel)}
           ${detailsRow('Network', 'sentinelhub-2', { sub: 'Sentinel mainnet' })}
-          ${detailsRow('Balance ($P2P)', fmtExact(balDvpn) + ' P2P', { sub: balUsd })}
-          ${detailsRow('Balance (udvpn)', balUdvpn, { mono: true, sub: 'Raw on-chain units (1 P2P = 1,000,000 udvpn)' })}
+          ${detailsRow('Balance ($P2P)', fmtExact(balDvpn) + ' P2P', { sub: balUsd, id: 'wpDetailBalP2p', subId: 'wpDetailBalUsd' })}
+          ${detailsRow('Balance (udvpn)', balUdvpn, { mono: true, sub: 'Raw on-chain units (1 P2P = 1,000,000 udvpn)', id: 'wpDetailBalUdvpn' })}
           ${detailsRow('Provider name', w.provider?.name || '', { sub: w.provider?.identity ? 'Identity: ' + w.provider.identity : '' })}
           ${detailsRow('$P2P price', priceUsd, { sub: 'CoinGecko spot' })}
         </div>
@@ -6888,7 +6918,7 @@ function renderWalletPage() {
           </div>
           <div class="wallet-fee-strip">
             <div style="display:flex;justify-content:space-between;color:var(--text-muted)"><span>Estimated gas</span><span>~${SEND_GAS_HINT} P2P</span></div>
-            <div style="display:flex;justify-content:space-between;color:var(--text)"><span style="font-weight:500">Source balance</span><span style="font-weight:600">${fmtExact(balDvpn)} P2P</span></div>
+            <div style="display:flex;justify-content:space-between;color:var(--text)"><span style="font-weight:500">Source balance</span><span style="font-weight:600" id="wpSendSrcBal">${fmtExact(balDvpn)} P2P</span></div>
           </div>
           <div id="sendResult" style="display:none"></div>
           <button id="sendBtn" class="btn btn-primary" style="width:100%" onclick="doWalletSend()" disabled>Send transaction</button>
@@ -7490,6 +7520,22 @@ async function txFetch(url, opts = {}) {
 }
 
 async function signAndBroadcast(signDoc) {
+  // Privy sessions have no browser extension — the privkey lives in Privy's
+  // enclave. Relay the unsigned signDoc to the server, which calls Privy
+  // raw_sign and broadcasts. Same payload shape the route validates.
+  if (S.wallet && S.wallet.kind === 'privy') {
+    const r = await fetch('/api/tx/privy-sign-and-broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({
+        bodyBytes: signDoc.bodyBytes,
+        authInfoBytes: signDoc.authInfoBytes,
+        chainId: signDoc.chainId,
+        accountNumber: signDoc.accountNumber,
+      }),
+    });
+    return await r.json();
+  }
   if (!window.keplr) throw new Error('Keplr not available');
   const addr = walletAddress || (S.keplrKey && S.keplrKey.bech32Address);
   if (!addr) throw new Error('No Keplr address loaded');
@@ -8901,7 +8947,13 @@ function speedBarHtml(mbps) {
 
 function protocolBadge(p) {
   if (!p) return '<span class="badge badge-dim">?</span>';
-  return p === 'WireGuard' ? '<span class="badge badge-green">WG</span>' : '<span class="badge badge-blue">V2Ray</span>';
+  // The API passes through whatever the node reports: 'wireguard'/'v2ray'
+  // strings in any case, or Sentinel numeric service types (1=WireGuard,
+  // 2=V2Ray). Unknown values get a neutral badge instead of a wrong label.
+  const proto = String(p).toLowerCase();
+  if (proto === 'wireguard' || proto === '1') return '<span class="badge badge-green">WG</span>';
+  if (proto === 'v2ray' || proto === '2') return '<span class="badge badge-blue">V2Ray</span>';
+  return `<span class="badge badge-dim">${escapeHtml(String(p))}</span>`;
 }
 
 function getLeaseLabel() {
