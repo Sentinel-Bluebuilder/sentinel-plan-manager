@@ -4,6 +4,7 @@
 // Cache (cached/cacheInvalidate/cacheClear) imported from blue-js-sdk.
 
 import 'dotenv/config';
+import { randomBytes as _cryptoRandomBytes } from 'crypto';
 import express from 'express';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'url';
@@ -1341,7 +1342,7 @@ function gcKeplrChallenges() {
 
 app.post('/api/wallet/keplr-challenge', rateLimit('kchal', 30, 60_000), (req, res) => {
   gcKeplrChallenges();
-  const nonce = `spm-login-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  const nonce = `spm-login-${Date.now()}-${_cryptoRandomBytes(16).toString('hex')}`;
   keplrChallenges.set(nonce, Date.now() + KEPLR_CHALLENGE_TTL_MS);
   res.json({ nonce });
 });
