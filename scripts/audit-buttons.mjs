@@ -14,7 +14,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
 const server = readFileSync(join(ROOT, 'server.js'), 'utf8');
 let cli = '';
-try { cli = readFileSync(join(ROOT, 'cli.js'), 'utf8'); } catch {}
+try {
+  cli = readFileSync(join(ROOT, 'cli.js'), 'utf8');
+} catch (e) {
+  // Missing cli.js is expected (the parity check below is skipped); any other
+  // error (permissions, disk fault) would silently produce a false-clean audit.
+  if (e.code !== 'ENOENT') console.warn(`[audit-buttons] could not read cli.js: ${e.message}`);
+}
 
 // ─── 1. Collect every onclick call in HTML ─────────────────────────────────
 // Two shapes:

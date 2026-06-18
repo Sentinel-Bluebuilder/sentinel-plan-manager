@@ -15,7 +15,16 @@ const child = spawn(process.execPath, [serverPath], {
   env: { ...process.env, DEMO: 'true' },
 });
 
-const forward = (sig) => () => { try { child.kill(sig); } catch {} };
+const forward = (sig) => () => {
+  // ESRCH (child already gone) is benign — the exit handler fires anyway. Any
+  // other failure (e.g. EPERM) means the signal didn't reach the child, which
+  // the operator needs to know about.
+  try {
+    child.kill(sig);
+  } catch (e) {
+    if (e.code !== 'ESRCH') console.warn(`[demo] failed to forward ${sig}: ${e.message}`);
+  }
+};
 process.on('SIGINT', forward('SIGINT'));
 process.on('SIGTERM', forward('SIGTERM'));
 

@@ -20,13 +20,22 @@ function parseArgs(argv) {
     if (a === '--json') {
       flags.json = true;
     } else if (a === '--base-url') {
-      flags.baseUrl = argv[++i];
+      const next = argv[++i];
+      if (next === undefined) {
+        process.stderr.write('--base-url requires a value\n');
+        process.exit(1);
+      }
+      flags.baseUrl = next;
     } else if (a === '-h' || a === '--help') {
       flags.help = true;
     } else if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('--')) {
+      // Reject single-dash tokens (e.g. "-1", "-h") as flag values: otherwise
+      // `--hours -h` swallows the help flag and `--hours -1` silently passes a
+      // negative number through. A value is only the next token when it is not
+      // itself a flag.
+      if (next !== undefined && !next.startsWith('-')) {
         flags[key] = next;
         i++;
       } else {
@@ -50,6 +59,19 @@ function err(str) { process.stderr.write(str + '\n'); }
 function scanning(msg) { process.stderr.write(msg + '\n'); }
 
 function printJson(data) { out(JSON.stringify(data, null, 2)); }
+
+// Parse a required positive integer CLI argument. A truthy-but-non-numeric
+// value (e.g. "abc") otherwise reaches the server as JSON null, which the
+// server rejects with a misleading "field required" message. Validate here so
+// the operator sees the real problem.
+function reqInt(value, label) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    err(`${label} must be a positive number (got "${value}")`);
+    process.exit(1);
+  }
+  return n;
+}
 
 function printKv(obj, indent = '') {
   for (const [k, v] of Object.entries(obj)) {
@@ -83,7 +105,8 @@ function fmtP2P(udvpn) {
     const whole = big / 1_000_000n;
     const frac = ((big % 1_000_000n) * 100n / 1_000_000n).toString().padStart(2, '0');
     return `${whole.toLocaleString()}.${frac} P2P`;
-  } catch {
+  } catch (e) {
+    process.stderr.write(`WARN: fmtP2P BigInt parse failed for "${udvpn}": ${e.message}\n`);
     const n = parseInt(udvpn, 10);
     return Number.isFinite(n) ? (n / 1e6).toFixed(2) + ' P2P' : '--';
   }
@@ -93,7 +116,8 @@ function fmtUdvpn(udvpn) {
   if (udvpn === null || udvpn === undefined) return '--';
   try {
     return BigInt(String(udvpn).trim()).toLocaleString() + ' udvpn';
-  } catch {
+  } catch (e) {
+    process.stderr.write(`WARN: fmtUdvpn BigInt parse failed for "${udvpn}": ${e.message}\n`);
     const n = parseInt(udvpn, 10);
     return Number.isFinite(n) ? n.toLocaleString() + ' udvpn' : '--';
   }
@@ -552,14 +576,17 @@ async function cmdPlanCreate(f) {
 
 async function cmdPlanStatus(id, status) {
   if (!id || !status) { err('Usage: plans plan status <id> <status>  (1=active, 3=inactive)'); process.exit(1); }
-  const d = await POST('/api/plan/status', { planId: parseInt(id, 10), status: parseInt(status, 10) });
+  const planId = reqInt(id, 'planId');
+  const st = reqInt(status, 'status');
+  if (st !== 1 && st !== 3) { err('status must be 1 (active) or 3 (inactive)'); process.exit(1); }
+  const d = await POST('/api/plan/status', { planId, status: st });
   if (JSON_MODE) { printJson(d); return; }
   txLine(d);
 }
 
 async function cmdPlanSubscribe(planId, f) {
   if (!planId) { err('Usage: plans plan subscribe <planId> [--denom udvpn]'); process.exit(1); }
-  const d = await POST('/api/plan/subscribe', { planId: parseInt(planId, 10), denom: f.denom || 'udvpn' });
+  const d = await POST('/api/plan/subscribe', { planId: reqInt(planId, 'planId'), denom: f.denom || 'udvpn' });
   if (JSON_MODE) { printJson(d); return; }
   txLine(d);
   if (d.subscriptionId) out(`subscriptionId: ${d.subscriptionId}`);
@@ -649,8 +676,8 @@ async function cmdNodeRankings() {
 
 async function cmdLink(planId, nodeAddr, f) {
   if (!planId || !nodeAddr) { err('Usage: plans link <planId> <nodeAddr> [--lease-hours N]'); process.exit(1); }
-  const body = { planId: parseInt(planId, 10), nodeAddress: nodeAddr };
-  if (f['lease-hours']) body.leaseHours = parseInt(f['lease-hours'], 10);
+  const body = { planId: reqInt(planId, 'planId'), nodeAddress: nodeAddr };
+  if (f['lease-hours']) body.leaseHours = reqInt(f['lease-hours'], 'lease-hours');
   const d = await POST('/api/plan-manager/link', body);
   if (JSON_MODE) { printJson(d); return; }
   if (d.alreadyLinked) { out(`OK  already linked: ${d.msg}`); return; }
@@ -663,8 +690,8 @@ async function cmdBatchLink(planId, nodeList, f) {
     process.exit(1);
   }
   const nodeAddresses = nodeList.split(',').map(s => s.trim()).filter(Boolean);
-  const body = { planId: parseInt(planId, 10), nodeAddresses };
-  if (f['lease-hours']) body.leaseHours = parseInt(f['lease-hours'], 10);
+  const body = { planId: reqInt(planId, 'planId'), nodeAddresses };
+  if (f['lease-hours']) body.leaseHours = reqInt(f['lease-hours'], 'lease-hours');
   const d = await POST('/api/plan-manager/batch-link', body);
   if (JSON_MODE) { printJson(d); return; }
   if (d.alreadyLinked) { out(`OK  all already linked (${d.alreadyLinked})`); return; }
@@ -674,7 +701,7 @@ async function cmdBatchLink(planId, nodeList, f) {
 
 async function cmdUnlink(planId, nodeAddr) {
   if (!planId || !nodeAddr) { err('Usage: plans unlink <planId> <nodeAddr>'); process.exit(1); }
-  const d = await POST('/api/plan-manager/unlink', { planId: parseInt(planId, 10), nodeAddress: nodeAddr });
+  const d = await POST('/api/plan-manager/unlink', { planId: reqInt(planId, 'planId'), nodeAddress: nodeAddr });
   if (JSON_MODE) { printJson(d); return; }
   if (d.alreadyUnlinked) { out(`OK  already unlinked: ${d.msg}`); return; }
   txLine(d);
@@ -686,7 +713,7 @@ async function cmdBatchUnlink(planId, nodeList) {
     process.exit(1);
   }
   const nodeAddresses = nodeList.split(',').map(s => s.trim()).filter(Boolean);
-  const d = await POST('/api/plan-manager/batch-unlink', { planId: parseInt(planId, 10), nodeAddresses });
+  const d = await POST('/api/plan-manager/batch-unlink', { planId: reqInt(planId, 'planId'), nodeAddresses });
   if (JSON_MODE) { printJson(d); return; }
   txLine(d);
   if (d.unlinked != null) out(`unlinked: ${d.unlinked}`);

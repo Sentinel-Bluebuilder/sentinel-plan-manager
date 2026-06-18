@@ -323,7 +323,14 @@ function saveMyPlanId(id) {
   if (!list.includes(Number(id))) {
     list.push(Number(id));
     store[addr] = list;
-    writeFileSync(MY_PLANS_FILE, JSON.stringify(store), 'utf8');
+    // A disk write failure here must not surface as a false 500 to a caller
+    // whose TX already succeeded on-chain. Log and continue — the ledger is a
+    // convenience cache, not the source of truth (the chain is).
+    try {
+      writeFileSync(MY_PLANS_FILE, JSON.stringify(store), 'utf8');
+    } catch (e) {
+      console.warn(`[plans] failed to persist plan ${id} to ${MY_PLANS_FILE}: ${e.message}`);
+    }
   }
 }
 
@@ -437,8 +444,9 @@ async function filterOwnedPlanIds(planIds) {
         try {
           const lcdPlan = await lcd(`/sentinel/plan/v3/plans/${id}`);
           if (lcdPlan?.plan?.prov_address) provAddress = lcdPlan.plan.prov_address;
-        } catch {
+        } catch (err) {
           // Both queries failed — indeterminate, keep optimistically.
+          console.log(`[ownership] LCD plan(${id}) probe failed: ${err.message} — keeping optimistically`);
           kept.push(Number(id));
           return;
         }
@@ -546,6 +554,10 @@ function savePrivyWallet(userId, entry) {
 const NODE_CACHE_FILE = join(DATA_DIR, 'nodes-cache.json');
 let nodeCache = { nodes: [], ts: 0, scanning: false };
 let scanProgress = { total: 0, probed: 0, online: 0 };
+// Declared here (above runNodeScan) — runNodeScan reads it in its re-entrancy
+// guard and the initial scan runs during startup/module-eval, so a `let`
+// declaration below runNodeScan would hit the temporal dead zone on boot.
+let _enrichInflight = false;
 
 function loadNodeCacheFromDisk() {
   try {
@@ -610,7 +622,12 @@ function nodeCacheToAllNodes(raw) {
 //   Phase 2 (background): probe-enrich for country/city/protocol on top of catalog.
 //                   Successful probes overlay enrichment fields; failures keep chain entry.
 async function runNodeScan() {
-  if (nodeCache.scanning) return;
+  // Bail if a scan is in progress OR if a prior scan's background enrichment is
+  // still running — otherwise the phase-1 `nodeCache = {…}` reassignment below
+  // swaps the cache object out from under the in-flight phase-2, whose
+  // `nodeCache.nodes = merged` would then clobber this scan's fresh catalog
+  // with stale enriched data from the previous run.
+  if (nodeCache.scanning || _enrichInflight) return;
   nodeCache.scanning = true;
   scanProgress = { total: 0, probed: 0, online: 0 };
   console.log('Starting node scan: phase 1 (chain catalog)...');
@@ -669,7 +686,6 @@ async function runNodeScan() {
   }
 }
 
-let _enrichInflight = false;
 async function enrichNodeCacheInBackground(catalog) {
   if (_enrichInflight) return;
   _enrichInflight = true;
@@ -747,7 +763,7 @@ async function discoverPlanIds() {
             const total = parseInt(d.pagination?.total || '0');
             if (total > 0) ids.add(planId);
           })
-          .catch(() => {});
+          .catch((err) => { console.log(`[LCD] discoverPlanIds probe ${planId} failed: ${err.message}`); });
       })(i));
     }
     await Promise.all(checks);
@@ -906,7 +922,10 @@ async function _getPlanStatsImpl(planId) {
       try {
         const lp = await lcd(`/sentinel/plan/v3/plans/${planId}`);
         return lp?.plan || null;
-      } catch { return null; }
+      } catch (err) {
+        console.log(`[LCD] _getPlanStatsImpl plan(${planId}) fallback failed: ${err.message} — price may render as 0`);
+        return null;
+      }
     })(),
   ]);
 
@@ -1104,7 +1123,8 @@ async function getNodesForPlan(planId) {
   }
 
   // LCD fallback
-  let nextKey = undefined;
+  let nextKey = undefined, pages = 0;
+  const MAX_PAGES = 100; // 100 × 100 = 10k plan members — guards against an unbounded loop
   do {
     const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
     const d = await lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=100${keyParam}`);
@@ -1121,12 +1141,15 @@ async function getNodesForPlan(planId) {
       });
     }
     nextKey = d.pagination?.next_key || null;
-  } while (nextKey);
+    pages++;
+  } while (nextKey && pages < MAX_PAGES);
 
   return nodes;
 }
 
 async function getProviders() {
+  // RPC-first N/A: blue-js-sdk exposes no list-all-providers RPC query, so this
+  // read-only catalog lookup uses LCD by necessity (not a regression).
   const d = await lcd('/sentinel/provider/v2/providers?pagination.limit=100');
   return (d.providers || []).map(p => ({
     address: p.address,
@@ -1233,14 +1256,16 @@ async function buildLeaseMsg(nodeAddress, hours = 24) {
 
   if (!nodeInfo) {
     // LCD fallback: paginated scan (slow but reliable)
-    let allNodesList = [], nextKey = null;
+    let allNodesList = [], nextKey = null, pages = 0;
+    const MAX_PAGES = 60; // 60 × 500 = 30k nodes — guards against an unbounded loop
     do {
       let url = '/sentinel/node/v3/nodes?pagination.limit=500&status=1';
       if (nextKey) url += `&pagination.key=${encodeURIComponent(nextKey)}`;
       const page = await lcd(url);
       allNodesList.push(...(page.nodes || []));
       nextKey = page.pagination?.next_key || null;
-    } while (nextKey);
+      pages++;
+    } while (nextKey && pages < MAX_PAGES);
     nodeInfo = allNodesList.find(n => n.address === nodeAddress);
   }
 
@@ -2301,8 +2326,14 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
       );
     }
 
+    // Filter the operator's own subscriptions out — but on a COPY. `d` may be
+    // the shared object returned by cached(); mutating its `subscriptions`
+    // array would poison the cache for every later reader (who would then see
+    // a permanently self-filtered list).
     if (getAddr() && d.subscriptions) {
-      d.subscriptions = d.subscriptions.filter(s => s.acc_address !== getAddr());
+      const me = getAddr();
+      res.json({ ...d, subscriptions: d.subscriptions.filter(s => s.acc_address !== me) });
+      return;
     }
     res.json(d);
   } catch (err) {
@@ -2633,12 +2664,17 @@ app.post('/api/plan/status', async (req, res) => {
     const { planId, status } = req.body;
     if (!planId || !status) return res.status(400).json({ error: 'planId and status required' });
 
-    const ownErr = await assertPlanOwnership(planId);
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
+    const statusNum = parseInt(status, 10);
+    if (statusNum !== 1 && statusNum !== 3) return res.status(400).json({ error: 'status must be 1 (active) or 3 (inactive)' });
+
+    const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
     const msg = {
       typeUrl: C.MSG_UPDATE_PLAN_STATUS_TYPE,
-      value: { from: getProvAddr(), id: BigInt(planId), status: parseInt(status) },
+      value: { from: getProvAddr(), id: BigInt(planIdNum), status: statusNum },
     };
 
     console.log(`Updating plan ${planId} status to ${status} (v3)...`);
@@ -2760,7 +2796,8 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
   let requestedBytes;
   try {
     requestedBytes = allocBytes != null ? BigInt(allocBytes) : DEFAULT_SHARE_BYTES;
-  } catch {
+  } catch (e) {
+    console.warn(`[AddSub] invalid allocBytes ${JSON.stringify(allocBytes)} (${e.message}) — using default share`);
     requestedBytes = DEFAULT_SHARE_BYTES;
   }
   if (requestedBytes <= 0n) requestedBytes = DEFAULT_SHARE_BYTES;
@@ -2930,11 +2967,15 @@ app.post('/api/plan/start-session', async (req, res) => {
     const { subscriptionId, nodeAddress } = req.body;
     if (!subscriptionId || !nodeAddress) return res.status(400).json({ error: 'subscriptionId and nodeAddress required' });
 
+    const subIdNum = parseInt(subscriptionId, 10);
+    if (!Number.isFinite(subIdNum) || subIdNum <= 0) return res.status(400).json({ error: 'subscriptionId must be a positive integer' });
+    if (!NODE_ADDR_RE.test(nodeAddress)) return res.status(400).json({ error: 'invalid node address' });
+
     const msg = {
       typeUrl: C.MSG_SUB_START_SESSION_TYPE,
       value: {
         from: getAddr(),
-        id: BigInt(subscriptionId),
+        id: BigInt(subIdNum),
         nodeAddress,
       },
     };
@@ -3203,12 +3244,16 @@ app.post('/api/plan-manager/link', async (req, res) => {
     const { planId, nodeAddress, leaseHours: reqLeaseHours } = req.body;
     if (!planId || !nodeAddress) return res.status(400).json({ error: 'Plan ID and node address are required' });
 
-    const ownErr = await assertPlanOwnership(planId);
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
+    if (!NODE_ADDR_RE.test(nodeAddress)) return res.status(400).json({ error: 'invalid node address' });
+
+    const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
     const linkMsg = {
       typeUrl: C.MSG_LINK_TYPE,
-      value: { from: getProvAddr(), id: BigInt(planId), nodeAddress },
+      value: { from: getProvAddr(), id: BigInt(planIdNum), nodeAddress },
     };
 
     const hours = parseInt(reqLeaseHours) || 24;
@@ -3338,16 +3383,20 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     if (!planId || !nodeAddresses || !Array.isArray(nodeAddresses) || nodeAddresses.length === 0) {
       return res.status(400).json({ error: 'planId and nodeAddresses[] required' });
     }
-    const ownErr = await assertPlanOwnership(planId);
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
+    const addrs = [...new Set(nodeAddresses)];
+    const badAddr = addrs.find(a => !NODE_ADDR_RE.test(a));
+    if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
+    const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
     const hours = parseInt(reqLeaseHours) || 24;
-    const addrs = [...new Set(nodeAddresses)];
     console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
 
 
     const linkMsgs = addrs.map(addr => ({
       typeUrl: C.MSG_LINK_TYPE,
-      value: { from: getProvAddr(), id: BigInt(planId), nodeAddress: addr },
+      value: { from: getProvAddr(), id: BigInt(planIdNum), nodeAddress: addr },
     }));
 
     // Same Keplr-safe pattern as single link: BUNDLE [...leases, ...links] into
@@ -3424,12 +3473,16 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
     const { planId, nodeAddress } = req.body;
     if (!planId || !nodeAddress) return res.status(400).json({ error: 'Plan ID and node address are required' });
 
-    const ownErr = await assertPlanOwnership(planId);
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
+    if (!NODE_ADDR_RE.test(nodeAddress)) return res.status(400).json({ error: 'invalid node address' });
+
+    const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
     const msg = {
       typeUrl: C.MSG_UNLINK_TYPE,
-      value: { from: getProvAddr(), id: BigInt(planId), nodeAddress },
+      value: { from: getProvAddr(), id: BigInt(planIdNum), nodeAddress },
     };
 
     console.log(`Unlinking node ${nodeAddress} from plan ${planId}...`);
@@ -3469,14 +3522,18 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
     if (!planId || !nodeAddresses || !Array.isArray(nodeAddresses) || nodeAddresses.length === 0) {
       return res.status(400).json({ error: 'planId and nodeAddresses[] required' });
     }
-    const ownErr = await assertPlanOwnership(planId);
-    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
     const addrs = [...new Set(nodeAddresses)];
+    const badAddr = addrs.find(a => !NODE_ADDR_RE.test(a));
+    if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
+    const ownErr = await assertPlanOwnership(planIdNum);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
     console.log(`\n[BATCH-UNLINK] ${addrs.length} nodes from plan ${planId}`);
 
     const msgs = addrs.map(addr => ({
       typeUrl: C.MSG_UNLINK_TYPE,
-      value: { from: getProvAddr(), id: BigInt(planId), nodeAddress: addr },
+      value: { from: getProvAddr(), id: BigInt(planIdNum), nodeAddress: addr },
     }));
 
     const result = await safeBroadcast(msgs);
@@ -3579,9 +3636,12 @@ app.post('/api/lease/end', async (req, res) => {
     const { leaseId } = req.body;
     if (!leaseId) return res.status(400).json({ error: 'leaseId required' });
 
+    const leaseIdNum = parseInt(leaseId, 10);
+    if (!Number.isFinite(leaseIdNum) || leaseIdNum <= 0) return res.status(400).json({ error: 'leaseId must be a positive integer' });
+
     const msg = {
       typeUrl: C.MSG_END_LEASE_TYPE,
-      value: { from: getProvAddr(), id: BigInt(leaseId) },
+      value: { from: getProvAddr(), id: BigInt(leaseIdNum) },
     };
 
     console.log(`Ending lease ${leaseId} (v1)...`);
@@ -3698,9 +3758,12 @@ app.post('/api/provider/status', async (req, res) => {
     const { status } = req.body;
     if (!status) return res.status(400).json({ error: 'status required (1=active, 2=inactive_pending, 3=inactive)' });
 
+    const statusNum = parseInt(status, 10);
+    if (statusNum !== 1 && statusNum !== 2 && statusNum !== 3) return res.status(400).json({ error: 'status must be 1 (active), 2 (inactive_pending), or 3 (inactive)' });
+
     const msg = {
       typeUrl: C.MSG_UPDATE_PROVIDER_STATUS_TYPE,
-      value: { from: getProvAddr(), status: parseInt(status) },
+      value: { from: getProvAddr(), status: statusNum },
     };
 
     console.log(`Updating provider status to ${status} (v3)...`);
@@ -3798,6 +3861,8 @@ app.get('/api/feegrant/grants', async (req, res) => {
 
 // Bech32 charset for sent1... addresses (38 chars after prefix).
 const SENT_ADDR_RE = /^sent1[02-9ac-hj-np-z]{38}$/i;
+// Node operator addresses: sentnode1... (38+ chars after prefix).
+const NODE_ADDR_RE = /^sentnode1[02-9ac-hj-np-z]{38,}$/i;
 const MAX_GRANT_DVPN = 10; // hard cap per grant
 
 app.post('/api/feegrant/grant', async (req, res) => {
@@ -3832,10 +3897,10 @@ app.post('/api/feegrant/grant', async (req, res) => {
     let alreadyGranted = false;
     try {
       let existing = [];
-      const rpc = await getRpcClient().catch(() => null);
-      if (rpc) existing = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 }).catch(() => []);
+      const rpc = await getRpcClient().catch((e) => { console.log(`[grant] rpc client unavailable for grant-check: ${e.message}`); return null; });
+      if (rpc) existing = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 }).catch((e) => { console.log(`[grant] rpc issued-grants check failed: ${e.message}`); return []; });
       if (!existing.length) {
-        const d = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`).catch(() => ({}));
+        const d = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`).catch((e) => { console.log(`[grant] lcd issued-grants check failed: ${e.message}`); return {}; });
         existing = d.allowances || [];
       }
       alreadyGranted = existing.some(a => a.grantee === grantee);
@@ -3882,6 +3947,20 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
   const { planId, spendLimitDvpn, expirationDays } = req.query;
   if (!planId) return res.status(400).json({ error: 'planId required' });
+  const planIdNum = parseInt(planId, 10);
+  if (!Number.isFinite(planIdNum) || planIdNum <= 0) {
+    return res.status(400).json({ error: 'planId must be a positive integer' });
+  }
+  // Cap the per-subscriber spend limit BEFORE the SSE stream opens — the POST
+  // /api/feegrant/grant path enforces MAX_GRANT_DVPN, but this streaming path
+  // bypassed it entirely, letting a crafted query grant an unbounded allowance
+  // to every subscriber. Validate here while we can still return a JSON 400.
+  if (spendLimitDvpn !== undefined) {
+    const lim = parseFloat(spendLimitDvpn);
+    if (!Number.isFinite(lim) || lim < 0 || lim > MAX_GRANT_DVPN) {
+      return res.status(400).json({ error: `spendLimitDvpn must be a number between 0 and ${MAX_GRANT_DVPN}` });
+    }
+  }
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -4131,6 +4210,7 @@ app.post('/api/feegrant/revoke', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
   const { grantee } = req.body;
   if (!grantee) return res.status(400).json({ error: 'grantee address required' });
+  if (!SENT_ADDR_RE.test(grantee)) return res.status(400).json({ error: 'invalid grantee address' });
 
   try {
     const msg = buildRevokeFeeGrantMsg(getAddr(), grantee);
@@ -4159,7 +4239,7 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
   if (!Array.isArray(grantees) || grantees.length === 0) {
     return res.status(400).json({ error: 'grantees array required' });
   }
-  const list = grantees.filter(g => typeof g === 'string' && g.startsWith('sent1'));
+  const list = grantees.filter(g => typeof g === 'string' && SENT_ADDR_RE.test(g));
   if (list.length === 0) return res.status(400).json({ error: 'no valid grantees in list' });
 
   try {
@@ -4289,6 +4369,8 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
   const { planId } = req.query;
   if (!planId) return res.status(400).json({ error: 'planId required' });
+  const planIdNum = parseInt(planId, 10);
+  if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
 
   try {
     const subsCacheKey = `planSubs:${planId}:500:`;
