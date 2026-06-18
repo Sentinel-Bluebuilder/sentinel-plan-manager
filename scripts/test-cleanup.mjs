@@ -17,7 +17,7 @@ async function gen() {
 async function post(path, body) {
   const r = await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
     body: JSON.stringify(body),
   });
   return { status: r.status, body: await r.json() };
@@ -31,15 +31,26 @@ async function get(path) {
   console.log('─── revoke-list E2E against live chain ───\n');
 
   const w = await get('/api/wallet');
-  console.log('wallet:', w.body.address, '· bal:', (w.body.balanceUdvpn / 1e6).toFixed(4), 'P2P');
+  const balU = w.body && w.body.balanceUdvpn;
+  const balStr = (balU === null || balU === undefined) ? '--' : (Number(balU) / 1e6).toFixed(4);
+  console.log('wallet:', w.body.address, '· bal:', balStr, 'P2P');
 
   const g1 = await gen();
   const g2 = await gen();
   console.log('grantee 1:', g1);
   console.log('grantee 2:', g2);
 
-  console.log('\nStep 1: grant both');
-  for (const g of [g1, g2]) {
+  console.log('\nStep 1: grant both (7s gap between TXs — sequential-chain-test rule)');
+  const grantees = [g1, g2];
+  for (let i = 0; i < grantees.length; i++) {
+    const g = grantees[i];
+    // Space broadcasts ≥7s apart so the signing account's sequence advances
+    // cleanly between TXs and we don't trip RPC rate limits. Two grants
+    // fired back-to-back is exactly the pattern the chain-test rule forbids.
+    if (i > 0) {
+      console.log('  waiting 7s before next grant TX...');
+      await new Promise(r => setTimeout(r, 7000));
+    }
     const { status, body } = await post('/api/feegrant/grant', {
       grantee: g, spendLimitDvpn: 0.001, expirationDays: 1,
     });

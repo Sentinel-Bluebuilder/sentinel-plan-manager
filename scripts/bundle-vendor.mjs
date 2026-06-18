@@ -32,32 +32,47 @@ const targets = [
   },
 ];
 
+// Build each target independently. A failure in one (missing dep, esbuild error)
+// must not silently abort the rest — report it, keep going, and exit non-zero at
+// the end so CI/the operator knows the vendor bundle is incomplete.
+const failures = [];
 for (const t of targets) {
   const outfile = join(outDir, `${t.name}.mjs`);
-  await build({
-    entryPoints: [t.entry],
-    outfile,
-    bundle: true,
-    format: 'esm',
-    platform: 'browser',
-    target: ['es2020'],
-    minify: true,
-    sourcemap: false,
-    legalComments: 'none',
-    define: {
-      'process.env.NODE_ENV': '"production"',
-      global: 'globalThis',
-    },
-    alias: {
-      crypto: emptyShim,
-      stream: emptyShim,
-      buffer: emptyShim,
-      path: emptyShim,
-      fs: emptyShim,
-      os: emptyShim,
-    },
-    loader: { '.json': 'json' },
-    logLevel: 'info',
-  });
-  console.log('built', outfile);
+  try {
+    await build({
+      entryPoints: [t.entry],
+      outfile,
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      target: ['es2020'],
+      minify: true,
+      sourcemap: false,
+      legalComments: 'none',
+      define: {
+        'process.env.NODE_ENV': '"production"',
+        global: 'globalThis',
+      },
+      alias: {
+        crypto: emptyShim,
+        stream: emptyShim,
+        buffer: emptyShim,
+        path: emptyShim,
+        fs: emptyShim,
+        os: emptyShim,
+      },
+      loader: { '.json': 'json' },
+      logLevel: 'info',
+    });
+    console.log('built', outfile);
+  } catch (err) {
+    console.error(`✗ failed to bundle "${t.name}" (${t.entry}): ${err.message}`);
+    failures.push(t.name);
+  }
 }
+
+if (failures.length) {
+  console.error(`\n${failures.length}/${targets.length} vendor bundle(s) failed: ${failures.join(', ')}`);
+  process.exit(1);
+}
+console.log(`\nAll ${targets.length} vendor bundles built.`);
