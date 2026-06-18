@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// â”€â”€â”€ Plan Manager CLI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Plan Manager CLI ─────────────────────────────────────────────────────────
 // Thin HTTP client for the Plan Manager server (port 3003).
 // Maps every server.js endpoint to a CLI subcommand.
 // Uses only Node built-ins (fetch, process). No external deps.
@@ -9,7 +9,7 @@
 //         --base-url X   override base URL
 //         -h / --help    show help
 
-// â”€â”€â”€ Arg parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Arg parsing ──────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
   const flags = {};
@@ -43,7 +43,7 @@ const { flags, positional } = parseArgs(process.argv.slice(2));
 const BASE_URL = (flags.baseUrl || process.env.BASE_URL || `http://localhost:${process.env.PORT || 3003}`).replace(/\/$/, '');
 const JSON_MODE = !!flags.json;
 
-// â”€â”€â”€ Output helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Output helpers ───────────────────────────────────────────────────────────
 
 function out(str) { process.stdout.write(str + '\n'); }
 function err(str) { process.stderr.write(str + '\n'); }
@@ -99,7 +99,7 @@ function fmtUdvpn(udvpn) {
   }
 }
 
-// â”€â”€â”€ Table printer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Table printer ────────────────────────────────────────────────────────────
 
 function table(rows, cols) {
   // cols: [{key, label, width?, fmt?}]
@@ -125,7 +125,7 @@ function table(rows, cols) {
   }
 }
 
-// â”€â”€â”€ HTTP client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HTTP client ──────────────────────────────────────────────────────────────
 // Session cookie jar: the server's wallet endpoints set an httpOnly session
 // cookie (FIX 7). The CLI persists that cookie to a local file so subsequent
 // invocations stay logged in. File is keyed by base URL to support multi-env.
@@ -146,7 +146,7 @@ function loadCookie() {
     if (!_existsSync(f)) return '';
     return _readFileSync(f, 'utf8').trim();
   } catch (e) {
-    // No cookie jar / unreadable file just means "not logged in" â€” proceed
+    // No cookie jar / unreadable file just means "not logged in" — proceed
     // without a cookie, but note it on stderr so a perms issue is visible.
     err(`WARN: could not read cookie jar: ${e.message}`);
     return '';
@@ -164,7 +164,7 @@ function saveCookie(setCookie) {
       _mkdirSync(COOKIE_DIR, { recursive: true });
       _writeFileSync(cookieFile(), pair, 'utf8');
     } catch (e) {
-      // Persisting the session cookie failed â€” the command still works for this
+      // Persisting the session cookie failed — the command still works for this
       // invocation, but the next one won't stay logged in. Warn, don't crash.
       err(`WARN: could not persist session cookie: ${e.message}`);
     }
@@ -232,7 +232,7 @@ async function request(method, path, body) {
 async function GET(path) { return request('GET', path); }
 async function POST(path, body) { return request('POST', path, body); }
 
-// â”€â”€â”€ Help text â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Help text ────────────────────────────────────────────────────────────────
 
 const HELP_ROOT = `
 Sentinel Plan Manager CLI
@@ -276,11 +276,11 @@ Run 'plans <group> --help' for per-group details.
 
 const HELP = {
   wallet: `
-plans wallet status           GET /api/wallet/status â€” is a wallet loaded?
-plans wallet info             GET /api/wallet      â€” address, balance, provider
-plans wallet generate         POST /api/wallet/generate â€” new 24-word mnemonic (printed once)
+plans wallet status           GET /api/wallet/status — is a wallet loaded?
+plans wallet info             GET /api/wallet      — address, balance, provider
+plans wallet generate         POST /api/wallet/generate — new 24-word mnemonic (printed once)
 plans wallet import <mnemo>   POST /api/wallet/import
-plans wallet send <to>        POST /api/wallet/send  â€” send P2P (DVPN) on-chain
+plans wallet send <to>        POST /api/wallet/send  — send P2P (DVPN) on-chain
   --amount N        Amount in P2P (e.g. 1.5)
   [--memo "text"]   Optional memo (max 256 chars)
 plans wallet logout           POST /api/wallet/logout
@@ -307,7 +307,7 @@ plans node list               GET /api/all-nodes
   [--country XX]    Filter by country code
   [--protocol wireguard|v2ray]
 plans node progress           GET /api/nodes/progress
-plans node chain-count        GET /api/nodes/chain-count â€” fast chain-side count of active nodes
+plans node chain-count        GET /api/nodes/chain-count — fast chain-side count of active nodes
 plans node sessions <addr>    GET /api/nodes/:addr/sessions
 plans node rankings           GET /api/node-rankings
 `,
@@ -341,7 +341,7 @@ plans provider register        POST /api/provider/register
 plans provider status <n>      POST /api/provider/status (1=active, 2=inactive_pending, 3=inactive)
 `,
   params: `
-plans params                   GET /api/params â€” subscription, node, session params
+plans params                   GET /api/params — subscription, node, session params
 `,
   feegrant: `
 plans feegrant list                       GET /api/feegrant/grants
@@ -353,7 +353,7 @@ plans feegrant grant-subscribers <planId> POST /api/feegrant/grant-subscribers
   [--spend-limit-dvpn N]
   [--expiration-days N]
 plans feegrant revoke <grantee>           POST /api/feegrant/revoke
-plans feegrant revoke-list <g1,g2,...>    POST /api/feegrant/revoke-list â€” batch revoke a list
+plans feegrant revoke-list <g1,g2,...>    POST /api/feegrant/revoke-list — batch revoke a list
 plans feegrant revoke-all                 POST /api/feegrant/revoke-all
 plans feegrant auto-grant get             GET /api/feegrant/auto-grant
 plans feegrant auto-grant set <true|false>  POST /api/feegrant/auto-grant
@@ -361,14 +361,14 @@ plans feegrant auto-grant set <true|false>  POST /api/feegrant/auto-grant
   [--expiration-days N]
 `,
   'rpc-health': `
-plans rpc-health               GET /api/rpcs â€” probe all 39 LCD/RPC endpoints
+plans rpc-health               GET /api/rpcs — probe all 39 LCD/RPC endpoints
 `,
   'rpc-providers': `
-plans rpc-providers            GET /api/rpc-providers â€” Tendermint RPC provider status
+plans rpc-providers            GET /api/rpc-providers — Tendermint RPC provider status
 `,
 };
 
-// â”€â”€â”€ Command: health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Command: health ─────────────────────────────────────────────────────────
 
 async function cmdHealth() {
   const d = await GET('/health');
@@ -376,7 +376,7 @@ async function cmdHealth() {
   out(`OK  uptime: ${d.uptime ? d.uptime.toFixed(1) + 's' : '--'}`);
 }
 
-// â”€â”€â”€ Command: status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Command: status ─────────────────────────────────────────────────────────
 
 async function cmdStatus() {
   const [progress, walletStatus] = await Promise.all([
@@ -388,7 +388,7 @@ async function cmdStatus() {
   out(`Nodes:   scanning=${progress.scanning}  total=${progress.total}  probed=${progress.probed}  online=${progress.online}`);
 }
 
-// â”€â”€â”€ Commands: wallet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: wallet ─────────────────────────────────────────────────────────
 
 async function cmdWalletStatus() {
   const d = await GET('/api/wallet/status');
@@ -408,7 +408,7 @@ async function cmdWalletGenerate() {
   if (JSON_MODE) { printJson(d); return; }
   out(`OK  address: ${d.address}`);
   out('');
-  out('Mnemonic (write this down â€” shown ONCE, server does not store it):');
+  out('Mnemonic (write this down — shown ONCE, server does not store it):');
   out(`  ${d.mnemonic}`);
   out('');
   out('To use this wallet on the server: plans wallet import "<mnemonic>"');
@@ -457,7 +457,7 @@ async function cmdWalletLogout() {
   out('OK  wallet cleared');
 }
 
-// â”€â”€â”€ Commands: plan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: plan ───────────────────────────────────────────────────────────
 
 async function cmdPlanList() {
   const d = await GET('/api/plans');
@@ -573,7 +573,7 @@ async function cmdPlanStartSession(subId, nodeAddr) {
   if (d.sessionId) out(`sessionId: ${d.sessionId}`);
 }
 
-// â”€â”€â”€ Commands: node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: node ───────────────────────────────────────────────────────────
 
 async function cmdNodeList(f) {
   scanning('scanning...');
@@ -645,7 +645,7 @@ async function cmdNodeRankings() {
   out(`Scanned: ${d.scannedAt || '--'}`);
 }
 
-// â”€â”€â”€ Commands: link / unlink â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: link / unlink ──────────────────────────────────────────────────
 
 async function cmdLink(planId, nodeAddr, f) {
   if (!planId || !nodeAddr) { err('Usage: plans link <planId> <nodeAddr> [--lease-hours N]'); process.exit(1); }
@@ -692,7 +692,7 @@ async function cmdBatchUnlink(planId, nodeList) {
   if (d.unlinked != null) out(`unlinked: ${d.unlinked}`);
 }
 
-// â”€â”€â”€ Commands: lease â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: lease ──────────────────────────────────────────────────────────
 
 async function cmdLeaseStart(nodeAddr, f) {
   if (!nodeAddr) { err('Usage: plans lease start <nodeAddr> [--hours N] [--max-price-udvpn N]'); process.exit(1); }
@@ -712,7 +712,7 @@ async function cmdLeaseEnd(leaseId) {
   txLine(d);
 }
 
-// â”€â”€â”€ Commands: provider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: provider ───────────────────────────────────────────────────────
 
 async function cmdProviderList() {
   const d = await GET('/api/providers');
@@ -752,7 +752,7 @@ async function cmdProviderStatus(status) {
   txLine(d);
 }
 
-// â”€â”€â”€ Commands: params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: params ─────────────────────────────────────────────────────────
 
 async function cmdParams() {
   const d = await GET('/api/params');
@@ -767,7 +767,7 @@ async function cmdParams() {
   }
 }
 
-// â”€â”€â”€ Commands: feegrant â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: feegrant ───────────────────────────────────────────────────────
 
 async function cmdFeegrantList() {
   const d = await GET('/api/feegrant/grants');
@@ -899,7 +899,7 @@ async function cmdFeegrantAutoGrantSet(enabled, f) {
   out(`OK  enabled=${d.enabled}  spendLimitDvpn=${d.spendLimitDvpn}  expirationDays=${d.expirationDays}`);
 }
 
-// â”€â”€â”€ Commands: rpc-health / rpc-providers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Commands: rpc-health / rpc-providers ────────────────────────────────────
 
 async function cmdRpcHealth() {
   scanning('probing endpoints...');
@@ -940,7 +940,7 @@ async function cmdRpcProviders() {
   ]);
 }
 
-// â”€â”€â”€ Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Router ───────────────────────────────────────────────────────────────────
 
 async function main() {
   const [group, sub, ...rest] = positional;
@@ -962,7 +962,7 @@ async function main() {
 
   switch (group) {
 
-    // â”€â”€â”€ health / status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── health / status ───────────────────────────────────────────────────
     case 'health':
       await cmdHealth();
       break;
@@ -971,7 +971,7 @@ async function main() {
       await cmdStatus();
       break;
 
-    // â”€â”€â”€ wallet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── wallet ────────────────────────────────────────────────────────────
     case 'wallet':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.wallet); break; }
       switch (sub) {
@@ -988,7 +988,7 @@ async function main() {
       }
       break;
 
-    // â”€â”€â”€ plan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── plan ──────────────────────────────────────────────────────────────
     case 'plan':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.plan); break; }
       switch (sub) {
@@ -1007,7 +1007,7 @@ async function main() {
       }
       break;
 
-    // â”€â”€â”€ node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── node ──────────────────────────────────────────────────────────────
     case 'node':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.node); break; }
       switch (sub) {
@@ -1023,7 +1023,7 @@ async function main() {
       }
       break;
 
-    // â”€â”€â”€ link / unlink â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── link / unlink ─────────────────────────────────────────────────────
     case 'link':
       await cmdLink(sub, rest[0], flags);
       break;
@@ -1040,7 +1040,7 @@ async function main() {
       await cmdBatchUnlink(sub, rest[0]);
       break;
 
-    // â”€â”€â”€ lease â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── lease ─────────────────────────────────────────────────────────────
     case 'lease':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.lease); break; }
       switch (sub) {
@@ -1053,7 +1053,7 @@ async function main() {
       }
       break;
 
-    // â”€â”€â”€ provider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── provider ──────────────────────────────────────────────────────────
     case 'provider':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.provider); break; }
       switch (sub) {
@@ -1067,12 +1067,12 @@ async function main() {
       }
       break;
 
-    // â”€â”€â”€ params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── params ────────────────────────────────────────────────────────────
     case 'params':
       await cmdParams();
       break;
 
-    // â”€â”€â”€ feegrant â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── feegrant ──────────────────────────────────────────────────────────
     case 'feegrant':
       if (!sub || sub === 'help' || sub === '--help') { out(HELP.feegrant); break; }
       switch (sub) {
@@ -1098,7 +1098,7 @@ async function main() {
       }
       break;
 
-    // â”€â”€â”€ rpc-health / rpc-providers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── rpc-health / rpc-providers ────────────────────────────────────────
     case 'rpc-health':
       await cmdRpcHealth();
       break;
