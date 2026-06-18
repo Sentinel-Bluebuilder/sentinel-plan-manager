@@ -10235,7 +10235,10 @@ async function linkBatch() {
       // refetch the server-excluded list so chain truth reconciles — covers
       // added nodes that weren't on the current page / in S.mgrNodes.
       if (S.page === 'add-nodes') { renderAddNodes(); loadMgrNodes(); }
-      if (S.page === 'your-nodes') renderYourNodes();
+      // Your Nodes reads /api/all-nodes?...inPlanOnly — its cache was just
+      // invalidated above, but renderYourNodes() only re-renders the stale
+      // in-memory snapshot. Refetch so the just-added nodes actually appear.
+      if (S.page === 'your-nodes') loadYourNodes();
       refetchMyPlans();
     } else {
       toast(friendlyError(d.error || d.rawLog), 'error');
@@ -10286,7 +10289,10 @@ async function unlinkBatch() {
       if (S.mgrPlanId) invalidateCache('/api/plans/' + S.mgrPlanId);
       invalidateCache('/api/my-plans');
       if (S.page === 'add-nodes') renderAddNodes();
-      if (S.page === 'your-nodes') renderYourNodes();
+      // Refetch (not just re-render) so the removed node actually drops off
+      // Your Nodes — the cache was invalidated above but the in-memory snapshot
+      // still holds it.
+      if (S.page === 'your-nodes') loadYourNodes();
       refetchMyPlans();
     } else {
       toast(friendlyError(d.error || d.rawLog), 'error');
