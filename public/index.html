@@ -12503,41 +12503,58 @@ async function _renderFeeGrantsInner() {
     });
     const drainedCount = rawGrants.length - grants.length;
 
-    // Subscribers for the selected plan (for Coverage %) — go through cachedFetch
-    // so the response is shared with subscribers/pricing pages and a navigation
-    // away mid-flight discards the result instead of clobbering the new page.
+    // The complete active-subscriber set for one plan = on-chain subscriptions
+    // UNION shared-allocation members. Plans grown via subscribe-and-share (e.g.
+    // plan 267) hold only the operator's own base subscription on-chain; every
+    // real member lives under /members (rpcQuerySubscriptionAllocations). Pulling
+    // /subscriptions alone misses them — so their fee grants were wrongly flagged
+    // stale. We fetch BOTH and union. Each fetch defaults its OWN field to []
+    // on failure (never the whole response) so a /members 500 can't silently
+    // wipe the /subscriptions result, and vice-versa.
+    const planSubscriberSet = async (planId) => {
+      const set = new Set();
+      const now = new Date();
+      const [subs, members] = await Promise.all([
+        cachedFetch('/api/plans/' + planId + '/subscriptions?limit=500', 60_000)
+          .then(r => r.data?.subscriptions || [])
+          .catch((e) => { console.error(`feegrants: /subscriptions ${planId} failed: ${e.message}`); return []; }),
+        cachedFetch('/api/plans/' + planId + '/members', 60_000)
+          .then(r => r.data?.members || [])
+          .catch((e) => { console.error(`feegrants: /members ${planId} failed: ${e.message}`); return []; }),
+      ]);
+      subs.forEach(s => {
+        if (s.status === 'active' && new Date(s.inactive_at) > now) set.add(s.acc_address);
+      });
+      // Shared-allocation members have no per-row expiry — gate on status only.
+      members.forEach(m => {
+        if (m.status === 'active') set.add(m.address);
+      });
+      return set;
+    };
+
+    // Subscribers for the selected plan (drives Coverage %, the SUB badge, and the
+    // per-plan grant filter below). Empty when "all plans" is selected.
     let subscriberAddrs = new Set();
     if (S.mgrPlanId) {
       try {
-        const { data: sd } = await cachedFetch('/api/plans/' + S.mgrPlanId + '/subscriptions?limit=500', 60_000);
+        subscriberAddrs = await planSubscriberSet(S.mgrPlanId);
         if (!_navStillCurrent(epoch, 'fee-grants')) return;
-        const now = new Date();
-        (sd.subscriptions || []).forEach(s => {
-          if (s.status === 'active' && new Date(s.inactive_at) > now) subscriberAddrs.add(s.acc_address);
-        });
       } catch (err) {
         if (!_navStillCurrent(epoch, 'fee-grants')) return;
         console.error('Failed to fetch plan subscribers:', err.message);
       }
     }
 
-    // "Stale" = grantee is not a current subscriber of ANY plan the operator owns.
-    // Fetch subscribers for every owned plan in parallel and union the addresses.
+    // "Stale" = grantee is not a current subscriber/member of ANY plan the
+    // operator owns. Union the complete set (subscriptions + members) across
+    // every owned plan. A per-plan fetch failure logs and contributes an empty
+    // set for that plan only — it never short-circuits the whole union.
     let allSubscriberAddrs = new Set();
     const ownedPlans = S.myPlans || [];
     try {
-      const responses = await Promise.all(ownedPlans.map(p =>
-        cachedFetch('/api/plans/' + p.planId + '/subscriptions?limit=500', 60_000)
-          .then(r => r.data)
-          .catch(() => ({ subscriptions: [] }))
-      ));
+      const sets = await Promise.all(ownedPlans.map(p => planSubscriberSet(p.planId)));
       if (!_navStillCurrent(epoch, 'fee-grants')) return;
-      const now = new Date();
-      responses.forEach(sd => {
-        (sd.subscriptions || []).forEach(s => {
-          if (s.status === 'active' && new Date(s.inactive_at) > now) allSubscriberAddrs.add(s.acc_address);
-        });
-      });
+      sets.forEach(set => set.forEach(a => allSubscriberAddrs.add(a)));
     } catch (err) {
       if (!_navStillCurrent(epoch, 'fee-grants')) return;
       console.error('Failed to union subscribers across plans:', err.message);
@@ -12611,20 +12628,32 @@ async function _renderFeeGrantsInner() {
       </div>
     </div>`;
 
+    // Fee grants carry NO on-chain plan association — /api/feegrant/grants
+    // returns every allowance the operator's wallet has issued. When a specific
+    // plan is selected, the operator expects to see THIS plan's grants, not the
+    // whole wallet. Scope the table to grantees in the selected plan's subscriber
+    // set (subscriptions + shared-allocation members). "All plans" shows everything.
+    const planScoped = !!S.mgrPlanId;
+    const displayGrants = planScoped ? grants.filter(g => subscriberAddrs.has(g.grantee)) : grants;
+
     let tableHtml;
-    if (grants.length === 0) {
-      tableHtml = `<div class="empty-state" style="padding:50px">
+    if (displayGrants.length === 0) {
+      const emptyMsg = planScoped
+        ? `<div style="margin-top:12px;color:var(--text-dim)">No fee grants for this plan's subscribers</div>
+           <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">${grants.length > 0 ? `${fmt(grants.length)} grant${grants.length === 1 ? '' : 's'} exist on the wallet for other plans. ` : ''}Use the settings above to grant fee allowances to this plan's subscribers</div>`
+        : `<div style="margin-top:12px;color:var(--text-dim)">No fee grants issued yet</div>
+           <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Use the settings above to grant fee allowances to your subscribers</div>`;
+      tableHtml = `${statsHtml}<div class="empty-state" style="padding:50px">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        <div style="margin-top:12px;color:var(--text-dim)">No fee grants issued yet</div>
-        <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Use the settings above to grant fee allowances to your subscribers</div>
+        ${emptyMsg}
       </div>`;
     } else {
       const PAGE_SIZE = 100;
-      const totalPages = Math.max(1, Math.ceil(grants.length / PAGE_SIZE));
+      const totalPages = Math.max(1, Math.ceil(displayGrants.length / PAGE_SIZE));
       if (S.fgPage > totalPages) S.fgPage = totalPages;
       if (S.fgPage < 1) S.fgPage = 1;
       const startIdx = (S.fgPage - 1) * PAGE_SIZE;
-      const pageGrants = grants.slice(startIdx, startIdx + PAGE_SIZE);
+      const pageGrants = displayGrants.slice(startIdx, startIdx + PAGE_SIZE);
 
       const rows = pageGrants.map(g => {
         const isSub = subscriberAddrs.has(g.grantee);
@@ -12650,11 +12679,16 @@ async function _renderFeeGrantsInner() {
 
       const paginationHtml = totalPages > 1 ? `<div class="pagination" style="padding:12px 14px">
         <button class="btn btn-ghost btn-sm" ${S.fgPage <= 1 ? 'disabled' : ''} onclick="S.fgPage--;renderFeeGrants()">Prev</button>
-        <span class="info">Page ${S.fgPage} of ${totalPages} · ${fmt(startIdx + 1)}–${fmt(Math.min(startIdx + PAGE_SIZE, grants.length))} of ${fmt(grants.length)}</span>
+        <span class="info">Page ${S.fgPage} of ${totalPages} · ${fmt(startIdx + 1)}–${fmt(Math.min(startIdx + PAGE_SIZE, displayGrants.length))} of ${fmt(displayGrants.length)}</span>
         <button class="btn btn-ghost btn-sm" ${S.fgPage >= totalPages ? 'disabled' : ''} onclick="S.fgPage++;renderFeeGrants()">Next</button>
       </div>` : '';
 
+      const scopeNote = planScoped
+        ? `<div style="padding:10px 14px;font-size:11px;color:var(--text-muted);border-bottom:1px solid var(--border)">Showing ${fmt(displayGrants.length)} grant${displayGrants.length === 1 ? '' : 's'} for plan <strong style="color:var(--accent)">#${escapeHtml(String(S.mgrPlanId))}</strong>${grants.length > displayGrants.length ? ` · ${fmt(grants.length - displayGrants.length)} more on wallet for other plans` : ''}</div>`
+        : '';
+
       tableHtml = `${statsHtml}
+        ${scopeNote}
         <div style="overflow-x:auto">
           <table class="subs-table" style="width:100%">
             <colgroup>
