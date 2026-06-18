@@ -14,7 +14,8 @@
     "build:vendor": "node scripts/bundle-vendor.mjs",
     "postinstall": "node scripts/bundle-vendor.mjs",
     "test:e2e": "node scripts/test-e2e.mjs",
-    "test:universal": "node scripts/universal-test.mjs"
+    "test:universal": "node scripts/universal-test.mjs",
+    "test:cli-e2e": "node scripts/cli-e2e.mjs"
   },
   "files": [
     "cli.js",
