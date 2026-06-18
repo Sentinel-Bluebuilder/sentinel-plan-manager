@@ -6325,7 +6325,7 @@ function prefetchAll({ force = false } = {}) {
     fetch(t.url).then(r => r.json()).then(d => {
       if (!d || d.error) return;
       _dataCache[t.url] = { data: d, ts: Date.now() };
-    }).catch(() => {});
+    }).catch((e) => { console.debug('[prefetch] warm-up fetch failed: ' + (e && e.message)); });
   }
 }
 
@@ -6948,7 +6948,7 @@ function renderWalletPage() {
           }
         }
       })
-      .catch(() => {});
+      .catch((e) => { console.debug('[wallet] QR load failed: ' + (e && e.message)); });
   }
 
   onSendInputChange();
@@ -7334,7 +7334,10 @@ async function copyMnemonicToClipboard() {
     const orig = btn.textContent;
     btn.textContent = 'Copied!';
     setTimeout(() => { btn.textContent = orig; }, 1500);
-  } catch {}
+  } catch (e) {
+    console.warn('[wallet] clipboard write failed: ' + (e && e.message));
+    toast('Copy failed - select and copy manually', 'error');
+  }
 }
 
 async function copyToClipboard(text, btnEl) {
@@ -7834,7 +7837,7 @@ async function renderDashboard() {
       _dataCache['/api/nodes/chain-count'] = { data: d, ts: Date.now() };
       const el = document.getElementById('statNodeCount');
       if (el) el.textContent = fmtExact(d.count);
-    }).catch(() => {});
+    }).catch((e) => { console.debug('[dashboard] chain-count refresh failed: ' + (e && e.message)); });
   }
 
   // If we kicked off a background wallet load, re-render once it resolves so
@@ -7843,7 +7846,7 @@ async function renderDashboard() {
   if (walletPromise) {
     walletPromise.then(() => {
       if (_navStillCurrent(epoch, 'dashboard')) coalesceRender('dashboard', renderDashboard);
-    }).catch(() => {});
+    }).catch((e) => { console.debug('[dashboard] wallet load failed: ' + (e && e.message)); });
   }
 }
 
@@ -9094,7 +9097,7 @@ async function _ensurePlansLoaded(forPage) {
       if (handler[S.page] && _navStillCurrent(epoch, S.page)) coalesceRender('plans:' + S.page, handler[S.page]);
     };
     const { data: d } = await cachedFetch('/api/my-plans', 120_000, onRefresh);
-    if (!_navStillCurrent(epoch, forPage)) return;
+    if (!_navStillCurrent(epoch, forPage)) { S.myPlansLoading = false; return; }
     _lastMyPlansJson = JSON.stringify(d);
     S.myPlans = d.plans || [];
   } catch (e) {
@@ -9147,7 +9150,7 @@ function prefetchPerPlan() {
       fetch(u).then(r => r.json()).then(d => {
         if (!d || d.error) return;
         _dataCache[u] = { data: d, ts: Date.now() };
-      }).catch(() => {});
+      }).catch((e) => { console.debug('[prefetch] per-plan fetch failed: ' + (e && e.message)); });
     }
   }
 }
@@ -9205,7 +9208,7 @@ async function loadMgrNodes() {
       if (Array.isArray(d.countries) && d.countries.length) S.countries = d.countries;
       if (Array.isArray(d.protocols) && d.protocols.length) S.protocols = d.protocols;
       coalesceRender('add-nodes', renderAddNodes);
-    }).catch(() => {});
+    }).catch((e) => { console.debug('[add-nodes] background revalidate failed: ' + (e && e.message)); });
     return;
   }
 
@@ -11536,7 +11539,9 @@ async function loadYourPlans() {
         _dataCache['/api/my-plans'] = { data: { ...d, plans: S.myPlans }, ts: Date.now() };
         _lastMyPlansJson = JSON.stringify({ plans: S.myPlans });
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[your-plans] stub-merge refetch failed: ' + (e && e.message));
+    }
   }
   if (_navStillCurrent(epoch, 'your-plans')) renderYourPlans();
 }
@@ -12727,17 +12732,25 @@ async function toggleAutoGrant(enabled) {
   try {
     const spendLimit = parseFloat($('fgSpendLimit')?.value) || 10;
     const expDays = parseInt($('fgExpDays')?.value, 10) || 30;
-    await fetch('/api/feegrant/auto-grant', {
+    const res = await fetch('/api/feegrant/auto-grant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ enabled, spendLimitDvpn: spendLimit, expirationDays: expDays }),
     });
+    if (!res.ok) {
+      let serverErr = '';
+      try { serverErr = (await res.json()).error || ''; } catch (e) { serverErr = 'HTTP ' + res.status; }
+      throw new Error(serverErr || ('HTTP ' + res.status));
+    }
     toast(enabled ? 'Auto-add enabled — new subscribers will be granted automatically' : 'Auto-add disabled', 'success');
     if (enabled && S.mgrPlanId) {
       // Immediately grant any uncovered subscribers
       grantAllSubscribers();
     }
   } catch (err) {
+    // Roll back the optimistic toggle - the setting did NOT persist server-side.
+    _autoGrantEnabled = !enabled;
+    updateAutoGrantUI(!enabled);
     toast('Failed to update auto-grant setting: ' + err.message, 'error');
   }
 }
@@ -12799,8 +12812,8 @@ function renderGasCosts() {
   const periodP2p = totalP2p * mult;
   const periodTxs = Math.round(txCount * mult);
 
-  // Get P2P price for USD conversion
-  const dvpnPrice = S.wallet?.dvpnPrice || 0;
+  // Get P2P price for USD conversion (lives on S.dvpnPrice; S.wallet has dvpnPriceUsd, not dvpnPrice)
+  const dvpnPrice = S.dvpnPrice || 0;
   const periodUsd = periodP2p * dvpnPrice;
 
   // Top spenders
