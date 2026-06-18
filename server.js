@@ -565,14 +565,21 @@ function loadNodeCacheFromDisk() {
     const d = JSON.parse(readFileSync(NODE_CACHE_FILE, 'utf8'));
     if (d.nodes && d.nodes.length) {
       const ageMs = Date.now() - (d.ts || 0);
-      // Only seed cache if fresh (within TTL). Stale on-disk data is discarded —
-      // we'd rather scan fresh than serve stale counts as "on-chain truth".
+      // Always seed from disk — even when stale. The startup runNodeScan() below
+      // immediately overwrites prices/membership with fresh on-chain truth in its
+      // phase-1 `seeded` merge (gigabytePrices/hourlyPrices are re-pulled from
+      // chain), and only CARRIES FORWARD the probe-only enrichment (country, city,
+      // moniker, serviceType). Discarding stale enrichment left every node with
+      // country/city = null for the entire multi-minute phase-2 re-probe window —
+      // so the Add Nodes country column and filter dropdown rendered empty after
+      // every restart. The `ts` is kept stale on purpose so fetchAllNodes() still
+      // treats the seed as past-TTL and triggers a background refresh.
+      nodeCache.nodes = d.nodes;
+      nodeCache.ts = d.ts || 0;
       if (ageMs < NODE_CACHE_TTL) {
-        nodeCache.nodes = d.nodes;
-        nodeCache.ts = d.ts || 0;
         console.log(`Seeded node cache from disk: ${d.nodes.length} nodes (age ${Math.round(ageMs / 1000)}s, will refresh in background)`);
       } else {
-        console.log(`Disk node cache is stale (age ${Math.round(ageMs / 1000)}s > TTL ${NODE_CACHE_TTL / 1000}s) — discarding, will rescan`);
+        console.log(`Seeded node cache from disk: ${d.nodes.length} nodes (age ${Math.round(ageMs / 1000)}s > TTL ${NODE_CACHE_TTL / 1000}s — enrichment kept, prices refresh on next scan)`);
       }
     }
   } catch (err) {
