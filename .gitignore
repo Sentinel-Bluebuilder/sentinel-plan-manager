@@ -5,6 +5,7 @@ wallet.json
 .session-key
 my-plans.json
 nodes-cache.json
+auto-grant.json
 privy-wallets.json
 sellers.json
 an.json

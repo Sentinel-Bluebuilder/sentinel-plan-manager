@@ -6,14 +6,20 @@
 // against an already-running server (the port check just notes "in use" — it
 // doesn't try to bind).
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import net from 'node:net';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
+
+// Load .env from the project ROOT, not the current working directory. The bare
+// `dotenv/config` import reads cwd — so running this from anywhere but the
+// project root would make the MNEMONIC/DEMO_ADDR/Privy checks read a different
+// (or missing) .env than the ".env file present" check below, which uses ROOT.
+dotenv.config({ path: join(ROOT, '.env') });
 
 const checks = [];
 const ok = (name, detail = '') => checks.push({ name, status: 'PASS', detail });

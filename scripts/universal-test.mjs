@@ -130,7 +130,13 @@ async function getStream(path, maxMs = 60_000) {
       raw += dec.decode(value, { stream: true });
       if (/event:\s*end/i.test(raw) || /data:\s*\{[^}]*"done":\s*true/i.test(raw)) break;
     }
-  } catch { /* aborted is fine */ }
+  } catch (e) {
+    // AbortError on timeout is the expected stop path; anything else is a real
+    // stream failure worth surfacing so a flaky SSE endpoint isn't read as "0 events".
+    if (e.name !== 'AbortError') {
+      console.warn(`[sse] stream read for ${path} failed: ${e.message}`);
+    }
+  }
   finally { clearTimeout(t); }
   const events = [];
   for (const blk of raw.split(/\n\n/)) {
@@ -185,9 +191,12 @@ async function balanceOf(label) {
   // ── 0. Health + read-only ─────────────────────────────────────────────────
   await section('0. Health & read-only (no auth)');
   {
+    // Light, static reads fan out in parallel. /api/rpcs is probed SEPARATELY
+    // afterwards — it dials every RPC endpoint, and firing it alongside 9 other
+    // reads saturates the connection pool and skews the probe's own timings.
     const readOnly = [
       '/health',
-      '/api/params', '/api/rpcs', '/api/rpc-providers',
+      '/api/params', '/api/rpc-providers',
       '/api/nodes/progress', '/api/nodes/chain-count',
       '/api/all-nodes?page=1&limit=5', '/api/providers',
       '/api/plans', '/api/node-rankings',
@@ -200,6 +209,11 @@ async function balanceOf(label) {
                           : (r.status === 200 && r.body && !r.body.error);
       log(`GET ${p}`, ok, isHealth ? '' : `status=${r.status}`);
     });
+    // RPC probe alone — no other in-flight reads competing for the pool.
+    {
+      const r = await get('/api/rpcs');
+      log('GET /api/rpcs', r.status === 200 && r.body && !r.body.error, `status=${r.status}`);
+    }
   }
 
   // ── 1. P session: import, balance, provider, plan ─────────────────────────
@@ -502,19 +516,25 @@ async function balanceOf(label) {
     log('GET /api/feegrant/grants (sees U2)', r.status === 200 && seesU2, `total=${list.length}`);
   }
   {
-    // Remaining read-only fan-out: gas-costs, auto-grant state, SSE, dryRun POST.
-    const [gasRes, agGetRes, sseRes, gsPostRes] = await Promise.all([
+    // Light reads fan out in parallel — gas-costs and auto-grant state are cheap.
+    const [gasRes, agGetRes] = await Promise.all([
       get(`/api/feegrant/gas-costs?planId=${planId}`),
       get('/api/feegrant/auto-grant'),
-      getStream(`/api/feegrant/grant-subscribers-stream?planId=${planId}&dryRun=1`, 15_000),
-      post('/api/feegrant/grant-subscribers', { planId, dryRun: true }),
     ]);
     log('GET /api/feegrant/gas-costs', gasRes.status === 200 && !gasRes.body?.error);
+
+    // SSE stream and the dryRun POST BOTH walk the plan's subscriber set and run
+    // per-subscriber gas estimation against the chain. Firing them concurrently on
+    // the same RPC client saturates the pool (same failure the grants query above
+    // documents). Run them sequentially — stream first, then the POST.
+    const sseRes = await getStream(`/api/feegrant/grant-subscribers-stream?planId=${planId}&dryRun=1`, 15_000);
     log('GET /api/feegrant/grant-subscribers-stream (SSE)',
       sseRes.status === 200 && sseRes.events.length > 0,
       `events=${sseRes.events.length}`);
+    const gsPostRes = await post('/api/feegrant/grant-subscribers', { planId, dryRun: true });
     log('POST /api/feegrant/grant-subscribers (dryRun shape)',
       gsPostRes.status === 200 || gsPostRes.status === 400, `status=${gsPostRes.status}`);
+
     // auto-grant toggle round-trip MUST stay sequential — second toggle reads the first's state
     const before = !!agGetRes.body?.enabled;
     const t1 = await post('/api/feegrant/auto-grant', { enabled: !before });
