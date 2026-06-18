@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€ Plan Manager Server â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿// ─── Plan Manager Server ──────────────────────────────────────────────────────
 // Express backend for Sentinel dVPN plan management.
 // Modules: lib/constants, lib/errors, lib/protobuf, lib/chain, lib/wallet
 // Cache (cached/cacheInvalidate/cacheClear) imported from blue-js-sdk.
@@ -24,10 +24,10 @@ import {
   buildRevokeFeeGrantMsg,
 } from 'blue-js-sdk';
 
-// â”€â”€â”€ Module Imports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Module Imports ──────────────────────────────────────────────────────────
 import { PORT, LCD_ENDPOINTS, RPC_PROVIDERS, RPC_ENDPOINTS, NODE_CACHE_TTL } from './lib/constants.js';
 import * as C from './lib/constants.js';
-// Chain error parsing + plan-specific helpers (kept local â€” SDK's parseChainError lacks plan/lease patterns)
+// Chain error parsing + plan-specific helpers (kept local — SDK's parseChainError lacks plan/lease patterns)
 import { parseChainError, isDuplicateNode, txResponse, extractEventId } from './lib/errors.js';
 import {
   lcd,
@@ -67,7 +67,7 @@ registerCleanupHandlers();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // DATA_DIR lets deployments (Docker, etc.) redirect state files to a mounted
-// volume. Defaults to the project root â€” unchanged for local installs.
+// volume. Defaults to the project root — unchanged for local installs.
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 try { mkdirSync(DATA_DIR, { recursive: true }); } catch (err) {
   console.error(`[boot] Cannot create DATA_DIR ${DATA_DIR}:`, err.message);
@@ -75,14 +75,14 @@ try { mkdirSync(DATA_DIR, { recursive: true }); } catch (err) {
 }
 initSession(DATA_DIR);
 
-// â”€â”€â”€ planSubs cache invalidation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// The subscriptions cache is keyed `planSubs:<planId>:<limit>:<cursorKey>` â€” one
+// ─── planSubs cache invalidation ─────────────────────────────────────────────
+// The subscriptions cache is keyed `planSubs:<planId>:<limit>:<cursorKey>` — one
 // entry per (limit, cursor) variant. The SDK's cacheInvalidate(key) is an
 // EXACT-key delete (no prefix match), so invalidating the bare `planSubs:<id>`
 // prefix never removed the real entries and operators saw stale subscriber lists
 // for up to the 60s TTL after subscribe/unsubscribe. We track every live planSubs
 // key per planId and delete them all on invalidation.
-const _planSubsKeys = new Map(); // planId(number) â†’ Set<cacheKey>
+const _planSubsKeys = new Map(); // planId(number) → Set<cacheKey>
 function registerPlanSubsKey(planId, cacheKey) {
   const id = Number(planId);
   if (!Number.isFinite(id)) return;
@@ -99,7 +99,7 @@ function invalidatePlanSubs(planId) {
   _planSubsKeys.delete(id);
 }
 
-// â”€â”€â”€ Demo Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Demo Mode ────────────────────────────────────────────────────────────────
 // Read-only browse: any visitor sees the UI mounted on a watch-only address
 // without supplying a mnemonic. Every TX-broadcasting endpoint returns 403.
 // Set DEMO_ADDR to any sent1... operator address you want visitors to view.
@@ -125,11 +125,11 @@ if (DEMO_MODE) {
     console.error(`[demo] DEMO_ADDR is not a valid sentinel address: ${err.message}`);
     process.exit(1);
   }
-  console.log(`[demo] Read-only mode enabled â€” mounted on ${DEMO_ADDR}. Writes return 403.`);
+  console.log(`[demo] Read-only mode enabled — mounted on ${DEMO_ADDR}. Writes return 403.`);
 }
 
-// â”€â”€â”€ Boot Pre-flight â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Warn about partial Privy config at boot â€” the email login card mounts but
+// ─── Boot Pre-flight ──────────────────────────────────────────────────────────
+// Warn about partial Privy config at boot — the email login card mounts but
 // /api/wallet/privy-login returns 503, leaving users stuck staring at "send
 // code did nothing" with no clue why. Catch it here, in the startup log,
 // where ops actually look.
@@ -154,7 +154,7 @@ app.disable('x-powered-by');
 // header when an HTTPS-terminating reverse proxy fronts us on localhost.
 app.set('trust proxy', 'loopback');
 
-// â”€â”€â”€ Security Headers (FIX 4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Security Headers (FIX 4) ─────────────────────────────────────────────────
 // TODO: Move to nonce-based CSP to eliminate 'unsafe-inline' for script-src.
 app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy',
@@ -173,7 +173,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// â”€â”€â”€ CSRF Protection (FIX 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── CSRF Protection (FIX 3) ─────────────────────────────────────────────────
 // Non-GET requests must be same-origin OR carry an allow-listed Origin OR
 // include X-Requested-With (impossible to set on a classic cross-site form).
 //
@@ -202,7 +202,7 @@ app.use((req, res, next) => {
   return res.status(403).json({ error: 'CSRF blocked' });
 });
 
-// â”€â”€â”€ Static Files (FIX 1) â€” serves only public/ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Static Files (FIX 1) — serves only public/ ──────────────────────────────
 app.use(express.static(join(__dirname, 'public'), {
   setHeaders(res, path) {
     // Browsers refuse to evaluate .mjs files unless the MIME type says JS.
@@ -210,7 +210,7 @@ app.use(express.static(join(__dirname, 'public'), {
   },
 }));
 
-// â”€â”€â”€ Per-Request Session Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Per-Request Session Middleware ───────────────────────────────────────
 // Decrypts the httpOnly session cookie (if present) into a wallet and runs
 // the rest of the request chain inside that session's AsyncLocalStorage
 // context. Handlers call `getAddr()` / `getSigningClient()` as before;
@@ -235,7 +235,7 @@ app.use(async (req, res, next) => {
       const session = await sessionFromMnemonic(mnemonic);
       return runWithSession(session, () => next());
     } catch (err) {
-      // Cookie decrypt + wallet derivation are pure crypto â€” no broadcast,
+      // Cookie decrypt + wallet derivation are pure crypto — no broadcast,
       // no KEPLR_SIGN_REQUIRED can surface here. Just clear the bad cookie.
       console.warn('[session] Rejecting mnemonic cookie:', err.message);
       res.setHeader('Set-Cookie', buildClearCookie({ secure: req.secure }));
@@ -263,16 +263,16 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// â”€â”€â”€ Demo Write Gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Demo Write Gate ──────────────────────────────────────────────────────────
 // Demo sessions can read but not write. Reject any state-changing method
 // (POST/PUT/DELETE/PATCH) with a clear 403 so the UI can surface a banner.
 app.use((req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   if (currentSession()?.kind !== 'demo') return next();
-  return res.status(403).json({ error: 'Demo mode is read-only â€” clone the repo and set MNEMONIC to make transactions.', demo: true });
+  return res.status(403).json({ error: 'Demo mode is read-only — clone the repo and set MNEMONIC to make transactions.', demo: true });
 });
 
-// â”€â”€â”€ Plan ID Persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Plan ID Persistence ──────────────────────────────────────────────────────
 // Keyed by wallet address so multi-user deploys keep each operator's plan
 // list separate. Legacy flat-array files (single-user installs) are migrated
 // to the per-address map on first read.
@@ -291,7 +291,7 @@ function readPlanStore() {
     }
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
-    // Helper has no `res` in scope â€” log and return safe default.
+    // Helper has no `res` in scope — log and return safe default.
     console.error('Failed to load my-plans.json:', err.message);
     return {};
   }
@@ -329,8 +329,8 @@ function saveMyPlanId(id) {
 
 /**
  * Drop plan IDs from the per-wallet `my-plans.json` ledger. Used to evict
- * stale entries left over from a different mnemonic â€” these would otherwise
- * surface in the UI and produce "address â€¦ is not authorized" errors when
+ * stale entries left over from a different mnemonic — these would otherwise
+ * surface in the UI and produce "address … is not authorized" errors when
  * the user tries to link nodes / change status / etc.
  */
 function dropMyPlanIds(ids) {
@@ -356,7 +356,7 @@ function dropMyPlanIds(ids) {
  * Pre-flight ownership check for any TX that names a `planId`. RPC-first.
  * Returns null on success, or an Express-friendly `{ status, error }` object
  * to short-circuit the handler. Prevents broadcasting a doomed
- * "address â€¦ is not authorized" TX (and burning gas) when the user's
+ * "address … is not authorized" TX (and burning gas) when the user's
  * `my-plans.json` lists a plan they don't actually own.
  */
 async function assertPlanOwnership(planId) {
@@ -365,7 +365,7 @@ async function assertPlanOwnership(planId) {
   if (!myProv) return { status: 401, error: 'Wallet not loaded' };
 
   // Resolve the plan's prov_address with RPC first, LCD fallback when RPC
-  // returns null (the SDK's rpcQueryPlan swallows ALL errors as null â€”
+  // returns null (the SDK's rpcQueryPlan swallows ALL errors as null —
   // transient blip vs missing plan are indistinguishable, so we MUST verify
   // via LCD before allowing the TX, or doomed "is not authorized" broadcasts
   // sneak through and burn gas).
@@ -385,16 +385,16 @@ async function assertPlanOwnership(planId) {
       const lcdPlan = await lcd(`/sentinel/plan/v3/plans/${planId}`);
       if (lcdPlan?.plan?.prov_address) provAddress = lcdPlan.plan.prov_address;
     } catch (e) {
-      console.warn(`[ownership] LCD ownership probe failed for plan ${planId}: ${e.message} â€” allowing TX (chain will validate)`);
+      console.warn(`[ownership] LCD ownership probe failed for plan ${planId}: ${e.message} — allowing TX (chain will validate)`);
       return null;
     }
   }
 
   if (!provAddress) {
-    // Both RPC and LCD failed to return a prov_address. Don't block â€”
+    // Both RPC and LCD failed to return a prov_address. Don't block —
     // could be a brand-new plan or a transient outage. Chain will reject
     // if foreign.
-    console.warn(`[ownership] No prov_address resolved for plan ${planId} via RPC or LCD â€” allowing TX`);
+    console.warn(`[ownership] No prov_address resolved for plan ${planId} via RPC or LCD — allowing TX`);
     return null;
   }
 
@@ -415,7 +415,7 @@ async function filterOwnedPlanIds(planIds) {
   return cached(`myPlansOwned:${myProv}:${planIds.slice().sort().join(',')}`, 60_000, async () => {
     const client = await getRpcClient();
     if (!client) {
-      // No RPC â€” can't make ownership decisions. Return list as-is, do not
+      // No RPC — can't make ownership decisions. Return list as-is, do not
       // prune. Better to show possibly-stale plans than to nuke the list on
       // a transient outage.
       return planIds.map(Number).sort((a, b) => a - b);
@@ -438,14 +438,14 @@ async function filterOwnedPlanIds(planIds) {
           const lcdPlan = await lcd(`/sentinel/plan/v3/plans/${id}`);
           if (lcdPlan?.plan?.prov_address) provAddress = lcdPlan.plan.prov_address;
         } catch {
-          // Both queries failed â€” indeterminate, keep optimistically.
+          // Both queries failed — indeterminate, keep optimistically.
           kept.push(Number(id));
           return;
         }
       }
 
       if (!provAddress) {
-        // Both RPC and LCD couldn't resolve â€” indeterminate, keep.
+        // Both RPC and LCD couldn't resolve — indeterminate, keep.
         kept.push(Number(id));
         return;
       }
@@ -460,14 +460,14 @@ async function filterOwnedPlanIds(planIds) {
   });
 }
 
-// â”€â”€â”€ Chain-Side Plan Discovery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Chain-Side Plan Discovery ────────────────────────────────────────────────
 // my-plans.json only learns about plans created through THIS app. Plans the
 // wallet created elsewhere (CLI, another Plan Manager install) would be
 // invisible after login, so on every /api/my-plans read we also ask the chain
-// for ALL plans under our provider address (active + inactive â€” a wallet can
+// for ALL plans under our provider address (active + inactive — a wallet can
 // manage many) and merge any unknown IDs into the local ledger. Linked nodes
 // then flow automatically: getPlanStats resolves them per plan ID via
-// rpcQueryNodesForPlan. RPC-first, LCD fallback, and never fatal â€” on total
+// rpcQueryNodesForPlan. RPC-first, LCD fallback, and never fatal — on total
 // failure the route still serves the local ledger.
 async function discoverChainPlans() {
   const myProv = getProvAddr();
@@ -485,7 +485,7 @@ async function discoverChainPlans() {
         const data = await lcd(`/sentinel/plan/v3/providers/${myProv}/plans?pagination.limit=1000`);
         plans = data.plans || [];
       } catch (e) {
-        console.warn(`[discovery] LCD plans-for-provider failed: ${e.message} â€” using local ledger only`);
+        console.warn(`[discovery] LCD plans-for-provider failed: ${e.message} — using local ledger only`);
         return [];
       }
     }
@@ -500,11 +500,11 @@ async function discoverChainPlans() {
   });
 }
 
-// â”€â”€â”€ Privy Cosmos Wallet Persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Maps Privy userId â†’ { walletId, pubkeyB64, sent1Addr } so repeat logins from
+// ─── Privy Cosmos Wallet Persistence ──────────────────────────────────────────
+// Maps Privy userId → { walletId, pubkeyB64, sent1Addr } so repeat logins from
 // the same email reuse the same Privy server-custody cosmos wallet (and
 // therefore the same sent1 address) instead of provisioning a fresh one each
-// session. Stored on disk via DATA_DIR; safe to commit no secrets here â€” the
+// session. Stored on disk via DATA_DIR; safe to commit no secrets here — the
 // privkey lives inside Privy's enclave.
 const PRIVY_WALLETS_FILE = join(DATA_DIR, 'privy-wallets.json');
 
@@ -542,7 +542,7 @@ function savePrivyWallet(userId, entry) {
   catch (err) { console.error('Failed to save privy-wallets.json:', err.message); }
 }
 
-// â”€â”€â”€ Node Cache (SDK scan) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Node Cache (SDK scan) ────────────────────────────────────────────────────
 const NODE_CACHE_FILE = join(DATA_DIR, 'nodes-cache.json');
 let nodeCache = { nodes: [], ts: 0, scanning: false };
 let scanProgress = { total: 0, probed: 0, online: 0 };
@@ -553,14 +553,14 @@ function loadNodeCacheFromDisk() {
     const d = JSON.parse(readFileSync(NODE_CACHE_FILE, 'utf8'));
     if (d.nodes && d.nodes.length) {
       const ageMs = Date.now() - (d.ts || 0);
-      // Only seed cache if fresh (within TTL). Stale on-disk data is discarded â€”
+      // Only seed cache if fresh (within TTL). Stale on-disk data is discarded —
       // we'd rather scan fresh than serve stale counts as "on-chain truth".
       if (ageMs < NODE_CACHE_TTL) {
         nodeCache.nodes = d.nodes;
         nodeCache.ts = d.ts || 0;
         console.log(`Seeded node cache from disk: ${d.nodes.length} nodes (age ${Math.round(ageMs / 1000)}s, will refresh in background)`);
       } else {
-        console.log(`Disk node cache is stale (age ${Math.round(ageMs / 1000)}s > TTL ${NODE_CACHE_TTL / 1000}s) â€” discarding, will rescan`);
+        console.log(`Disk node cache is stale (age ${Math.round(ageMs / 1000)}s > TTL ${NODE_CACHE_TTL / 1000}s) — discarding, will rescan`);
       }
     }
   } catch (err) {
@@ -577,7 +577,7 @@ loadNodeCacheFromDisk();
 // Always kick a fresh scan on startup so the disk seed is replaced with on-chain truth ASAP.
 runNodeScan().catch(err => console.error('Initial node scan failed:', err.message));
 
-// Adapter: handles both shapes simultaneously â€”
+// Adapter: handles both shapes simultaneously —
 //   chain catalog (snake_case: gigabyte_prices, remote_url, no country)
 //   probe-enriched (camelCase: gigabytePrices, remoteUrl, country, city, etc.)
 function nodeCacheToAllNodes(raw) {
@@ -605,7 +605,7 @@ function nodeCacheToAllNodes(raw) {
 }
 
 // Two-phase scan:
-//   Phase 1 (fast): chain catalog via fetchAllNodes â€” every active node on chain.
+//   Phase 1 (fast): chain catalog via fetchAllNodes — every active node on chain.
 //                   Cache populated with truth immediately. No probe filtering.
 //   Phase 2 (background): probe-enrich for country/city/protocol on top of catalog.
 //                   Successful probes overlay enrichment fields; failures keep chain entry.
@@ -616,14 +616,14 @@ async function runNodeScan() {
   console.log('Starting node scan: phase 1 (chain catalog)...');
   try {
     // Pull the full chain catalog via RPC directly. SDK's fetchAllNodes()
-    // hardcodes limit=500 via fetchActiveNodes default â€” that's why we were
+    // hardcodes limit=500 via fetchActiveNodes default — that's why we were
     // missing half the network. Go straight to rpcQueryNodes with limit=10000.
     const rpc = await getRpcClient();
     if (!rpc) {
       // All RPC endpoints failed. rpcQueryNodes(null, ...) would throw an opaque
       // "Cannot read properties of null" deep in the SDK; surface a clear cause
       // and bail cleanly so the next scan can retry once RPC recovers.
-      console.warn('[scan] No RPC client available â€” skipping node catalog refresh, will retry next scan.');
+      console.warn('[scan] No RPC client available — skipping node catalog refresh, will retry next scan.');
       nodeCache.scanning = false;
       return;
     }
@@ -638,7 +638,7 @@ async function runNodeScan() {
       })
       .filter(n => n.remote_url && (n.gigabyte_prices || []).some(p => p.denom === 'udvpn'));
     // Preserve prior enrichment (country/city/moniker/serviceType) across catalog
-    // refreshes â€” otherwise the country dropdown empties for the duration of phase 2.
+    // refreshes — otherwise the country dropdown empties for the duration of phase 2.
     const priorByAddr = new Map((nodeCache.nodes || []).map(n => [n.address, n]));
     const seeded = catalog.map(n => {
       const prior = priorByAddr.get(n.address);
@@ -720,11 +720,11 @@ async function fetchAllNodes() {
   return nodeCacheToAllNodes(nodeCache.nodes);
 }
 
-// â”€â”€â”€ Plan Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Plan Helpers ─────────────────────────────────────────────────────────────
 
 async function discoverPlanIds() {
   const ids = new Set();
-  // Fetch RPC client once outside the loop â€” reused for every probe.
+  // Fetch RPC client once outside the loop — reused for every probe.
   let rpc = null;
   try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
   for (let batch = 0; batch < 10; batch++) {
@@ -732,16 +732,16 @@ async function discoverPlanIds() {
     for (let i = batch * 10 + 1; i <= (batch + 1) * 10; i++) {
       checks.push((async (planId) => {
         // RPC-first: if RPC returns a non-empty array the plan exists.
-        // Empty array is ambiguous (truly empty OR not-on-chain) â€” fall back to LCD count_total.
+        // Empty array is ambiguous (truly empty OR not-on-chain) — fall back to LCD count_total.
         if (rpc) {
           try {
             const result = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 1 });
             if (result && result.length > 0) { ids.add(planId); return; }
           } catch (err) {
-            console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} â€” LCD fallback`);
+            console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} — LCD fallback`);
           }
         }
-        // LCD fallback â€” count_total is authoritative for empty-vs-nonexistent distinction.
+        // LCD fallback — count_total is authoritative for empty-vs-nonexistent distinction.
         await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`)
           .then(d => {
             const total = parseInt(d.pagination?.total || '0');
@@ -767,7 +767,7 @@ async function getUniqueWallets(planId) {
       return wallets.size;
     }
   } catch (err) {
-    console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} â€” LCD fallback`);
+    console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} — LCD fallback`);
   }
 
   // LCD fallback
@@ -828,7 +828,7 @@ async function _retry(thunk, { attempts = 3, baseMs = 400, label = 'op' } = {}) 
 }
 
 async function getPlanStats(planId) {
-  // Cache only successful results â€” retry transient failures up to 3x before
+  // Cache only successful results — retry transient failures up to 3x before
   // giving up. Otherwise a single RPC blip caches a null for 2 minutes and
   // the plan disappears from the UI even after the chain recovers.
   // Scope the cache key by operator: the subscriber total excludes the
@@ -848,7 +848,7 @@ async function getPlanStats(planId) {
 }
 
 async function _getPlanStatsImpl(planId) {
-  // Fetch RPC client once for this call â€” shared by RPC-first paths below.
+  // Fetch RPC client once for this call — shared by RPC-first paths below.
   let rpc = null;
   try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
 
@@ -862,10 +862,10 @@ async function _getPlanStatsImpl(planId) {
           const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
           return { source: 'rpc', subs };
         } catch (err) {
-          console.log(`[RPC] _getPlanStatsImpl subs(${planId}) failed: ${err.message} â€” LCD fallback`);
+          console.log(`[RPC] _getPlanStatsImpl subs(${planId}) failed: ${err.message} — LCD fallback`);
         }
       }
-      // LCD fallback: two calls â€” count_total + reverse sample.
+      // LCD fallback: two calls — count_total + reverse sample.
       const [countD, latestD] = await Promise.all([
         lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`).catch(() => ({})),
         lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=200&pagination.reverse=true`).catch(() => ({})),
@@ -880,7 +880,7 @@ async function _getPlanStatsImpl(planId) {
           const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
           if (nodes) return { nodes };
         } catch (err) {
-          console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} â€” LCD fallback`);
+          console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
         }
       }
       return lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=500`).catch(() => ({ nodes: [] }));
@@ -935,7 +935,7 @@ async function _getPlanStatsImpl(planId) {
 
   // Authoritative price comes from the plan record (set at creation, immutable).
   // Subscription samples are only used as a last-resort fallback when the plan
-  // record didn't load â€” pricing must NOT silently fall back to zero just
+  // record didn't load — pricing must NOT silently fall back to zero just
   // because the plan has no subscribers yet.
   const planPrices = Array.isArray(planRecord?.prices) ? planRecord.prices : [];
   const planPrice = planPrices[0] || null;
@@ -960,7 +960,7 @@ async function _getPlanStatsImpl(planId) {
   const earliestStart = dates[0]?.toISOString() || null;
   const latestStart = dates[dates.length - 1]?.toISOString() || null;
 
-  // Duration from the plan record (seconds â†’ days). Fall back to the
+  // Duration from the plan record (seconds → days). Fall back to the
   // sample-derived duration only when the plan record didn't load.
   let durationDays = null;
   if (planRecord?.duration != null) {
@@ -1100,7 +1100,7 @@ async function getNodesForPlan(planId) {
       return nodes;
     }
   } catch (err) {
-    console.log(`[RPC] getNodesForPlan(${planId}) failed: ${err.message} â€” LCD fallback`);
+    console.log(`[RPC] getNodesForPlan(${planId}) failed: ${err.message} — LCD fallback`);
   }
 
   // LCD fallback
@@ -1138,7 +1138,7 @@ async function getProviders() {
   }));
 }
 
-// â”€â”€â”€ Analytics Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Analytics Helpers ────────────────────────────────────────────────────────
 
 async function getAllNodeInfo() {
   const nodeMap = {};
@@ -1187,7 +1187,7 @@ async function scanSessions() {
   let pages = 0;
   let totalScanned = 0;
 
-  // No chain-wide RPC sessions query available â€” LCD is the only path
+  // No chain-wide RPC sessions query available — LCD is the only path
   do {
     const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
     const d = await lcd(`/sentinel/session/v3/sessions?pagination.limit=500${keyParam}`);
@@ -1216,7 +1216,7 @@ async function scanSessions() {
   return { nodes, totalScanned };
 }
 
-// â”€â”€â”€ Lease Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Lease Helpers ────────────────────────────────────────────────────────────
 
 // Build a MsgStartLease for a node WITHOUT broadcasting it. Pure lookup +
 // message construction, so the result can be bundled into a multi-message TX
@@ -1361,10 +1361,10 @@ async function buildLeaseMsgs(addrs, hours = 24) {
           // Too short — end it so a fresh full-duration lease can replace it.
           endMsgs.push({ typeUrl: C.MSG_END_LEASE_TYPE, value: { from: myProv, id: BigInt(lease.id) } });
           reconciled++;
-          console.log(`[BATCH-LEASE] ${addr}: existing lease ${lease.hours}h < ${hours}h â€” ending lease ${lease.id} and re-leasing`);
+          console.log(`[BATCH-LEASE] ${addr}: existing lease ${lease.hours}h < ${hours}h — ending lease ${lease.id} and re-leasing`);
         }
       }
-      if (skip.size) console.log(`[BATCH-LEASE] ${skip.size} node(s) already cover ${hours}h â€” skipping their lease msg`);
+      if (skip.size) console.log(`[BATCH-LEASE] ${skip.size} node(s) already cover ${hours}h — skipping their lease msg`);
     }
   } catch (e) {
     console.log(`[BATCH-LEASE] lease pre-check skipped: ${e.message}`);
@@ -1374,9 +1374,9 @@ async function buildLeaseMsgs(addrs, hours = 24) {
   for (const addr of addrs) {
     if (skip.has(addr)) continue;
     const raw = rawMap[addr];
-    if (!raw) { console.log(`[BATCH-LEASE] Skipping ${addr} â€” not found on chain`); continue; }
+    if (!raw) { console.log(`[BATCH-LEASE] Skipping ${addr} — not found on chain`); continue; }
     const hp = (raw.hourly_prices || []).find(p => p.denom === 'udvpn');
-    if (!hp) { console.log(`[BATCH-LEASE] Skipping ${addr} â€” no udvpn hourly price`); continue; }
+    if (!hp) { console.log(`[BATCH-LEASE] Skipping ${addr} — no udvpn hourly price`); continue; }
 
     startMsgs.push({
       typeUrl: C.MSG_START_LEASE_TYPE,
@@ -1412,7 +1412,7 @@ async function batchLeaseNodes(addrs, hours = 24) {
   if (!resp.ok) {
     const raw = resp.rawLog || '';
     if (raw.includes('already exists')) {
-      console.log(`[BATCH-LEASE] Some leases already existed â€” continuing`);
+      console.log(`[BATCH-LEASE] Some leases already existed — continuing`);
       return resp;
     }
     console.log(`[BATCH-LEASE] Failed: ${raw.slice(0, 200)}`);
@@ -1422,11 +1422,11 @@ async function batchLeaseNodes(addrs, hours = 24) {
   return resp;
 }
 
-// â”€â”€â”€ Routes: Wallet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Wallet ──────────────────────────────────────────────────────────
 
-// â”€â”€â”€ Wallet route rate limiter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Wallet route rate limiter ───────────────────────────────────────────────
 // In-memory token bucket. Localhost-only deployment, so this exists primarily
-// to slow brute-force or runaway scripts on the same machine â€” not to defend
+// to slow brute-force or runaway scripts on the same machine — not to defend
 // against an external attacker (the bind to 127.0.0.1 already handles that).
 const _rl = new Map();
 function rateLimit(bucket, max, windowMs) {
@@ -1496,7 +1496,7 @@ app.post('/api/wallet/import', rateLimit('wimp', 20, 60_000), async (req, res) =
 
     // Derive the wallet to validate the mnemonic before encrypting it into
     // the cookie. The mnemonic never leaves this request frame on the server
-    // side â€” it lives in the user's encrypted browser cookie.
+    // side — it lives in the user's encrypted browser cookie.
     const session = await sessionFromMnemonic(trimmed);
     const token = encryptMnemonic(trimmed);
     res.setHeader('Set-Cookie', buildSetCookie(token, { secure: req.secure }));
@@ -1534,7 +1534,7 @@ app.post('/api/wallet/logout', (req, res) => {
   } catch (err) {
     console.warn('[logout] cache cleanup failed:', err.message);
   }
-  // Clear both cookies so a Keplr â†’ mnemonic switch (or vice versa) leaves
+  // Clear both cookies so a Keplr → mnemonic switch (or vice versa) leaves
   // no residual session.
   res.setHeader('Set-Cookie', [
     buildClearCookie({ secure: req.secure }),
@@ -1544,10 +1544,10 @@ app.post('/api/wallet/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-// â”€â”€â”€ Keplr Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Keplr Login ─────────────────────────────────────────────────────────────
 // Client flow:
-//   1. POST /api/wallet/keplr-challenge           â†’ { nonce }
-//   2. window.keplr.signArbitrary(chainId, addr, nonce) â†’ { signature, pub_key }
+//   1. POST /api/wallet/keplr-challenge           → { nonce }
+//   2. window.keplr.signArbitrary(chainId, addr, nonce) → { signature, pub_key }
 //   3. POST /api/wallet/keplr-login { addr, pubkey, signature, nonce }
 // We verify the ADR-36 signature server-side before issuing the spm_keplr
 // cookie. This proves the browser holds the private key for `addr` (defends
@@ -1575,7 +1575,7 @@ function relayKeplrSign(err, res) {
 //   - signDoc is an amino StdSignDoc with chain_id="", account_number="0",
 //     sequence="0", fee={gas:"0",amount:[]}, memo="", and a single
 //     {type:"sign/MsgSignData", value:{signer:addr, data:base64(message)}}.
-//   - Sorted-keys JSON encoding (amino) â†’ SHA-256 â†’ secp256k1.verify.
+//   - Sorted-keys JSON encoding (amino) → SHA-256 → secp256k1.verify.
 //   - Pubkey-derived address must match the claimed bech32.
 async function verifyAdr36Signature({ addr, pubkeyB64, signatureB64, message }) {
   try {
@@ -1587,7 +1587,7 @@ async function verifyAdr36Signature({ addr, pubkeyB64, signatureB64, message }) 
     const signature = fromBase64(signatureB64);
     if (signature.length !== 64) return false;
 
-    // Derive bech32 from pubkey: sha256 â†’ ripemd160 â†’ bech32('sent', ...).
+    // Derive bech32 from pubkey: sha256 → ripemd160 → bech32('sent', ...).
     const sha = new Sha256(pubkey).digest();
     const ripemd = ripemd160(sha);
     const derived = toBech('sent', ripemd);
@@ -1607,7 +1607,7 @@ async function verifyAdr36Signature({ addr, pubkeyB64, signatureB64, message }) 
     const hash = new Sha256(Buffer.from(sortedJson, 'utf8')).digest();
 
     return await Secp256k1.verifySignature(
-      // Secp256k1Signature.fromFixedLength(signature) â€” but the lib wants
+      // Secp256k1Signature.fromFixedLength(signature) — but the lib wants
       // an ExtendedSecp256k1Signature; we pass via the static helper.
       // Use the simpler `.verifySignature` API which accepts the 64-byte sig.
       // Build a Secp256k1Signature from r||s.
@@ -1616,7 +1616,7 @@ async function verifyAdr36Signature({ addr, pubkeyB64, signatureB64, message }) 
       pubkey,
     );
   } catch (err) {
-    // Helper has no `res` in scope â€” log and treat as verification failure.
+    // Helper has no `res` in scope — log and treat as verification failure.
     console.warn('[keplr] ADR-36 verify error:', err.message);
     return false;
   }
@@ -1659,7 +1659,7 @@ app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req,
     //   1. Rebuild the canonical amino SignDoc Keplr signs for arbitrary text.
     //   2. SHA-256 the JSON bytes.
     //   3. secp256k1.verify(hash, sig, pubkey).
-    //   4. Confirm pubkey hash â†’ addr matches the claimed bech32 address
+    //   4. Confirm pubkey hash → addr matches the claimed bech32 address
     //      (otherwise an attacker could submit anyone's pubkey + a sig made
     //      with their own key for a different address).
     const ok = await verifyAdr36Signature({ addr, pubkeyB64: pubkey, signatureB64: signature, message: nonce });
@@ -1684,7 +1684,7 @@ app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req,
   }
 });
 
-// â”€â”€â”€ Privy Login (server-custody Cosmos wallet) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Privy Login (server-custody Cosmos wallet) ──────────────────────────────
 // Privy issues a "Tier 2" Cosmos wallet for the authenticated user; the
 // privkey lives inside Privy's enclave, never on this server, never in the
 // browser. Flow:
@@ -1694,7 +1694,7 @@ app.post('/api/wallet/keplr-login', rateLimit('klogin', 20, 60_000), async (req,
 //      provision) a `chain_type: 'cosmos'` wallet for this userId via Privy's
 //      REST API. Privy returns a compressed secp256k1 public_key; we re-bech32
 //      it with the `sent` prefix to produce the user's sent1 address.
-//   3. We persist `userId â†’ {walletId, pubkey, sent1Addr}` so repeat logins
+//   3. We persist `userId → {walletId, pubkey, sent1Addr}` so repeat logins
 //      reuse the same wallet (same address) and we issue the standard Keplr
 //      session cookie. /api/tx/privy-sign-and-broadcast then proxies signing
 //      through Privy raw_sign for any TX path.
@@ -1728,7 +1728,7 @@ function privyAuthHeaders() {
 
 async function privyCreateCosmosWallet(_userId) {
   // owner_id is omitted: Privy requires a cuid2-shaped id created via its Owners
-  // API, not the did:privy:... userId. We persist the userIdâ†’walletId binding
+  // API, not the did:privy:... userId. We persist the userId→walletId binding
   // in privy-wallets.json instead, which is sufficient for our recovery model.
   const r = await fetch(`${PRIVY_API_BASE}/wallets`, {
     method: 'POST',
@@ -1814,8 +1814,8 @@ app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req,
     }
 
     // Reuse the user's existing cosmos wallet if we've provisioned one before;
-    // otherwise create one bound to this Privy userId. Same userId â†’ same
-    // wallet â†’ same sent1 address forever, recoverable via Privy auth alone.
+    // otherwise create one bound to this Privy userId. Same userId → same
+    // wallet → same sent1 address forever, recoverable via Privy auth alone.
     let entry = lookupPrivyWallet(verified.userId);
     if (!entry?.walletId) {
       let wallet;
@@ -1853,7 +1853,7 @@ app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req,
   }
 });
 
-// TEMP DIAG â€” client error/event beacon. Browser POSTs {tag, data}; we log it
+// TEMP DIAG — client error/event beacon. Browser POSTs {tag, data}; we log it
 // server-side so frontend-only failures (e.g. keplr.signDirect throwing before
 // the broadcast POST fires) show up in server-out.log. Remove once Keplr create
 // flow is verified.
@@ -1867,7 +1867,7 @@ app.post('/api/_clientlog', (req, res) => {
   res.json({ ok: true });
 });
 
-// â”€â”€â”€ Keplr Broadcast (client-signed TxRaw) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Keplr Broadcast (client-signed TxRaw) ───────────────────────────────────
 // The browser POSTs back the result of window.keplr.signDirect packaged as a
 // TxRaw (bodyBytes, authInfoBytes, signatures[]) base64-encoded. We broadcast
 // it via the existing RPC failover and respond in the same shape mnemonic
@@ -1886,7 +1886,7 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
 
     // Assert the signer pubkey inside authInfoBytes derives to the session's
     // bech32 address. Without this, a logged-in Keplr user could POST a TxRaw
-    // signed by a different wallet â€” chain rejects it (sig mismatch) but we
+    // signed by a different wallet — chain rejects it (sig mismatch) but we
     // still don't want to act as a relay for arbitrary signed payloads.
     const authInfo = AuthInfo.decode(fromBase64(authInfoBytes));
     const signerInfo = authInfo.signerInfos?.[0];
@@ -1925,7 +1925,7 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
     const events = result.events;
     const planId = extractEventId(events, /plan/i, ['plan_id', 'id']);
     const subscriptionId = extractEventId(events, /subscription/i, ['subscription_id', 'id']);
-    // TEMP DIAG â€” trace why Keplr create activation isn't firing. Remove once fixed.
+    // TEMP DIAG — trace why Keplr create activation isn't firing. Remove once fixed.
     try {
       console.log('[broadcast-signed][diag] pending=%s eventCount=%s planId=%s subId=%s',
         result.pending || false, Array.isArray(events) ? events.length : 'none', planId, subscriptionId);
@@ -1963,7 +1963,7 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Privy server-side signed broadcast â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Privy server-side signed broadcast ──────────────────────────────────────
 // Browser builds {bodyBytes, authInfoBytes} for the user's TX, POSTs them
 // here. We compute SHA256(signDocBytes) per SIGN_MODE_DIRECT, hand the digest
 // to Privy raw_sign (the Cosmos privkey lives in Privy's enclave), then wrap
@@ -2012,7 +2012,7 @@ app.post('/api/tx/privy-sign-and-broadcast', async (req, res) => {
 
     // Build signDocBytes server-side (don't trust browser's framing) when the
     // browser supplied chainId/accountNumber. Falls back to client-supplied
-    // signDocBytes only if the explicit fields are absent â€” useful for tests.
+    // signDocBytes only if the explicit fields are absent — useful for tests.
     let signDocBytesBuf;
     if (chainId && (accountNumber !== undefined && accountNumber !== null)) {
       const sd = SignDoc.fromPartial({
@@ -2044,7 +2044,7 @@ app.post('/api/tx/privy-sign-and-broadcast', async (req, res) => {
     const cleaned = signatureHex.startsWith('0x') ? signatureHex.slice(2) : signatureHex;
     let sigBytes = fromHex(cleaned);
     // Cosmos SIGN_MODE_DIRECT expects 64 bytes (R||S, no recovery byte).
-    // Privy's raw_sign returns either 64 or 65 (with recovery id) â€” strip it.
+    // Privy's raw_sign returns either 64 or 65 (with recovery id) — strip it.
     if (sigBytes.length === 65) sigBytes = sigBytes.slice(0, 64);
     if (sigBytes.length !== 64) {
       return res.status(502).json({ error: `Privy returned unexpected signature length: ${sigBytes.length}` });
@@ -2079,7 +2079,7 @@ app.get('/api/wallet', async (req, res) => {
   try {
     const [bal, dvpnPrice, provider] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
-        // Read-only â€” go straight to the RPC query client so Keplr/Privy
+        // Read-only — go straight to the RPC query client so Keplr/Privy
         // sessions (which have no signing client; getClient() throws
         // 'client-signs') can still fetch their balance. Falls back to the
         // LCD if RPC is unavailable.
@@ -2087,7 +2087,7 @@ app.get('/api/wallet', async (req, res) => {
           const rpc = await getRpcClient();
           if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
         } catch (e) {
-          console.log(`[RPC] Balance query failed: ${e.message} â€” LCD fallback`);
+          console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
         }
         const data = await lcd(`/cosmos/bank/v1beta1/balances/${getAddr()}`);
         const bal = data.balances?.find(b => b.denom === 'udvpn');
@@ -2095,7 +2095,7 @@ app.get('/api/wallet', async (req, res) => {
       }),
       getDvpnPrice(),
       cached(`provider:${getAddr()}`, 600_000, async () => {
-        // RPC-first: direct lookup by sentprov address â€” single round trip vs scanning 500 providers.
+        // RPC-first: direct lookup by sentprov address — single round trip vs scanning 500 providers.
         try {
           const rpc = await getRpcClient();
           if (rpc) {
@@ -2103,9 +2103,9 @@ app.get('/api/wallet', async (req, res) => {
             if (prov) return prov;
           }
         } catch (err) {
-          // Read-only query â€” never produces KEPLR_SIGN_REQUIRED. Don't write
+          // Read-only query — never produces KEPLR_SIGN_REQUIRED. Don't write
           // to `res` from inside a cached() callback or we'd double-respond.
-          console.log(`[RPC] provider lookup failed: ${err.message} â€” LCD fallback`);
+          console.log(`[RPC] provider lookup failed: ${err.message} — LCD fallback`);
         }
         // LCD fallback
         try {
@@ -2145,7 +2145,7 @@ app.get('/api/wallet', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Wallet Send (MsgSend) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Wallet Send (MsgSend) ───────────────────────────────────────────────────
 // POST /api/wallet/send  body: { to, amountDvpn, memo? }
 // Broadcasts a Cosmos bank MsgSend from the session wallet. RPC-first via
 // the standard signing client. Validates bech32 prefix, positive amount,
@@ -2181,7 +2181,7 @@ app.post('/api/wallet/send', rateLimit('wsend', 30, 60_000), async (req, res) =>
       },
     };
 
-    console.log(`[SEND] ${from} â†’ ${trimmedTo} : ${amt} P2P (${amountUdvpn} udvpn)${safeMemo ? ` memo="${safeMemo}"` : ''}`);
+    console.log(`[SEND] ${from} → ${trimmedTo} : ${amt} P2P (${amountUdvpn} udvpn)${safeMemo ? ` memo="${safeMemo}"` : ''}`);
     const result = await safeBroadcast([msg], safeMemo);
 
     if (result.code !== 0) {
@@ -2204,7 +2204,7 @@ app.post('/api/wallet/send', rateLimit('wsend', 30, 60_000), async (req, res) =>
   }
 });
 
-// GET /api/wallet/qr â€” returns an SVG QR for the session wallet's address.
+// GET /api/wallet/qr — returns an SVG QR for the session wallet's address.
 app.get('/api/wallet/qr', async (req, res) => {
   if (!requireWallet(req, res)) return;
   try {
@@ -2223,7 +2223,7 @@ app.get('/api/wallet/qr', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Plans â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Plans ────────────────────────────────────────────────────────────
 
 app.get('/api/plans', async (req, res) => {
   try {
@@ -2268,7 +2268,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     const keyParam = key ? `&pagination.key=${encodeURIComponent(key)}` : '';
     const cacheKey = `planSubs:${planId}:${limit}:${key}`;
 
-    // RPC-first only when no cursor key and limit â‰¤ 500 (full page, no pagination needed).
+    // RPC-first only when no cursor key and limit ≤ 500 (full page, no pagination needed).
     // RPC doesn't give next_key, so cursor-based pagination must use LCD.
     let d;
     if (!key && limit <= 500) {
@@ -2277,7 +2277,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
         if (rpc) {
           const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
           if (rpcResult) {
-            // Normalize numeric status â†’ string to match LCD shape ({status:'active'|'inactive_pending'|'inactive'}).
+            // Normalize numeric status → string to match LCD shape ({status:'active'|'inactive_pending'|'inactive'}).
             // Reverse ordering to match LCD pagination.reverse=true behavior (newest first).
             const STATUS_MAP = { 1: 'active', 2: 'inactive_pending', 3: 'inactive' };
             const subs = rpcResult
@@ -2288,8 +2288,8 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
           }
         }
       } catch (err) {
-        // Read-only RPC probe â€” never produces KEPLR_SIGN_REQUIRED. Outer catch handles user-facing errors.
-        console.log(`[RPC] GET /api/plans/${planId}/subscriptions failed: ${err.message} â€” LCD fallback`);
+        // Read-only RPC probe — never produces KEPLR_SIGN_REQUIRED. Outer catch handles user-facing errors.
+        console.log(`[RPC] GET /api/plans/${planId}/subscriptions failed: ${err.message} — LCD fallback`);
         d = null;
       }
     }
@@ -2424,7 +2424,7 @@ app.get('/api/my-plans', async (req, res) => {
     // into my-plans.json before reading the ledger. Cached 60s; never throws.
     await discoverChainPlans();
     const rawPlanIds = loadMyPlanIds();
-    // RPC ownership filter: drop any plan whose `prov_address` â‰  our
+    // RPC ownership filter: drop any plan whose `prov_address` ≠ our
     // current sentprov address. Stale entries (e.g. plans created from a
     // different mnemonic that ended up under our wallet's bucket) are
     // pruned from `my-plans.json` so the UI never offers them again and
@@ -2437,7 +2437,7 @@ app.get('/api/my-plans', async (req, res) => {
           const rpc = await getRpcClient();
           if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
         } catch (e) {
-          console.log(`[RPC] Balance query failed: ${e.message} â€” LCD fallback`);
+          console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
         }
         const data = await lcd(`/cosmos/bank/v1beta1/balances/${getAddr()}`);
         const bal = data.balances?.find(b => b.denom === 'udvpn');
@@ -2515,7 +2515,7 @@ app.post('/api/plan/create', async (req, res) => {
 
     // Validate gigabytes/durationSeconds are positive integers BEFORE they reach
     // BigInt()/parseInt() below. BigInt(1.5) throws an opaque RangeError, and
-    // parseInt() would silently truncate "10.9d" â†’ 10 â€” both surface to the user
+    // parseInt() would silently truncate "10.9d" → 10 — both surface to the user
     // as a confusing chain error instead of a clear 400.
     const gbNum = Number(gigabytes);
     if (!Number.isInteger(gbNum) || gbNum <= 0) {
@@ -2529,7 +2529,7 @@ app.post('/api/plan/create', async (req, res) => {
     // Build the Coin array the chain expects:
     //   { denom, base_value, quote_value }
     // base_value is the per-byte rate the chain uses for partial settlements;
-    // we keep the v3 default ("0.003â€¦") unless an explicit override is passed.
+    // we keep the v3 default ("0.003…") unless an explicit override is passed.
     const DEFAULT_BASE = '0.003000000000000000';
     let prices;
     if (Array.isArray(pricesIn) && pricesIn.length > 0) {
@@ -2611,7 +2611,7 @@ app.post('/api/plan/create', async (req, res) => {
       } catch (err) {
         // Plan create TX already succeeded; activation failure is a soft error
         // attached to the response. If the user is on Keplr they'll be prompted
-        // to sign the activation TX from a follow-up "Activate plan" button â€”
+        // to sign the activation TX from a follow-up "Activate plan" button —
         // never relay keplr-sign here or the create result is hidden.
         console.error('Plan activation error:', err.message);
         resp.activationError = err.code === 'KEPLR_SIGN_REQUIRED'
@@ -2660,7 +2660,7 @@ app.post('/api/plan/status', async (req, res) => {
 
 // Find an active fee-grant *received* by the current signer. When a grantor
 // exists we pass it to safeBroadcast so the chain charges the grantor's
-// account for the TX gas â€” this is what makes the "operator pays subscriber's
+// account for the TX gas — this is what makes the "operator pays subscriber's
 // gas" flow actually work (subscribe / start-session). Returns null if no
 // usable grant is found, so callers fall back to self-paid gas. RPC-first per
 // project rule; LCD is not used here because rpcQueryFeeGrants already has
@@ -2703,7 +2703,7 @@ app.post('/api/plan/subscribe', async (req, res) => {
     };
 
     const feeGranter = await pickActiveGrantor(getAddr());
-    console.log(`Subscribing to plan ${planId} (v3)${feeGranter ? ` â€” gas paid by grant from ${feeGranter}` : ''}...`);
+    console.log(`Subscribing to plan ${planId} (v3)${feeGranter ? ` — gas paid by grant from ${feeGranter}` : ''}...`);
     const result = await safeBroadcast([msg], undefined, feeGranter ? { feeGranter } : undefined);
     const resp = txResponse(result);
     if (resp.ok) {
@@ -2940,7 +2940,7 @@ app.post('/api/plan/start-session', async (req, res) => {
     };
 
     const feeGranter = await pickActiveGrantor(getAddr());
-    console.log(`Starting session on subscription ${subscriptionId} with node ${nodeAddress} (v3)${feeGranter ? ` â€” gas paid by grant from ${feeGranter}` : ''}...`);
+    console.log(`Starting session on subscription ${subscriptionId} with node ${nodeAddress} (v3)${feeGranter ? ` — gas paid by grant from ${feeGranter}` : ''}...`);
     const result = await safeBroadcast([msg], undefined, feeGranter ? { feeGranter } : undefined);
     const resp = txResponse(result);
     if (resp.ok) {
@@ -2971,13 +2971,13 @@ app.post('/api/plan/start-session', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Nodes ────────────────────────────────────────────────────────────
 
 app.get('/api/nodes/progress', (req, res) => {
   res.json({ scanning: nodeCache.scanning, ...scanProgress });
 });
 
-// Chain-active node count (status=1). Cached 60s â€” cheap RPC call, LCD fallback.
+// Chain-active node count (status=1). Cached 60s — cheap RPC call, LCD fallback.
 let chainCountCache = { count: null, ts: 0 };
 const CHAIN_COUNT_TTL = 60_000;
 
@@ -3031,7 +3031,7 @@ app.get('/api/all-nodes', async (req, res) => {
         const planNodes = await getNodesForPlan(planId);
         for (const n of planNodes) planNodeMap.set(n.address, n);
       } catch (err) {
-        // Read-only chain query â€” never produces KEPLR_SIGN_REQUIRED. Soft-fail.
+        // Read-only chain query — never produces KEPLR_SIGN_REQUIRED. Soft-fail.
         console.error(`Failed to fetch nodes for plan ${planId}:`, err.message);
       }
     }
@@ -3040,7 +3040,7 @@ app.get('/api/all-nodes', async (req, res) => {
     // and a lease are SEPARATE on-chain objects: a node we leased but whose
     // link half failed is NOT a plan member, so planNodeMap alone wouldn't hide
     // it and it kept reappearing in Add Nodes (where re-adding fails with "Lease
-    // already exists"). One provider-wide lease query (cheap â€” a provider holds
+    // already exists"). One provider-wide lease query (cheap — a provider holds
     // few leases) lets us exclude every node we already lease. Only fetched for
     // the Add Nodes browser (excludeInPlan); legacy callers skip the cost.
     const leasedAddrs = new Set();
@@ -3072,7 +3072,7 @@ app.get('/api/all-nodes', async (req, res) => {
       filtered = filtered.filter(n => !planNodeMap.has(n.address) && !leasedAddrs.has(n.address));
     }
     if (search) filtered = filtered.filter(n => n.address.toLowerCase().includes(search) || (n.moniker || '').toLowerCase().includes(search));
-    // Exact country match â€” `.includes()` matches "Korea" against both Koreas
+    // Exact country match — `.includes()` matches "Korea" against both Koreas
     // and "Guinea" against "Equatorial Guinea". The dropdown sends full names,
     // so an exact compare is correct and avoids surprise hits.
     if (country) filtered = filtered.filter(n => (n.country || '').toLowerCase() === country);
@@ -3087,7 +3087,7 @@ app.get('/api/all-nodes', async (req, res) => {
       for (const [addr, pn] of planNodeMap) {
         if (!cachedAddrs.has(addr)) missing.push([addr, pn]);
       }
-      // 3s per probe, 4s overall ceiling â€” never let a dead node block the tab.
+      // 3s per probe, 4s overall ceiling — never let a dead node block the tab.
       const probeWithTimeout = (url) => Promise.race([
         nodeStatusV3(url),
         new Promise((_, rej) => setTimeout(() => rej(new Error('probe timeout')), 3000)),
@@ -3129,7 +3129,7 @@ app.get('/api/all-nodes', async (req, res) => {
     // Country/protocol facets reflect the *browseable* set so the dropdown
     // never offers a country that has zero rows to show. When excludeInPlan is
     // on we drop plan-linked nodes from the facet pool too. Search/country
-    // selections are NOT applied here â€” that would empty the dropdowns once a
+    // selections are NOT applied here — that would empty the dropdowns once a
     // user picks a value.
     const facetPool = (excludeInPlan && (planNodeMap.size || leasedAddrs.size))
       ? all.filter(n => !planNodeMap.has(n.address) && !leasedAddrs.has(n.address))
@@ -3166,7 +3166,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
     const addr = req.params.addr;
     // Validate the node address before scanning. Without this a malformed/empty
     // addr triggers the full 50-page LCD walk below (up to 25k sessions) only to
-    // match nothing â€” a cheap way to hammer the LCD endpoints. Node addresses are
+    // match nothing — a cheap way to hammer the LCD endpoints. Node addresses are
     // bech32 with the `sentnode` prefix (distinct from account `sent1` addresses).
     if (typeof addr !== 'string' || !/^sentnode1[02-9ac-hj-np-z]{38,}$/.test(addr)) {
       return res.status(400).json({ error: 'valid sentnode1... node address required' });
@@ -3176,7 +3176,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
     let pages = 0;
 
     do {
-      // No chain-wide RPC sessions query â€” LCD only
+      // No chain-wide RPC sessions query — LCD only
       const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
       const d = await lcd(`/sentinel/session/v3/sessions?pagination.limit=500${keyParam}`);
       for (const s of d.sessions || []) {
@@ -3195,7 +3195,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Leases â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Leases ───────────────────────────────────────────────────────────
 
 app.post('/api/plan-manager/link', async (req, res) => {
   if (!requireWallet(req, res)) return;
@@ -3212,13 +3212,13 @@ app.post('/api/plan-manager/link', async (req, res) => {
     };
 
     const hours = parseInt(reqLeaseHours) || 24;
-    console.log(`\n[LINK] Node ${nodeAddress} â†’ plan ${planId} (lease: ${hours}h)`);
+    console.log(`\n[LINK] Node ${nodeAddress} → plan ${planId} (lease: ${hours}h)`);
 
     // Linking a node requires an active lease for it first. The old flow tried
-    // link â†’ caught "lease not found" â†’ auto-leased â†’ retried link, all as
+    // link → caught "lease not found" → auto-leased → retried link, all as
     // SEPARATE TXs. That only works when the SERVER signs (mnemonic/Privy): on
     // Keplr the very first safeBroadcast throws KEPLR_SIGN_REQUIRED before the
-    // chain is ever touched, so the server never learns a lease is missing â€” it
+    // chain is ever touched, so the server never learns a lease is missing — it
     // relays the bare link signDoc, the chain rejects it ("No active lease"),
     // and broadcast-signed has no retry. Fix: BUNDLE [lease, link] into ONE TX.
     // Cosmos runs a TX's messages sequentially in one atomic state transition,
@@ -3247,7 +3247,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
           .sort((a, b) => (b.hours || 0) - (a.hours || 0))[0] || null;
       }
     } catch (e) {
-      console.log(`[LINK] lease pre-check failed: ${e.message} â€” proceeding with lease msg`);
+      console.log(`[LINK] lease pre-check failed: ${e.message} — proceeding with lease msg`);
     }
 
     const covered = existingLease && (existingLease.hours || 0) >= hours;
@@ -3255,9 +3255,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
     if (existingLease && !covered) {
       // Existing lease too short — end it so a fresh full-duration lease lands.
       endMsg = { typeUrl: C.MSG_END_LEASE_TYPE, value: { from: getProvAddr(), id: BigInt(existingLease.id) } };
-      console.log(`[LINK] existing lease ${existingLease.hours}h < ${hours}h â€” ending lease ${existingLease.id} and re-leasing`);
+      console.log(`[LINK] existing lease ${existingLease.hours}h < ${hours}h — ending lease ${existingLease.id} and re-leasing`);
     } else if (covered) {
-      console.log(`[LINK] existing lease already covers ${hours}h â€” linking only`);
+      console.log(`[LINK] existing lease already covers ${hours}h — linking only`);
     }
 
     let leaseMsg = null;
@@ -3290,9 +3290,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
       console.log(`[LINK] Bundled TX threw: ${msg.slice(0, 150)}`);
       if (isDuplicateNode(msg)) return res.json({ ok: true, alreadyLinked: true, msg: 'Node is already in this plan' });
       // A pre-existing lease makes the bundled lease msg fail with "already
-      // exists" â€” fall back to a link-only TX (lease is already there).
+      // exists" — fall back to a link-only TX (lease is already there).
       if (msg.includes('already exists')) {
-        console.log(`[LINK] Lease already exists â€” retrying link-only...`);
+        console.log(`[LINK] Lease already exists — retrying link-only...`);
         out = await broadcastOrRelay([linkMsg]);
         if (out.relayed) return;
         if (out.err) return res.status(400).json({ error: parseChainError(out.err.message) });
@@ -3307,9 +3307,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
       const raw = resp.rawLog || '';
       console.log(`[LINK] TX failed in rawLog: ${raw.slice(0, 150)}`);
       if (isDuplicateNode(raw)) return res.json({ ok: true, alreadyLinked: true, msg: 'Node is already in this plan' });
-      // Bundled TX rejected because the lease already existed â€” retry link-only.
+      // Bundled TX rejected because the lease already existed — retry link-only.
       if (raw.includes('already exists')) {
-        console.log(`[LINK] Lease already exists (rawLog) â€” retrying link-only...`);
+        console.log(`[LINK] Lease already exists (rawLog) — retrying link-only...`);
         const out2 = await broadcastOrRelay([linkMsg]);
         if (out2.relayed) return;
         if (out2.err) return res.status(400).json({ error: parseChainError(out2.err.message) });
@@ -3342,7 +3342,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
     const hours = parseInt(reqLeaseHours) || 24;
     const addrs = [...new Set(nodeAddresses)];
-    console.log(`\n[BATCH-LINK] ${addrs.length} nodes â†’ plan ${planId} (lease: ${hours}h)`);
+    console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
 
 
     const linkMsgs = addrs.map(addr => ({
@@ -3352,7 +3352,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
 
     // Same Keplr-safe pattern as single link: BUNDLE [...leases, ...links] into
     // ONE TX so the links see their leases in the same atomic state transition.
-    // The server can't do a "try link â†’ lease â†’ retry" dance on Keplr because
+    // The server can't do a "try link → lease → retry" dance on Keplr because
     // the first safeBroadcast throws KEPLR_SIGN_REQUIRED before touching chain.
     let leaseMsgs;
     try {
@@ -3378,9 +3378,9 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
       const msg = out.err.message || '';
       console.log(`[BATCH-LINK] Bundled TX threw: ${msg.slice(0, 200)}`);
       if (isDuplicateNode(msg)) return res.json({ ok: true, linked: 0, alreadyLinked: addrs.length, msg: 'All nodes already in plan' });
-      // Some/all leases already exist â€” retry links-only.
+      // Some/all leases already exist — retry links-only.
       if (msg.includes('already exists')) {
-        console.log(`[BATCH-LINK] Some leases already exist â€” retrying links-only...`);
+        console.log(`[BATCH-LINK] Some leases already exist — retrying links-only...`);
         out = await broadcastOrRelay(linkMsgs);
         if (out.relayed) return;
         if (out.err) return res.status(400).json({ error: parseChainError(out.err.message) });
@@ -3396,7 +3396,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
       console.log(`[BATCH-LINK] TX failed: ${raw.slice(0, 200)}`);
       if (isDuplicateNode(raw)) return res.json({ ok: true, linked: 0, alreadyLinked: addrs.length, msg: 'Nodes already in plan' });
       if (raw.includes('already exists')) {
-        console.log(`[BATCH-LINK] Leases already exist (rawLog) â€” retrying links-only...`);
+        console.log(`[BATCH-LINK] Leases already exist (rawLog) — retrying links-only...`);
         const out2 = await broadcastOrRelay(linkMsgs);
         if (out2.relayed) return;
         if (out2.err) return res.status(400).json({ error: parseChainError(out2.err.message) });
@@ -3516,13 +3516,13 @@ app.post('/api/lease/start', async (req, res) => {
         nodePrice = prices.find((p) => p.denom === denom) || prices[0];
       }
     } catch (err) {
-      // Read-only RPC node lookup â€” never KEPLR_SIGN_REQUIRED. Soft-fail to nodePrice=null.
+      // Read-only RPC node lookup — never KEPLR_SIGN_REQUIRED. Soft-fail to nodePrice=null.
       console.log(`[LEASE] RPC node price lookup failed: ${err.message}`);
     }
 
     if (!nodePrice) {
       return res.status(400).json({
-        error: 'Could not fetch node price from chain â€” node may be offline or unreachable',
+        error: 'Could not fetch node price from chain — node may be offline or unreachable',
       });
     }
 
@@ -3601,7 +3601,7 @@ app.post('/api/lease/end', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Provider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Provider ─────────────────────────────────────────────────────────
 
 app.get('/api/providers', async (req, res) => {
   try {
@@ -3621,7 +3621,7 @@ app.post('/api/provider/register', async (req, res) => {
 
 
     let alreadyExists = false;
-    // RPC-first: direct lookup by sentprov address â€” exact match, no substring heuristic.
+    // RPC-first: direct lookup by sentprov address — exact match, no substring heuristic.
     try {
       const rpc = await getRpcClient();
       if (rpc) {
@@ -3629,15 +3629,15 @@ app.post('/api/provider/register', async (req, res) => {
         if (prov) alreadyExists = true;
       }
     } catch (err) {
-      // Read-only provider lookup â€” never KEPLR_SIGN_REQUIRED. Fall through to LCD.
-      console.log(`[RPC] provider exists probe failed: ${err.message} â€” LCD fallback`);
+      // Read-only provider lookup — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
+      console.log(`[RPC] provider exists probe failed: ${err.message} — LCD fallback`);
     }
     if (!alreadyExists) {
       try {
         const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
         alreadyExists = (provs.providers || []).some(p => p.address === getProvAddr());
       } catch (err) {
-        // Read-only LCD lookup â€” never KEPLR_SIGN_REQUIRED. Fall through; treat as not-registered.
+        // Read-only LCD lookup — never KEPLR_SIGN_REQUIRED. Fall through; treat as not-registered.
         console.error('Failed to check existing providers:', err.message);
       }
     }
@@ -3721,7 +3721,7 @@ app.post('/api/provider/status', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Subscriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Subscriptions ────────────────────────────────────────────────────
 
 app.get('/api/params', async (req, res) => {
   try {
@@ -3740,7 +3740,7 @@ app.get('/api/params', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Fee Grants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Fee Grants ───────────────────────────────────────────────────────
 
 app.get('/api/feegrant/grants', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
@@ -3757,10 +3757,10 @@ app.get('/api/feegrant/grants', async (req, res) => {
           if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
         }
       } catch (err) {
-        // Inside cached() callback â€” never write to res from here (callers
+        // Inside cached() callback — never write to res from here (callers
         // wait on the promise then write). Read-only RPC can't produce
         // KEPLR_SIGN_REQUIRED anyway. Fall through to LCD.
-        console.log(`[RPC] feegrant/grants failed: ${err.message} â€” LCD fallback`);
+        console.log(`[RPC] feegrant/grants failed: ${err.message} — LCD fallback`);
       }
       return lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
     });
@@ -3859,7 +3859,7 @@ app.post('/api/feegrant/grant', async (req, res) => {
       // Race / stale read: grant existed but our check missed it. Retry once as
       // revoke + grant so the operator's re-authorize still succeeds.
       if (!alreadyGranted && /allowance already exists/i.test(e.message || '')) {
-        console.log(`[FeeGrant] ${grantee} already granted (raced) â€” retrying as revoke + grant`);
+        console.log(`[FeeGrant] ${grantee} already granted (raced) — retrying as revoke + grant`);
         result = await safeBroadcast([buildRevokeFeeGrantMsg(getAddr(), grantee), grantMsg], 'Fee grant (re-authorize)');
         if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
       } else {
@@ -3870,7 +3870,7 @@ app.post('/api/feegrant/grant', async (req, res) => {
     res.json({ ok: true, txHash: result.transactionHash, reauthorized: alreadyGranted });
   } catch (e) {
     // Keplr path: safeBroadcast throws KEPLR_SIGN_REQUIRED before touching the
-    // chain â€” relay the signDoc so the frontend can client-sign, rather than
+    // chain — relay the signDoc so the frontend can client-sign, rather than
     // surfacing the raw error to the user.
     if (relayKeplrSign(e, res)) return;
     res.status(500).json({ error: parseChainError(e.message) });
@@ -3910,7 +3910,7 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
     } catch (err) {
-      // SSE stream â€” headers already written; never call relayKeplrSign here.
+      // SSE stream — headers already written; never call relayKeplrSign here.
       // Read-only RPC query also can't produce KEPLR_SIGN_REQUIRED.
       console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
     }
@@ -3940,7 +3940,7 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowances.length}`);
       }
     } catch (err) {
-      // SSE stream â€” headers already written; never call relayKeplrSign here.
+      // SSE stream — headers already written; never call relayKeplrSign here.
       // Read-only RPC query also can't produce KEPLR_SIGN_REQUIRED.
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
@@ -4044,7 +4044,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
     } catch (err) {
-      // Read-only RPC subs query â€” never KEPLR_SIGN_REQUIRED. Fall through to LCD.
+      // Read-only RPC subs query — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] rpcQuerySubscriptionsForPlan failed: ${err.message}`);
     }
     if (!subsFromRpc) {
@@ -4072,7 +4072,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowancesPost.length}`);
       }
     } catch (err) {
-      // Read-only RPC query â€” never KEPLR_SIGN_REQUIRED. Fall through to LCD.
+      // Read-only RPC query — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!existingAllowancesPost.length) {
@@ -4150,7 +4150,7 @@ app.post('/api/feegrant/revoke', async (req, res) => {
   }
 });
 
-// Batch revoke a specific list of grantees (e.g. "stale cleanup" â€” grantees
+// Batch revoke a specific list of grantees (e.g. "stale cleanup" — grantees
 // no longer subscribed to any plan). Uses the same per-grantee fallback as
 // revoke-all so partial chain state doesn't abort the whole operation.
 app.post('/api/feegrant/revoke-list', async (req, res) => {
@@ -4188,7 +4188,7 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
             if (/fee-grant not found|not found.*grant/i.test(msg)) {
               alreadyGone += 1;
             } else {
-              errors.push(`${grantee.slice(0, 20)}â€¦: ${parseChainError(msg)}`);
+              errors.push(`${grantee.slice(0, 20)}…: ${parseChainError(msg)}`);
             }
           }
         }
@@ -4220,7 +4220,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${revokeAllowances.length}`);
       }
     } catch (err) {
-      // Read-only RPC query â€” never KEPLR_SIGN_REQUIRED. Fall through to LCD.
+      // Read-only RPC query — never KEPLR_SIGN_REQUIRED. Fall through to LCD.
       console.log(`[RPC] rpcQueryFeeGrantsIssued failed: ${err.message}`);
     }
     if (!revokeAllowances.length) {
@@ -4250,7 +4250,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
         if (result.code !== 0) throw new Error(result.rawLog || `TX failed code=${result.code}`);
         revoked += batch.length;
       } catch (batchErr) {
-        // Atomic batch failed â€” retry one grantee at a time so the rest go through.
+        // Atomic batch failed — retry one grantee at a time so the rest go through.
         console.log(`[revoke-all] batch ${Math.floor(i / BATCH) + 1} failed, retrying one-by-one: ${batchErr.message}`);
         for (const grantee of batch) {
           try {
@@ -4263,7 +4263,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
             if (/fee-grant not found|not found.*grant/i.test(msg)) {
               alreadyGone += 1;
             } else {
-              errors.push(`${grantee.slice(0, 20)}â€¦: ${parseChainError(msg)}`);
+              errors.push(`${grantee.slice(0, 20)}…: ${parseChainError(msg)}`);
             }
           }
         }
@@ -4283,7 +4283,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Analytics ───────────────────────────────────────────────────────
 
 app.get('/api/feegrant/gas-costs', async (req, res) => {
   if (!getAddr()) return res.status(401).json({ error: 'No wallet loaded' });
@@ -4302,9 +4302,9 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
           if (rpcResult) return { subscriptions: rpcResult };
         }
       } catch (err) {
-        // Inside cached() â€” never write to res from here. Read-only RPC can't
+        // Inside cached() — never write to res from here. Read-only RPC can't
         // produce KEPLR_SIGN_REQUIRED. Fall through to LCD.
-        console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} â€” LCD fallback`);
+        console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} — LCD fallback`);
       }
       return { subscriptions: await lcdAllSubscriptions(planId) };
     });
@@ -4347,7 +4347,7 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
         }
         console.log(`[GasCosts] ${addr.slice(0, 12)}...: ${rawTxs.length} txs checked, ${addrTxCount} fee-granted`);
       } catch (err) {
-        // Per-address LCD probe inside accumulator loop â€” never KEPLR_SIGN_REQUIRED.
+        // Per-address LCD probe inside accumulator loop — never KEPLR_SIGN_REQUIRED.
         // Don't bail the whole loop on a single address failure.
         console.error(`[GasCosts] ${addr.slice(0, 12)}... failed: ${err.message}`);
       }
@@ -4486,7 +4486,7 @@ app.get('/api/node-rankings', async (req, res) => {
   }
 });
 
-// â”€â”€â”€ Routes: Health / RPC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Routes: Health / RPC ─────────────────────────────────────────────────────
 
 // LCD primary endpoint (used for raw health check fetches)
 const LCD = LCD_ENDPOINTS[0];
@@ -4525,7 +4525,7 @@ app.get('/api/rpcs', async (req, res) => {
         try { const j = await r.json(); errorMsg = j.message || `HTTP ${r.status}`; } catch { errorMsg = `HTTP ${r.status}`; }
       }
     } catch (err) {
-      // Inside Promise.allSettled probe â€” fetch() error, never KEPLR_SIGN_REQUIRED.
+      // Inside Promise.allSettled probe — fetch() error, never KEPLR_SIGN_REQUIRED.
       // Writing to res here would race with the outer res.json at the bottom.
       latencyMs = Date.now() - start;
       status = 'timeout';
@@ -4564,7 +4564,7 @@ app.get('/api/rpcs', async (req, res) => {
     const totalSessions = parseInt(sessRes.pagination?.total || '0');
     const totalActiveNodes = parseInt(nodeRes.pagination?.total || '0');
 
-    // No chain-wide RPC sessions query â€” LCD only
+    // No chain-wide RPC sessions query — LCD only
     const sessPage = await lcd('/sentinel/session/v3/sessions?pagination.limit=500&pagination.reverse=true');
     const uniqueAccounts = new Set();
     for (const s of sessPage.sessions || []) {
@@ -4586,7 +4586,7 @@ app.get('/api/rpcs', async (req, res) => {
         explorerActiveSessions = expData.result[0].active_sessions;
       }
     } catch (err) {
-      // External explorer fetch â€” never KEPLR_SIGN_REQUIRED. Soft-fail; explorerActiveSessions stays null.
+      // External explorer fetch — never KEPLR_SIGN_REQUIRED. Soft-fail; explorerActiveSessions stays null.
       console.error('Failed to fetch explorer stats:', err.message);
     }
 
@@ -4598,7 +4598,7 @@ app.get('/api/rpcs', async (req, res) => {
       sampleSize: (sessPage.sessions || []).length,
     };
   } catch (err) {
-    // Read-only LCD aggregation â€” never KEPLR_SIGN_REQUIRED. Soft-fail; peerStats stays null.
+    // Read-only LCD aggregation — never KEPLR_SIGN_REQUIRED. Soft-fail; peerStats stays null.
     console.error('Failed to compute peer stats:', err.message);
   }
 
@@ -4657,18 +4657,18 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// SPA fallback â€” any non-API GET returns index.html so deep-link refreshes work.
+// SPA fallback — any non-API GET returns index.html so deep-link refreshes work.
 app.use((req, res, next) => {
   if (req.method !== 'GET') return next();
   if (req.path.startsWith('/api/') || req.path === '/health') return next();
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
 
-// â”€â”€â”€ Start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Start ────────────────────────────────────────────────────────────────────
 
 console.log('[wallet] Cookie-mode: each visitor signs in with their own mnemonic, encrypted into an httpOnly browser cookie. No mnemonic env var or .wallet.json is read.');
 
-// â”€â”€â”€ FIX 8: .env permissions warning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── FIX 8: .env permissions warning ─────────────────────────────────────────
 // Non-fatal check: warn if .env has group/world read bits (Unix only; no-op on Windows).
 try {
   const envPath = join(__dirname, '.env');
@@ -4701,10 +4701,10 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-// â”€â”€â”€ Graceful Shutdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Graceful Shutdown ────────────────────────────────────────────────────────
 
 function shutdown(signal) {
-  console.log(`\n${signal} received â€” shutting down...`);
+  console.log(`\n${signal} received — shutting down...`);
   server.close(() => {
     disconnect();
     console.log('Server closed.');
