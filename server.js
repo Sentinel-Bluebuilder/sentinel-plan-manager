@@ -1899,6 +1899,38 @@ app.post('/api/_clientlog', (req, res) => {
   res.json({ ok: true });
 });
 
+// Keplr- and Privy-signed TXs are broadcast through the two generic endpoints
+// below, NOT through the inline server-signed routes. The inline routes (e.g.
+// /api/provider/register) call cacheInvalidate() AFTER safeBroadcast() returns —
+// but for a client-signed wallet safeBroadcast() throws KEPLR_SIGN_REQUIRED and
+// the request returns the signDoc before that line ever runs. The real TX then
+// lands here, where those per-route invalidations were never replayed. The most
+// visible casualty was `provider:<addr>` (10-min TTL): after a successful Keplr
+// provider registration /api/wallet kept serving the cached pre-register
+// `provider: null`, so the dashboard read "Provider not registered" and even a
+// page refresh didn't help until the cache aged out. Decode the signed TxBody and
+// clear the same caches the inline route would have, keyed off the message types
+// actually in the TX so unrelated TXs (send, subscribe) don't churn caches.
+async function invalidateCachesForSignedTxBody(bodyBytesB64) {
+  try {
+    const { TxBody } = await import('cosmjs-types/cosmos/tx/v1beta1/tx');
+    const { fromBase64 } = await import('@cosmjs/encoding');
+    const typeUrls = (TxBody.decode(fromBase64(bodyBytesB64)).messages || []).map((m) => m.typeUrl);
+    if (typeUrls.some((t) => t === C.MSG_REGISTER_PROVIDER_TYPE
+      || t === C.MSG_UPDATE_PROVIDER_DETAILS_TYPE
+      || t === C.MSG_UPDATE_PROVIDER_STATUS_TYPE)) {
+      cacheInvalidate(`provider:${getAddr()}`);
+    }
+    // MsgUpdatePlanStatus (deactivate/reactivate) emits no plan_id create event,
+    // so the event-based allPlans invalidation below would miss it — cover it here.
+    if (typeUrls.some((t) => t === C.MSG_CREATE_PLAN_TYPE || t === C.MSG_UPDATE_PLAN_STATUS_TYPE)) {
+      cacheInvalidate('allPlans');
+    }
+  } catch (e) {
+    console.warn('[broadcast] post-broadcast cache invalidation failed:', e.message);
+  }
+}
+
 // ─── Keplr Broadcast (client-signed TxRaw) ───────────────────────────────────
 // The browser POSTs back the result of window.keplr.signDirect packaged as a
 // TxRaw (bodyBytes, authInfoBytes, signatures[]) base64-encoded. We broadcast
@@ -1950,6 +1982,11 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
       return res.json({ ok: false, error: parseChainError(result.rawLog || 'Broadcast failed'), errorCode: 'tx-failed', txHash: result.transactionHash, code: result.code, rawLog: (result.rawLog || '').slice(0, 600) });
     }
     cacheInvalidate(`balance:${getAddr()}`);
+    // Clear the per-message caches the inline server-signed route would have
+    // (provider:<addr>, allPlans) — the Keplr path skipped them by returning the
+    // signDoc before the inline cacheInvalidate ran. Without this a Keplr provider
+    // registration keeps reading "Provider not registered" until the 10-min TTL.
+    await invalidateCachesForSignedTxBody(bodyBytes);
     // Surface the same ids the inline (server-signed) path returns, so a
     // Keplr-signed create/subscribe can drive the follow-up activation and the
     // success UX. broadcastSignedTx now returns raw Tendermint result events;
@@ -2092,6 +2129,11 @@ app.post('/api/tx/privy-sign-and-broadcast', async (req, res) => {
       return res.json({ ok: false, error: parseChainError(result.rawLog || 'Broadcast failed'), errorCode: 'tx-failed', txHash: result.transactionHash });
     }
     cacheInvalidate(`balance:${getAddr()}`);
+    // Same gap as the Keplr broadcast-signed path: Privy sessions also throw
+    // KEPLR_SIGN_REQUIRED in the inline route (key lives in Privy's enclave, not
+    // on this server), so the inline cacheInvalidate never ran. Clear the
+    // per-message caches (provider:<addr>, allPlans) off the signed TxBody here.
+    await invalidateCachesForSignedTxBody(bodyBytes);
     return res.json({
       ok: true,
       txHash: result.transactionHash,
@@ -3056,6 +3098,116 @@ app.get('/api/nodes/chain-count', async (req, res) => {
   }
 });
 
+// ─── Node hardware specs (external probe) ────────────────────────────────────
+// CPU / download speed / RAM aren't on chain — a NorseLabs webhook returns a
+// hardware probe keyed by the sentnode address. On a hit it's
+//   { cpu:{brand}, network:{download_speed}, ram:{size}, ... }
+// and on a miss it's { error:"notFound" } (still HTTP 200). We surface
+// cpu.brand → CPU, network.download_speed → Speed, ram.size → RAM. Results are
+// cached per address (hits long, misses short) so paging back and forth and the
+// frontend's background revalidation don't re-hit the webhook for every row.
+const NODE_SPECS_WEBHOOK = 'https://n8n.norselabs.dev/webhook/cqap';
+const NODE_SPECS_TTL = 6 * 60 * 60 * 1000;   // 6h — hardware rarely changes
+const NODE_SPECS_MISS_TTL = 30 * 60 * 1000;  // 30m — re-probe a not-yet-probed node soon
+const NODE_SPECS_FETCH_TIMEOUT = 4000;       // per-probe ceiling
+const NODE_SPECS_BATCH_CEILING = 5000;       // overall enrichment ceiling per page
+const _nodeSpecsCache = new Map();           // address → { specs, expires }
+
+// download_speed is bytes/sec (the probe reports data quantities in bytes —
+// ram.size is bytes, not bits), so ×8 → bits, /1e6 → Mbps. If the displayed
+// speeds ever read ~8× off, this single line is the unit to flip.
+function specBytesPerSecToMbps(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round((n * 8) / 1e5) / 10; // Mbps, 1 decimal
+}
+
+// "Intel(R) Xeon(R) Gold 6138 CPU @ 2.00GHz" → "Intel Xeon Gold 6138". Strip the
+// (R)/(TM) marks, the "CPU @ x.xxGHz" / "Processor" / "NN-Core" filler, collapse
+// whitespace — a 60–140px column can't show the raw string, so trim it to the
+// model identifier (the full cleaned brand still rides along as a tooltip).
+function specCleanCpuBrand(brand) {
+  if (typeof brand !== 'string' || !brand.trim()) return null;
+  const cleaned = brand
+    .replace(/\((?:R|TM)\)/gi, ' ')
+    .replace(/\bCPU\b/gi, ' ')
+    .replace(/\bProcessor\b/gi, ' ')
+    .replace(/@.*$/, ' ')
+    .replace(/\b\d+-Core\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || brand.trim();
+}
+
+function specFormatRamBytes(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const gb = n / 1e9;
+  if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 0 : 1).replace(/\.0$/, '')} GB`;
+  return `${Math.round(n / 1e6)} MB`;
+}
+
+const EMPTY_SPECS = { cpu: null, speedMbps: null, ram: null, ramBytes: null };
+
+// One webhook probe for a single node. Resolves to { specs, cacheable } so the
+// caller can cache real answers (hit/notFound) but NOT transient failures — a
+// webhook blip shouldn't blank a node's specs for the full miss TTL.
+async function fetchNodeSpecsRaw(address) {
+  const url = `${NODE_SPECS_WEBHOOK}?address=${encodeURIComponent(address)}`;
+  let data;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(NODE_SPECS_FETCH_TIMEOUT) });
+    if (!r.ok) return { specs: EMPTY_SPECS, cacheable: false };
+    data = await r.json();
+  } catch (e) {
+    return { specs: EMPTY_SPECS, cacheable: false }; // timeout / network — don't cache
+  }
+  if (!data || data.error) return { specs: EMPTY_SPECS, cacheable: true, ttl: NODE_SPECS_MISS_TTL };
+  const ramBytes = Number(data.ram?.size);
+  return {
+    specs: {
+      cpu: specCleanCpuBrand(data.cpu?.brand),
+      speedMbps: specBytesPerSecToMbps(data.network?.download_speed),
+      ram: specFormatRamBytes(data.ram?.size),
+      ramBytes: Number.isFinite(ramBytes) && ramBytes > 0 ? ramBytes : null,
+    },
+    cacheable: true,
+    ttl: NODE_SPECS_TTL,
+  };
+}
+
+// Cached per-address spec lookup. Returns EMPTY_SPECS for anything unknown so
+// the UI renders "—" exactly as before.
+async function getNodeSpecs(address) {
+  if (typeof address !== 'string' || !address.startsWith('sentnode1')) return EMPTY_SPECS;
+  const now = Date.now();
+  const hit = _nodeSpecsCache.get(address);
+  if (hit && hit.expires > now) return hit.specs;
+  const { specs, cacheable, ttl } = await fetchNodeSpecsRaw(address);
+  if (cacheable) _nodeSpecsCache.set(address, { specs, expires: now + ttl });
+  return specs;
+}
+
+// Attach specs to the visible page in parallel, best-effort. Bounded by an
+// overall ceiling: nodes whose probe is still in flight when the ceiling fires
+// keep null specs (UI shows "—") and get filled on the next load once the probe
+// has populated the cache. Never throws — enrichment failure must not break the
+// node list.
+async function enrichNodesWithSpecs(nodes) {
+  if (!Array.isArray(nodes) || !nodes.length) return;
+  const work = Promise.allSettled(nodes.map(async (n) => {
+    const s = await getNodeSpecs(n.address);
+    n.cpu = s.cpu;
+    n.speedMbps = s.speedMbps;
+    n.ram = s.ram;
+    n.ramBytes = s.ramBytes;
+  }));
+  await Promise.race([
+    work,
+    new Promise((resolve) => setTimeout(resolve, NODE_SPECS_BATCH_CEILING)),
+  ]);
+}
+
 app.get('/api/all-nodes', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page || '1'));
@@ -3192,6 +3344,12 @@ app.get('/api/all-nodes', async (req, res) => {
 
     const start = (page - 1) * limit;
     const paged = withStatus.slice(start, start + limit);
+
+    // Fill CPU / Speed / RAM for the rows actually being returned (≤ limit), from
+    // the hardware-probe webhook. Best-effort and cached per address — see
+    // enrichNodesWithSpecs. paged entries are fresh {...n} objects (from
+    // withStatus), so mutating them never touches the underlying node cache.
+    await enrichNodesWithSpecs(paged);
 
     res.json({
       nodes: paged,

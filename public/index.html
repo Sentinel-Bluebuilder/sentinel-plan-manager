@@ -3526,16 +3526,23 @@ html[data-theme="light"] .badge-dim { background: rgba(10,14,30,0.04); }
 }
 .node-list-header.has-resource-cols,
 .node-list-row.has-resource-cols {
-  grid-template-columns: 28px minmax(220px, 2fr) 110px 130px 70px 100px 70px 60px 60px;
+  grid-template-columns: 28px minmax(180px, 1.5fr) 96px 104px 62px 92px 78px 140px 60px;
 }
+/* Speed (7) and RAM (9) are numeric — centre + tabular. CPU (8) is a brand
+   string, handled separately below (left-aligned, ellipsis). */
 .node-list-header.has-resource-cols > :nth-child(7),
-.node-list-header.has-resource-cols > :nth-child(8),
 .node-list-header.has-resource-cols > :nth-child(9),
 .node-list-row.has-resource-cols > :nth-child(7),
-.node-list-row.has-resource-cols > :nth-child(8),
 .node-list-row.has-resource-cols > :nth-child(9) {
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+.node-list-row.has-resource-cols > .node-list-cpu {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
 }
 .node-list-header .node-list-sort {
   display: block;
@@ -9430,17 +9437,19 @@ function renderAddNodes() {
       const numKey = (n) => {
         if (key === 'price') return n.hrPriceUdvpn == null ? null : Number(n.hrPriceUdvpn);
         if (key === 'speed') return n.speedMbps == null ? null : Number(n.speedMbps);
-        if (key === 'cpu') return n.cpu == null ? null : Number(n.cpu);
-        if (key === 'ram') return n.ram == null ? null : Number(n.ram);
+        // RAM displays as a string ("1 GB"); sort by the raw byte count instead.
+        if (key === 'ram') return n.ramBytes == null ? null : Number(n.ramBytes);
         return null;
       };
       const strKey = (n) => {
         if (key === 'country') return (n.country || '').toLowerCase();
         if (key === 'city') return (n.city || '').toLowerCase();
         if (key === 'protocol') return (n.protocol || '').toLowerCase();
+        // CPU is a brand string — sort alphabetically, not numerically.
+        if (key === 'cpu') return (n.cpu || '').toLowerCase();
         return '';
       };
-      const isNumeric = ['price', 'speed', 'cpu', 'ram'].includes(key);
+      const isNumeric = ['price', 'speed', 'ram'].includes(key);
       nodes = [...nodes].sort((a, b) => {
         if (isNumeric) {
           const av = numKey(a), bv = numKey(b);
@@ -9507,7 +9516,7 @@ function renderAddNodes() {
               <span class="node-list-usd">${fmtDvpn(n.hrPriceUdvpn)} P2P/hr</span>
             </div>
             <span style="color:${speedColor}">${speed}</span>
-            <span class="node-list-cpu" style="color:var(--text-muted)">${n.cpu != null ? escapeHtml(String(n.cpu)) : '—'}</span>
+            <span class="node-list-cpu" style="color:var(--text-muted)" title="${n.cpu != null ? escapeAttr(String(n.cpu)) : ''}">${n.cpu != null ? escapeHtml(String(n.cpu)) : '—'}</span>
             <span class="node-list-ram" style="color:var(--text-muted)">${n.ram != null ? escapeHtml(String(n.ram)) : '—'}</span>
           </div>`;
         }
