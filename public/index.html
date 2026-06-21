@@ -5890,6 +5890,10 @@ const S = {
   subsPage: 1, fgPage: 1,
   leaseHours: 24, addSet: new Set(), removeSet: new Set(),
   nodePriceCache: {},
+  // Optimistic node-count overrides per plan, sticky across refetch/SWR clobbers
+  // until the chain count reconciles. Keyed by String(planId) →
+  // { value, dir: 'up'|'down', ts }. See applyPendingNodeCounts().
+  pendingNodeCount: {},
   // Create
   creating: false,
   // UI
@@ -9137,6 +9141,9 @@ async function _ensurePlansLoaded(forPage) {
     const onRefresh = (fresh) => {
       const freshJson = JSON.stringify(fresh);
       if (freshJson === _lastMyPlansJson) return;
+      // Keep any optimistic node-count painted until the chain reconciles, so a
+      // background SWR revalidate landing mid-index can't snap the card back.
+      applyPendingNodeCounts(fresh.plans || []);
       _lastMyPlansJson = freshJson;
       S.myPlans = fresh.plans || [];
       if (!S.mgrPlanId && S.myPlans.length > 0) selectPlan(S.myPlans[0].planId, { suppressRender: true });
@@ -9147,6 +9154,7 @@ async function _ensurePlansLoaded(forPage) {
     };
     const { data: d } = await cachedFetch('/api/my-plans', 120_000, onRefresh);
     if (!_navStillCurrent(epoch, forPage)) { S.myPlansLoading = false; return; }
+    applyPendingNodeCounts(d.plans || []);
     _lastMyPlansJson = JSON.stringify(d);
     S.myPlans = d.plans || [];
   } catch (e) {
@@ -9158,26 +9166,64 @@ async function _ensurePlansLoaded(forPage) {
   prefetchPerPlan();
 }
 
+/** Record an optimistic node-count for a plan that must stick through every
+ *  subsequent /api/my-plans read until the chain catches up. The chain indexes
+ *  1-6s after a successful link/unlink broadcast, so any refetch in that window
+ *  returns the PRE-mutation count — without this override it would clobber the
+ *  optimistic value and the card would snap back (the reported bug). */
+function setPendingNodeCount(planId, value, dir) {
+  S.pendingNodeCount[String(planId)] = { value: Number(value), dir, ts: Date.now() };
+}
+
+/** Apply (and self-expire) pending node-count overrides onto a freshly-fetched
+ *  plans array, IN PLACE. An override clears once the chain count reconciles
+ *  (>= the target for adds, <= for removes) or after a hard 30s safety timeout
+ *  so a stuck override can never pin a wrong number forever. Returns true if any
+ *  override is still pending (caller should keep polling). */
+function applyPendingNodeCounts(plans) {
+  let stillPending = false;
+  const now = Date.now();
+  for (const [id, ov] of Object.entries(S.pendingNodeCount)) {
+    const p = (plans || []).find(pl => String(pl.planId) === id);
+    if (!p) { stillPending = true; continue; }
+    const chainVal = Number(p.totalNodes) || 0;
+    const reconciled = ov.dir === 'down' ? chainVal <= ov.value : chainVal >= ov.value;
+    if (reconciled || (now - ov.ts) > 30_000) {
+      delete S.pendingNodeCount[id];
+    } else {
+      p.totalNodes = ov.value; // keep the optimistic number painted
+      stillPending = true;
+    }
+  }
+  return stillPending;
+}
+
 /** Re-pull /api/my-plans (cache already invalidated by the caller) and re-paint
  *  the current page so plan-pill counts (totalNodes, totalSubscriptions) reflect
  *  the post-TX chain state. Retries with backoff because the chain can lag a
- *  beat after a successful broadcast. */
-async function refetchMyPlans({ attempts = 4, baseMs = 1000 } = {}) {
+ *  beat after a successful broadcast. While a node-count override is pending we
+ *  keep polling (and re-applying the optimistic value) until it reconciles. */
+async function refetchMyPlans({ attempts = 8, baseMs = 1000 } = {}) {
   const epoch = _currentNavEpoch();
+  const hasPending = () => Object.keys(S.pendingNodeCount).length > 0;
   for (let i = 0; i < attempts; i++) {
+    // When an override is pending, wait BEFORE the first fetch too — give the
+    // indexer a head start so we don't waste the first attempt on a stale read.
+    if (i > 0 || hasPending()) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, Math.min(i, 3))));
     try {
       const r = await fetch('/api/my-plans');
       const d = await r.json();
       if (!d || d.error) throw new Error(d?.error || 'no data');
       if (!_navStillCurrent(epoch, S.page)) return;
+      const stillPending = applyPendingNodeCounts(d.plans || []);
       _dataCache['/api/my-plans'] = { data: d, ts: Date.now() };
       _lastMyPlansJson = JSON.stringify(d);
       S.myPlans = d.plans || [];
       const handler = { 'add-nodes': loadAddNodes, 'your-nodes': loadYourNodes, pricing: loadPricing, 'your-plans': loadYourPlans, subscribers: loadSubscribers, 'fee-grants': loadFeeGrants };
       if (handler[S.page]) coalesceRender('plans:' + S.page, handler[S.page]);
-      return;
+      if (!stillPending) return; // chain reconciled — done
     } catch (e) {
-      if (i < attempts - 1) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, i)));
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, Math.min(i, 3))));
     }
   }
 }
@@ -10409,10 +10455,15 @@ async function linkBatch() {
         S.mgrNodes.planNodesCount = (S.mgrNodes.planNodesCount || 0) + count;
       }
       // Optimistic plan-pill bump so the count reflects the new nodes immediately,
-      // then refetch to reconcile with chain truth.
+      // then refetch to reconcile with chain truth. Register a sticky override so
+      // the bumped count survives every refetch/SWR read until the chain (which
+      // indexes 1-6s later) catches up — otherwise the card snaps back.
       if (!d.alreadyLinked && S.myPlans) {
         const p = S.myPlans.find(pl => String(pl.planId) === String(S.mgrPlanId));
-        if (p) p.totalNodes = (p.totalNodes || 0) + count;
+        if (p) {
+          p.totalNodes = (p.totalNodes || 0) + count;
+          setPendingNodeCount(S.mgrPlanId, p.totalNodes, 'up');
+        }
       }
       S.addSet.clear();
       const targetCount = S.mgrNodes ? (S.mgrNodes.planNodesCount || 0) : null;
@@ -10473,10 +10524,14 @@ async function unlinkBatch() {
         }
         S.mgrNodes.planNodesCount = Math.max(0, (S.mgrNodes.planNodesCount || 0) - addrs.length);
       }
-      // Optimistic plan-pill decrement, then refetch.
+      // Optimistic plan-pill decrement + sticky override so the lower count holds
+      // through every refetch/SWR read until the chain catches up (1-6s index lag).
       if (S.myPlans) {
         const p = S.myPlans.find(pl => String(pl.planId) === String(S.mgrPlanId));
-        if (p) p.totalNodes = Math.max(0, (p.totalNodes || 0) - count);
+        if (p) {
+          p.totalNodes = Math.max(0, (p.totalNodes || 0) - count);
+          setPendingNodeCount(S.mgrPlanId, p.totalNodes, 'down');
+        }
       }
       S.removeSet.clear();
       // The floating bar may have been created by refreshRemoveActionBar() as a
