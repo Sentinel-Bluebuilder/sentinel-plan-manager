@@ -5456,7 +5456,7 @@ button.fiat-rail-tile:hover {
 
       <!-- Privy / email pane -->
       <div id="privyPane" style="display:none">
-        <button class="auth-back" type="button" onclick="backToChooser()">â† Back</button>
+        <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
         <div class="import-form-title">Sign in with email</div>
         <div class="import-form-sub">
           Enter your email. Privy will send a one-time code, then create or unlock an embedded Sentinel wallet for your account. Powered by <a href="https://privy.io" target="_blank" rel="noopener" style="color:var(--accent)">Privy</a>.
@@ -5467,7 +5467,7 @@ button.fiat-rail-tile:hover {
 
       <!-- Recovery phrase pane (was: Import pane) -->
       <div id="importPane" style="display:none">
-        <button class="auth-back" type="button" onclick="backToChooser()">â† Back</button>
+        <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
         <div class="import-form-title">Sign in with recovery phrase</div>
         <div class="import-form-sub">
           Paste your 12 or 24-word mnemonic. It is encrypted with AES-256-GCM and stored only in an httpOnly cookie scoped to your browser. The server never writes plaintext to disk.
@@ -7024,9 +7024,20 @@ async function doWalletSend() {
       toast('Transaction broadcast: ' + (d.txHash || '').slice(0, 16) + '…', 'success');
       $('sendAmt').value = '';
       $('sendMemo').value = '';
-      // Refresh balances.
+      // Refresh balances. The bank balance lags the TX by a block or two, so the
+      // immediate reload may still show the pre-send amount — reconcile after the
+      // indexing window with a second cache-busting reload.
       invalidateCache(/^\/api\/wallet/);
       await loadWallet();
+      (async () => {
+        const epoch = _currentNavEpoch();
+        const startPage = S.page;
+        await new Promise(r => setTimeout(r, 3000));
+        if (!_navStillCurrent(epoch, startPage)) return;
+        invalidateCache(/^\/api\/wallet/);
+        try { await loadWallet(); }
+        catch (e) { console.debug('[wallet send] balance reconcile failed: ' + (e && e.message)); }
+      })();
     } else {
       resultEl.style.display = '';
       resultEl.innerHTML = `<div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:var(--radius-md);padding:10px 12px;font-size:12px;color:var(--text)">
@@ -8773,6 +8784,25 @@ async function chainActivationIfNeeded(d, statusUrl, idField) {
 // (the Keplr register path lands it inactive; the auto-chain only fires for a
 // brand-new registration in the same session). Sends MsgUpdateProviderStatus
 // (status=1) through txFetch, which relays the Keplr signature.
+// Provider status (active/inactive) and the providers list lag a register /
+// activate TX by a block or two. The immediate loadWallet+render after the TX
+// reads the pre-mutation status; this waits out the window and re-reads truth.
+async function reconcileProviderViews({ delayMs = 3000 } = {}) {
+  const epoch = _currentNavEpoch();
+  const startPage = S.page;
+  await new Promise(r => setTimeout(r, delayMs));
+  if (!_navStillCurrent(epoch, startPage)) return;
+  invalidateCache('/api/wallet');
+  invalidateCache(/^\/api\/providers/);
+  try { await loadWallet(); }
+  catch (e) { console.debug('[reconcileProviderViews] loadWallet failed: ' + (e && e.message)); }
+  if (!_navStillCurrent(epoch, startPage)) return;
+  try {
+    if (S.page === 'create') renderCreate();
+    renderProvider();
+  } catch (e) { console.debug('[reconcileProviderViews] render failed: ' + (e && e.message)); }
+}
+
 async function activateProvider() {
   const btn = $('btnActivateProvider');
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Activating...'; }
@@ -8789,6 +8819,8 @@ async function activateProvider() {
       invalidateCache(/^\/api\/providers/);
       await loadWallet();
       renderProvider();
+      // Provider status lags the TX a block or two — reconcile after indexing.
+      reconcileProviderViews();
     } else {
       toast('Activation failed: ' + friendlyError(a?.error || a?.rawLog || 'unknown'), 'error');
     }
@@ -8836,6 +8868,8 @@ async function registerProvider() {
       // registered provider appears without a manual refresh.
       if (S.page === 'create') renderCreate();
       renderProvider();
+      // Provider status lags the TX a block or two — reconcile after indexing.
+      reconcileProviderViews();
     } else {
       toast(friendlyError(d.error || d.rawLog || 'Registration failed'), 'error');
     }
@@ -9145,6 +9179,113 @@ async function refetchMyPlans({ attempts = 4, baseMs = 1000 } = {}) {
     } catch (e) {
       if (i < attempts - 1) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, i)));
     }
+  }
+}
+
+// After a link/unlink TX, QueryNodesForPlan keeps reporting the PRE-change set
+// for a block or two until the chain indexes the new membership. A single
+// immediate refetch races that lag and re-paints the stale (pre-change) list,
+// undoing the optimistic update. Instead, poll the (cache-invalidated)
+// /api/all-nodes endpoint until the chain-reported count reaches the count we
+// optimistically applied — then commit chain truth. `predicate(count)` decides
+// when chain has caught up (>= for adds, <= for removes).
+async function reconcilePlanNodes(planId, predicate, { attempts = 6, baseMs = 1500 } = {}) {
+  const epoch = _currentNavEpoch();
+  const onAddNodes = S.page === 'add-nodes';
+  const onYourNodes = S.page === 'your-nodes';
+  for (let i = 0; i < attempts; i++) {
+    // Stagger the first probe — broadcast just returned, the block isn't in yet.
+    await new Promise(r => setTimeout(r, i === 0 ? baseMs : baseMs * Math.min(i + 1, 4)));
+    if (!_navStillCurrent(epoch, S.page)) return;
+    // Drop every cached /api/all-nodes snapshot so we re-query chain truth.
+    invalidateCache(/^\/api\/all-nodes/);
+    try {
+      // Your Nodes view: the dedicated inPlanOnly list IS the source of truth.
+      if (onYourNodes && String(S.mgrPlanId) === String(planId)) {
+        const url = `/api/all-nodes?page=1&limit=500&planId=${planId}&inPlanOnly=true`;
+        const r = await fetch(url);
+        const d = await r.json();
+        if (d && !d.error) {
+          _dataCache[url] = { data: d, ts: Date.now() };
+          const count = d.planNodesCount != null ? d.planNodesCount : (d.nodes ? d.nodes.length : 0);
+          if (!_navStillCurrent(epoch, 'your-nodes')) return;
+          _lastYourNodesJson = JSON.stringify(d);
+          S._yourNodes = d;
+          coalesceRender('your-nodes', renderYourNodes);
+          if (predicate(count)) return;
+        }
+      }
+      // Add Nodes view: planNodesCount comes back on the excludeInPlan list too.
+      if (onAddNodes && String(S.mgrPlanId) === String(planId)) {
+        loadMgrNodes();
+        // loadMgrNodes drives its own render; read the count it just stored.
+        const count = S.mgrNodes ? (S.mgrNodes.planNodesCount || 0) : 0;
+        if (predicate(count)) return;
+      }
+      // Not on a node page (or different plan selected): nothing to repaint,
+      // the invalidation above already freshens the next visit's first fetch.
+      if (!onAddNodes && !onYourNodes) return;
+    } catch (e) {
+      console.debug('[reconcilePlanNodes] probe failed: ' + (e && e.message));
+    }
+  }
+}
+
+// Generic "optimistic mutate + delayed reconcile" for any cached endpoint whose
+// chain truth lags a TX by a block or two. `mutate(data)` edits the in-memory
+// cached snapshot for instant feedback; we re-render from it, then wait out the
+// indexing window before a single real refetch reconciles. Mirrors why
+// reconcilePlanNodes exists, generalized for grants / own-subscription / wallet.
+//   url:       the cache key + endpoint to refetch
+//   mutate:    (cachedData) => void — mutate the snapshot in place (or no-op)
+//   render:    () => void — re-render from the (now-optimistic) snapshot
+//   page:      page key to epoch-guard against navigation
+//   delayMs:   how long to wait before the reconciling refetch (default 3s)
+async function optimisticThenReconcile(url, { mutate, render, page, delayMs = 3000 } = {}) {
+  const epoch = _currentNavEpoch();
+  const entry = _dataCache[url];
+  if (entry && entry.data && typeof mutate === 'function') {
+    try { mutate(entry.data); }
+    catch (e) { console.debug('[optimisticThenReconcile] mutate failed: ' + (e && e.message)); }
+    // Bump ts so the snapshot isn't treated as instantly-stale by cachedFetch.
+    entry.ts = Date.now();
+  }
+  if (typeof render === 'function' && (!page || _navStillCurrent(epoch, page))) render();
+  await new Promise(r => setTimeout(r, delayMs));
+  if (page && !_navStillCurrent(epoch, page)) return;
+  // Now drop the optimistic snapshot and pull chain truth.
+  invalidateCache(url);
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d || d.error) return;
+    _dataCache[url] = { data: d, ts: Date.now() };
+    if (typeof render === 'function' && (!page || _navStillCurrent(epoch, page))) render();
+  } catch (e) {
+    console.debug('[optimisticThenReconcile] reconcile fetch failed: ' + (e && e.message));
+  }
+}
+
+// After a subscribe / add-subscriber / authorize TX, the chain keeps reporting
+// the PRE-mutation subscription + member + own-subscription state for a block or
+// two. The immediate render right after the TX therefore paints stale data. This
+// waits out the indexing window, drops the relevant caches, and re-renders the
+// subscriber-facing views from chain truth — without blocking the snappy first
+// paint the caller already did.
+async function reconcileSubscriberViews(planId, { delayMs = 3000 } = {}) {
+  if (planId == null) return;
+  const epoch = _currentNavEpoch();
+  const startPage = S.page;
+  await new Promise(r => setTimeout(r, delayMs));
+  if (!_navStillCurrent(epoch, startPage)) return;
+  invalidateCache(new RegExp('^/api/plans/' + planId + '/subscriptions'));
+  invalidateCache(new RegExp('^/api/plans/' + planId + '/members'));
+  invalidateCache(new RegExp('^/api/plans/' + planId + '/own-subscription'));
+  try { renderOwnSubStatus(); }
+  catch (e) { console.debug('[reconcileSubscriberViews] own-sub render failed: ' + (e && e.message)); }
+  if (S.page === 'subscribers') {
+    try { loadSubscribers(); }
+    catch (e) { console.debug('[reconcileSubscriberViews] loadSubscribers failed: ' + (e && e.message)); }
   }
 }
 
@@ -9846,6 +9987,32 @@ function adjustPagePadding(hasBar) {
 
 // ─── Your Nodes Page ─────────────────────────────────────────────────────────
 let _lastYourNodesJson = '';
+
+// Optimistically merge just-linked nodes into the Your Nodes snapshot so they
+// appear instantly, before chain indexing makes them queryable via inPlanOnly.
+// Pulls the full node objects from the Add Nodes list (S.mgrNodes) the user was
+// just looking at, so country/price/protocol render correctly on first paint.
+function seedYourNodesWithAdded(addrs) {
+  if (!S.mgrNodes || !S.mgrNodes.nodes) return;
+  if (!S._yourNodes || !Array.isArray(S._yourNodes.nodes)) {
+    S._yourNodes = { nodes: [], planNodesCount: 0 };
+  }
+  const existing = new Set(S._yourNodes.nodes.map(n => n.address));
+  let added = 0;
+  for (const addr of addrs) {
+    if (existing.has(addr)) continue;
+    const node = S.mgrNodes.nodes.find(n => n.address === addr);
+    if (!node) continue;
+    S._yourNodes.nodes.push({ ...node, inPlan: true });
+    existing.add(addr);
+    added++;
+  }
+  S._yourNodes.planNodesCount = (S._yourNodes.planNodesCount || 0) + added;
+  // Invalidate the memo so reconcilePlanNodes' fresh fetch is recognized as
+  // changed and replaces this optimistic seed with chain truth.
+  _lastYourNodesJson = '';
+}
+
 async function loadYourNodes() {
   const epoch = _currentNavEpoch();
   if (!S._yourNodes) showLoading('Loading your plans...');
@@ -10248,17 +10415,29 @@ async function linkBatch() {
         if (p) p.totalNodes = (p.totalNodes || 0) + count;
       }
       S.addSet.clear();
+      const targetCount = S.mgrNodes ? (S.mgrNodes.planNodesCount || 0) : null;
       invalidateCache(/^\/api\/all-nodes/);
       if (S.mgrPlanId) invalidateCache('/api/plans/' + S.mgrPlanId);
       invalidateCache('/api/my-plans');
-      // Re-render now (optimistic inPlan flags hide the just-added rows), then
-      // refetch the server-excluded list so chain truth reconciles — covers
-      // added nodes that weren't on the current page / in S.mgrNodes.
-      if (S.page === 'add-nodes') { renderAddNodes(); loadMgrNodes(); }
-      // Your Nodes reads /api/all-nodes?...inPlanOnly — its cache was just
-      // invalidated above, but renderYourNodes() only re-renders the stale
-      // in-memory snapshot. Refetch so the just-added nodes actually appear.
-      if (S.page === 'your-nodes') loadYourNodes();
+      // Re-render now so the optimistic inPlan flags take effect immediately
+      // (added rows drop off Add Nodes; appear on Your Nodes via seed below).
+      if (S.page === 'add-nodes') renderAddNodes();
+      // Optimistically seed Your Nodes with the just-added rows so the page
+      // shows them instantly instead of an empty list while chain indexes.
+      if (S.page === 'your-nodes' && !d.alreadyLinked && S.mgrNodes && S.mgrNodes.nodes) {
+        seedYourNodesWithAdded(addrs);
+        renderYourNodes();
+      } else if (S.page === 'your-nodes') {
+        loadYourNodes();
+      }
+      // Poll chain (not a single immediate refetch) until QueryNodesForPlan
+      // reflects the new membership — beats the block-or-two indexing lag that
+      // would otherwise re-paint the pre-link list and undo the optimism.
+      if (!d.alreadyLinked && S.mgrPlanId && targetCount != null) {
+        reconcilePlanNodes(S.mgrPlanId, (c) => c >= targetCount);
+      } else if (S.page === 'add-nodes') {
+        loadMgrNodes();
+      }
       refetchMyPlans();
     } else {
       toast(friendlyError(d.error || d.rawLog), 'error');
@@ -10305,14 +10484,30 @@ async function unlinkBatch() {
       // rewrite #app.innerHTML, so that sibling bar survives and stays stuck.
       // Tear it down explicitly (removes by id wherever it lives) before re-render.
       refreshRemoveActionBar();
+      const targetCount = S.mgrNodes ? (S.mgrNodes.planNodesCount || 0) : null;
       invalidateCache(/^\/api\/all-nodes/);
       if (S.mgrPlanId) invalidateCache('/api/plans/' + S.mgrPlanId);
       invalidateCache('/api/my-plans');
       if (S.page === 'add-nodes') renderAddNodes();
-      // Refetch (not just re-render) so the removed node actually drops off
-      // Your Nodes — the cache was invalidated above but the in-memory snapshot
-      // still holds it.
-      if (S.page === 'your-nodes') loadYourNodes();
+      // Optimistically drop the removed rows from Your Nodes so they vanish
+      // instantly, then poll chain until QueryNodesForPlan reflects the removal.
+      if (S.page === 'your-nodes' && S._yourNodes && Array.isArray(S._yourNodes.nodes)) {
+        const removed = new Set(addrs);
+        const before = S._yourNodes.nodes.length;
+        S._yourNodes.nodes = S._yourNodes.nodes.filter(n => !removed.has(n.address));
+        S._yourNodes.planNodesCount = Math.max(0, (S._yourNodes.planNodesCount || before) - (before - S._yourNodes.nodes.length));
+        _lastYourNodesJson = '';
+        renderYourNodes();
+      }
+      // Poll until the chain-reported count drops to the post-unlink target,
+      // beating the indexing lag that would re-show the removed node.
+      if (S.mgrPlanId && targetCount != null) {
+        reconcilePlanNodes(S.mgrPlanId, (c) => c <= targetCount);
+      } else if (S.page === 'your-nodes') {
+        loadYourNodes();
+      } else if (S.page === 'add-nodes') {
+        loadMgrNodes();
+      }
       refetchMyPlans();
     } else {
       toast(friendlyError(d.error || d.rawLog), 'error');
@@ -10327,7 +10522,7 @@ async function unlinkBatch() {
 // ─── Pricing Page ─────────────────────────────────────────────────────────────
 const DENOM_NAMES = {
   'udvpn': { symbol: 'P2P', name: 'Sentinel P2P', icon: '🔵' },
-  'ibc/A8C2D23A1E6F95DA4E48BA349667E322BD7A6C996D8A4AAE8BA72E190F3D1477': { symbol: 'ATOM', name: 'Cosmos Hub', icon: 'âš›ï¸' },
+  'ibc/A8C2D23A1E6F95DA4E48BA349667E322BD7A6C996D8A4AAE8BA72E190F3D1477': { symbol: 'ATOM', name: 'Cosmos Hub', icon: '⚛️' },
   'ibc/ED07A3391A112B175915CD8FAF43A2DA8E4790EDE12566649D0C2F97716B8518': { symbol: 'OSMO', name: 'Osmosis', icon: '🧪' },
   'ibc/1A09D79819407F87DD64E884E5B46349E4A5191A0A9BCBFE1D9B425F4D273CFE': { symbol: 'JUNO', name: 'Juno', icon: '🟠' },
   'ibc/2E4CF68617591638A6CBD7DA3E8CAF8C9C0B34AAB4878775A0B16ADDC56E4389': { symbol: 'AKT', name: 'Akash', icon: '🔴' },
@@ -10379,7 +10574,7 @@ function buildFiatDetailHtml(tile, RAIL_LOGOS, origin, planId) {
   // Shared self-subscription status block. EVERY rail delivers bandwidth by
   // sharing an allocation from a subscription the operator holds — so the
   // operator must be subscribed to this plan first. This surfaces the same
-  // âš ï¸/✅ indicator + Self-subscribe button the Free tile shows, so the
+  // ⚠️/✅ indicator + Self-subscribe button the Free tile shows, so the
   // operator can see whether the whole flow is even possible and fix it in
   // one click before wiring a single webhook. Filled by renderOwnSubStatus().
   const ownSubBlock = `
@@ -10434,7 +10629,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
     setTimeout(() => renderOwnSubStatus(), 0);
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.stripe}</span>
@@ -10461,7 +10656,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
           <div class="fiat-detail-section-sub">Node + Express. Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code>, register the URL in your Stripe dashboard, ship.</div>
           ${codeBlock('Stripe webhook · Node.js', stripeCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">âš ï¸</span>
+            <span class="fiat-detail-callout-icon">⚠️</span>
             <div class="fiat-detail-callout-body"><strong><code>express.raw()</code> is required.</strong> If a JSON parser touches the body before <code>constructEvent</code>, the signature check will always fail.</div>
           </div>
         </div>
@@ -10521,7 +10716,7 @@ app.post('/webhooks/paypal', async (req, res) => {
     setTimeout(() => renderOwnSubStatus(), 0);
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.paypal}</span>
@@ -10738,7 +10933,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
           <div class="fiat-detail-section-sub">Zero infrastructure. Public REST. Poll a deposit address every 30s; fire once <code>vout</code> credits the address with the expected sats and the tx has cleared <code>CONFIRMATIONS</code> blocks. Quote each buyer a unique deposit address so you can map the settled payment back to their Sentinel wallet.</div>
           ${codeBlock('mempool.space poller · Node.js', mempoolCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">â±</span>
+            <span class="fiat-detail-callout-icon">⏱</span>
             <div class="fiat-detail-callout-body"><strong>Finality.</strong> 3 confirmations ≈ 30 min. Drop to 1 for low-value plans, raise to 6 for high-value.</div>
           </div>
         </div>`;
@@ -10749,7 +10944,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
           <div class="fiat-detail-section-sub"><code>ethers</code> v6 against any public JSON-RPC (Alchemy, Infura, or <code>ethereum-rpc.publicnode.com</code>). For USDC, filter the <code>Transfer</code> event on the contract by your deposit address. For native ETH, walk every new block. <code>tx.wait(N)</code> blocks until <code>N</code> confirmations land before triggering Plan Manager. Map the depositor to their Sentinel wallet (a unique deposit address per buyer is simplest) before delivering.</div>
           ${codeBlock('ethers v6 · Node.js', ethCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">â±</span>
+            <span class="fiat-detail-callout-icon">⏱</span>
             <div class="fiat-detail-callout-body"><strong>Finality.</strong> 3 confirmations ≈ 36 sec. USDC mainnet contract: <code>0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48</code>.</div>
           </div>
         </div>`;
@@ -10760,7 +10955,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
           <div class="fiat-detail-section-sub"><code>@solana/web3.js</code> v1 against <code>api.mainnet-beta.solana.com</code> at <code>'finalized'</code> — 31 slots, supermajority vote, the strongest guarantee Solana offers. <code>onAccountChange</code> fires on every lamport delta. For USDC, derive the associated token account via <code>@solana/spl-token</code> and watch its logs. Map the payer to their Sentinel wallet (a unique deposit address per buyer is simplest) before delivering.</div>
           ${codeBlock('@solana/web3.js · Node.js', solCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">â±</span>
+            <span class="fiat-detail-callout-icon">⏱</span>
             <div class="fiat-detail-callout-body"><strong>Finality.</strong> <code>'finalized'</code> commitment ≈ 13 sec. USDC mainnet mint: <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code>.</div>
           </div>
         </div>`;
@@ -10769,7 +10964,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
     setTimeout(() => renderOwnSubStatus(), 0);
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark">${RAIL_LOGOS.btc}</span>
@@ -10814,7 +11009,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
 
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark">${RAIL_LOGOS.free}</span>
@@ -11265,7 +11460,7 @@ async function runTrigTest() {
     return;
   }
   btn.disabled = true;
-  btn.innerHTML = '<span class="trig-test-btn-icon">â³</span> Broadcasting…';
+  btn.innerHTML = '<span class="trig-test-btn-icon">⏳</span> Broadcasting…';
   out.style.display = 'block';
   out.className = 'trig-test-result trig-test-result-pending';
   out.innerHTML = '<strong>Broadcasting subscribe TX…</strong> Signing with your loaded wallet.';
@@ -11280,6 +11475,10 @@ async function runTrigTest() {
       const subId = j.subscriptionId ? '<div>Subscription ID: <code>' + escapeHtml(String(j.subscriptionId)) + '</code></div>' : '';
       const tx = j.txHash ? '<div>tx: <code>' + escapeHtml(j.txHash) + '</code></div>' : '';
       out.innerHTML = '<strong>✓ Subscribe TX broadcast.</strong>' + subId + tx;
+      // This is a real subscribe — its caches were never invalidated before, so
+      // the own-sub banner and subscriber list stayed stale. Reconcile now.
+      invalidateCache('/api/wallet');
+      reconcileSubscriberViews(planId);
     } else {
       out.className = 'trig-test-result trig-test-result-err';
       const errMsg = j.error || j.rawLog || 'Subscribe failed';
@@ -11336,7 +11535,7 @@ async function renderOwnSubStatus() {
     if (!data?.subscribed) {
       el.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.35);border-radius:var(--radius-sm)">
-          <span style="font-size:20px;line-height:1">âš ï¸</span>
+          <span style="font-size:20px;line-height:1">⚠️</span>
           <div style="flex:1">
             <div style="font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--text)">Not subscribed to plan #${escapeHtml(String(planId))} yet</div>
             <div style="font-family:var(--font-display);font-size:12.5px;color:var(--text-muted);margin-top:3px">You hold no subscription to this plan. You can self-subscribe now to mint a bandwidth allocation, or just add a subscriber below — that self-subscribes you automatically before sharing their allocation.</div>
@@ -11440,6 +11639,9 @@ async function authorizeUser() {
     renderOwnSubStatus();
     if (S.page === 'fee-grants') renderFeeGrants();
     if (S.page === 'subscribers') loadSubscribers();
+    // The on-chain subscription/member set lags the TX by a block or two —
+    // reconcile after the indexing window so the views show chain truth.
+    reconcileSubscriberViews(S.mgrPlanId);
   } catch (e) {
     if (status) status.innerHTML = '<span style="color:var(--red)">Failed: ' + escapeHtml(e.message) + '</span>';
   }
@@ -11470,6 +11672,8 @@ async function selfSubscribe() {
     invalidateCache(new RegExp('^/api/plans/' + S.mgrPlanId + '/own-subscription'));
     invalidateCache(new RegExp('^/api/plans/' + S.mgrPlanId + '/subscriptions'));
     renderOwnSubStatus();
+    // own-subscription lags the TX a block or two — reconcile after indexing.
+    reconcileSubscriberViews(S.mgrPlanId);
   } catch (e) {
     if (status) status.innerHTML = '<span style="color:var(--red)">Failed: ' + escapeHtml(e.message) + '</span>';
     if (btn) { btn.disabled = false; btn.querySelector('span').textContent = 'Self-subscribe to plan #' + S.mgrPlanId; }
@@ -11512,6 +11716,8 @@ async function authorizeBulk() {
     }
     renderOwnSubStatus();
     if (S.page === 'subscribers') loadSubscribers();
+    // Subscription/member set lags the TX by a block or two — reconcile after.
+    reconcileSubscriberViews(S.mgrPlanId);
   } catch (e) {
     if (status) status.innerHTML = '<span style="color:var(--red)">Failed: ' + escapeHtml(e.message) + '</span>';
   }
@@ -11849,7 +12055,7 @@ async function renderPricing() {
     const focusMarks = railTab === 'onchain' ? onchainMarksHtml : fiatMarksHtml;
     const focusHeroHtml = railTab ? `
       <div class="rail-toggle-bar">
-        <button class="rail-toggle-back" onclick="setRailTab(null)">â† Back to options</button>
+        <button class="rail-toggle-back" onclick="setRailTab(null)">← Back to options</button>
         <div class="rail-toggle-switch" role="tablist" aria-label="Payment rail">
           <button class="rail-toggle-option ${railTab === 'onchain' ? 'active' : ''}" onclick="setRailTab('onchain')">On-Chain</button>
           <button class="rail-toggle-option ${railTab === 'fiat' ? 'active' : ''}" onclick="setRailTab('fiat')">Fiat &amp; Non-IBC</button>
@@ -11930,7 +12136,7 @@ async function renderPricing() {
             </div>
           </div>
           <div class="immutable-banner">
-            <span class="immutable-banner-icon">â„¹ï¸</span>
+            <span class="immutable-banner-icon">ℹ️</span>
             <div class="immutable-banner-body">
               <div class="immutable-banner-title">${plans.length > 0 ? 'Select a plan above to see live pricing.' : 'You don’t have a plan yet.'}</div>
               <div class="immutable-banner-sub">${plans.length > 0
@@ -12758,9 +12964,13 @@ async function initAutoGrant() {
       if (d2.granted > 0) {
         _autoGrantSessionCount += d2.granted;
         toast(`Auto-granted ${d2.granted} new subscriber${d2.granted > 1 ? 's' : ''} (${_autoGrantSessionCount} this session)`, 'success');
-        invalidateCache('/api/feegrant/grants');
         invalidateCache('/api/wallet');
-        renderFeeGrants();
+        // New grants index a block or two later — reconcile after the window.
+        optimisticThenReconcile('/api/feegrant/grants', {
+          mutate: () => {},
+          render: () => { if (S.page === 'fee-grants') renderFeeGrants(); },
+          page: 'fee-grants',
+        });
       }
     }
   } catch (err) {
@@ -13018,10 +13228,17 @@ async function grantAllSubscribers() {
     if (d.granted > 0) _autoGrantSessionCount += d.granted;
     toast(`Granted: ${d.granted}, skipped: ${d.skipped || 0}${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
     if (d.granted > 0) {
-      invalidateCache('/api/feegrant/grants');
       invalidateCache('/api/wallet');
+      // New grants take a block or two to index — reconcile after the window so
+      // the list reflects them instead of showing the pre-grant snapshot.
+      optimisticThenReconcile('/api/feegrant/grants', {
+        mutate: () => {},
+        render: () => { if (S.page === 'fee-grants') renderFeeGrants(); },
+        page: 'fee-grants',
+      });
+    } else if (S.page === 'fee-grants') {
+      renderFeeGrants();
     }
-    if (S.page === 'fee-grants') renderFeeGrants();
   } catch (e) {
     toast('Grant failed: ' + e.message, 'error');
   }
@@ -13041,9 +13258,14 @@ async function grantSingleAddr() {
     if (d.error) throw new Error(d.error);
     toast(`Fee grant issued! TX: ${d.txHash?.slice(0, 12)}...`, 'success');
     document.getElementById('fgSingleAddr').value = '';
-    invalidateCache('/api/feegrant/grants');
     invalidateCache('/api/wallet');
-    if (S.page === 'fee-grants') renderFeeGrants();
+    // New grant indexes a block or two after broadcast — reconcile after the
+    // window rather than refetching immediately into a pre-grant snapshot.
+    optimisticThenReconcile('/api/feegrant/grants', {
+      mutate: () => {},
+      render: () => { if (S.page === 'fee-grants') renderFeeGrants(); },
+      page: 'fee-grants',
+    });
   } catch (e) {
     toast('Grant failed: ' + e.message, 'error');
   }
@@ -13066,9 +13288,14 @@ async function revokeSingleGrant(grantee) {
     });
     if (d.error) throw new Error(d.error);
     toast(`Grant revoked! TX: ${d.txHash?.slice(0, 12)}...`, 'success');
-    invalidateCache('/api/feegrant/grants');
     invalidateCache('/api/wallet');
-    if (S.page === 'fee-grants') renderFeeGrants();
+    // Optimistically drop the row so it doesn't re-appear (chain still lists the
+    // revoked grant for a block or two); reconcile after the indexing window.
+    optimisticThenReconcile('/api/feegrant/grants', {
+      mutate: (data) => { if (Array.isArray(data.allowances)) data.allowances = data.allowances.filter(g => g.grantee !== grantee); },
+      render: () => { if (S.page === 'fee-grants') renderFeeGrants(); },
+      page: 'fee-grants',
+    });
   } catch (e) {
     toast('Revoke failed: ' + e.message, 'error');
   }
@@ -13092,9 +13319,12 @@ async function revokeAllGrants() {
     });
     if (d.error) throw new Error(d.error);
     toast(`Revoked ${d.revoked} grants${d.errors ? ', errors: ' + d.errors.length : ''}`, d.errors ? 'error' : 'success');
-    invalidateCache('/api/feegrant/grants');
     invalidateCache('/api/wallet');
-    if (S.page === 'fee-grants') renderFeeGrants();
+    optimisticThenReconcile('/api/feegrant/grants', {
+      mutate: (data) => { data.allowances = []; },
+      render: () => { if (S.page === 'fee-grants') renderFeeGrants(); },
+      page: 'fee-grants',
+    });
   } catch (e) {
     toast('Revoke failed: ' + e.message, 'error');
   } finally {
@@ -13130,12 +13360,18 @@ async function cleanupStaleGrants() {
     if (d.errors && d.errors.length) parts.push(`${d.errors.length} failed`);
     const variant = d.errors && d.errors.length ? 'error' : 'success';
     toast(`Cleanup: ${parts.join(' · ') || 'nothing to do'}`, variant);
+    // Only invalidate/reconcile on success — running this on TX failure wiped a
+    // healthy cache and forced a needless cold refetch (Finding 7 logic bug).
+    invalidateCache('/api/wallet');
+    const revoked = new Set(grantees);
+    optimisticThenReconcile('/api/feegrant/grants', {
+      mutate: (data) => { if (Array.isArray(data.allowances)) data.allowances = data.allowances.filter(g => !revoked.has(g.grantee)); },
+      render: () => { if (S.page === 'fee-grants') renderFeeGrants(); },
+      page: 'fee-grants',
+    });
   } catch (e) {
     toast('Cleanup failed: ' + e.message, 'error');
   }
-  invalidateCache('/api/feegrant/grants');
-  invalidateCache('/api/wallet');
-  if (S.page === 'fee-grants') renderFeeGrants();
 }
 
 // ─── Coming Soon placeholder ─────────────────────────────────────────────────
