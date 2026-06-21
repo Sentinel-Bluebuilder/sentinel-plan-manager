@@ -147,7 +147,12 @@ if (DEMO_MODE) {
 }
 
 const app = express();
-app.use(express.json({ limit: '32kb' }));
+// Batch link / batch subscribe relay a single signDoc carrying many messages
+// (bodyBytes/authInfoBytes base64), so the 32kb cap rejected large batches with
+// a PayloadTooLargeError — which, without a JSON error handler, surfaced to the
+// browser as an HTML error page ("Unexpected token '<'"). 512kb comfortably
+// covers the largest batch signDoc while staying well under any abuse concern.
+app.use(express.json({ limit: '512kb' }));
 // Suppress fingerprinting header.
 app.disable('x-powered-by');
 // Trust the loopback proxy so req.secure reflects the X-Forwarded-Proto
@@ -4876,6 +4881,40 @@ app.use((req, res, next) => {
   if (req.method !== 'GET') return next();
   if (req.path.startsWith('/api/') || req.path === '/health') return next();
   res.sendFile(join(__dirname, 'public', 'index.html'));
+});
+
+// ─── API 404 (JSON) ───────────────────────────────────────────────────────────
+// Any unmatched /api/ request (wrong method, typo, removed endpoint) must return
+// JSON — NOT the SPA HTML or Express's default "Cannot POST" page. The frontend
+// always calls res.json() on these responses; an HTML body throws
+// "Unexpected token '<', "<!DOCTYPE "... is not valid JSON".
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path === '/health') {
+    return res.status(404).json({ error: `No such endpoint: ${req.method} ${req.path}`, errorCode: 'not-found' });
+  }
+  next();
+});
+
+// ─── JSON Error Handler (must be LAST) ────────────────────────────────────────
+// Catches body-parser failures (malformed JSON → 400, oversized body → 413) and
+// any error thrown by a route's next(err). Express's DEFAULT handler renders an
+// HTML page for these, which the JSON-only frontend can't parse — that was the
+// "Unexpected token '<'" seen on Privy register and every other TX function.
+// Always respond JSON. 4 args is required so Express treats this as an error
+// handler.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  let errorCode = 'server-error';
+  if (err.type === 'entity.too.large' || status === 413) errorCode = 'payload-too-large';
+  else if (err.type === 'entity.parse.failed' || status === 400) errorCode = 'bad-json';
+  if (status >= 500) console.error('[error-handler]', req.method, req.path, '-', err.message);
+  if (res.headersSent) return next(err);
+  res.status(status).json({
+    ok: false,
+    error: status === 413 ? 'Request too large' : (err.message || 'Internal server error'),
+    errorCode,
+  });
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
