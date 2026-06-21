@@ -7164,20 +7164,20 @@ async function mountPrivyWidget() {
   if (!mount) return;
   _privyMounted = true;
 
-  mount.innerHTML = `<div style="padding:14px;color:var(--muted);font-size:13px">Loading email sign-in…</div>`;
+  mount.innerHTML = `<div style="padding:14px;color:var(--text-muted);font-size:13px">Loading email sign-in…</div>`;
 
   let cfg;
   try {
     const r = await fetch('/api/wallet/privy-config', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
     cfg = await r.json();
   } catch (e) {
-    mount.innerHTML = `<div style="padding:18px;border:1px dashed rgba(255,80,80,0.35);border-radius:10px;color:var(--muted);font-size:13px">Could not reach the Privy config endpoint: ${e.message}</div>`;
+    mount.innerHTML = `<div style="padding:18px;border:1px dashed rgba(255,80,80,0.35);border-radius:10px;color:var(--text-muted);font-size:13px">Could not reach the Privy config endpoint: ${e.message}</div>`;
     return;
   }
 
   if (!cfg?.enabled) {
     mount.innerHTML = `
-      <div style="padding:18px;border:1px dashed rgba(255,255,255,0.16);border-radius:10px;font-size:13px;line-height:1.55;color:var(--muted)">
+      <div style="padding:18px;border:1px dashed rgba(255,255,255,0.16);border-radius:10px;font-size:13px;line-height:1.55;color:var(--text-muted)">
         <strong style="color:var(--text)">Email sign-in is not configured on this server.</strong><br><br>
         To enable: get a Privy app from
         <a href="https://dashboard.privy.io" target="_blank" rel="noopener" style="color:var(--accent)">dashboard.privy.io</a>,
@@ -7207,7 +7207,7 @@ async function mountPrivyWidget() {
         Verify and sign in
       </button>
     </form>
-    <div id="privyStatus" style="margin-top:10px;color:var(--muted);font-size:12px"></div>
+    <div id="privyStatus" style="margin-top:10px;color:var(--text-muted);font-size:12px"></div>
   `;
 
   const status = $('privyStatus');
@@ -7531,8 +7531,14 @@ async function txFetch(url, opts = {}) {
     headers: { 'X-Requested-With': 'XMLHttpRequest', ...(opts.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
+  // Keplr-sign relay is a 200 with a special body — handle before the ok-check.
   if (data && data.mode === 'keplr-sign' && data.signDoc) {
     return await signAndBroadcast(data.signDoc);
+  }
+  // Surface HTTP errors instead of returning {} as if the call succeeded — a
+  // swallowed 400/500 made callers act on an empty object and fail silently.
+  if (!res.ok) {
+    throw new Error((data && data.error) || `Request failed (${res.status})`);
   }
   return data;
 }

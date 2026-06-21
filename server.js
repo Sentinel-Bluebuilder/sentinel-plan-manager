@@ -596,6 +596,14 @@ loadNodeCacheFromDisk();
 // Always kick a fresh scan on startup so the disk seed is replaced with on-chain truth ASAP.
 runNodeScan().catch(err => console.error('Initial node scan failed:', err.message));
 
+// Chain price fields arrive as strings ("1000000") but can be missing or
+// malformed; bare parseInt then yields NaN which silently poisons every
+// downstream price/total. Coerce to a finite integer, falling back to 0.
+function safeInt(v, fallback = 0) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 // Adapter: handles both shapes simultaneously —
 //   chain catalog (snake_case: gigabyte_prices, remote_url, no country)
 //   probe-enriched (camelCase: gigabytePrices, remoteUrl, country, city, etc.)
@@ -608,8 +616,8 @@ function nodeCacheToAllNodes(raw) {
     return {
       address: n.address,
       remoteUrl: n.remoteUrl || n.remote_url || '',
-      gbPriceUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
-      hrPriceUdvpn: hrPrice ? parseInt(hrPrice.quote_value) : 0,
+      gbPriceUdvpn: gbPrice ? safeInt(gbPrice.quote_value) : 0,
+      hrPriceUdvpn: hrPrice ? safeInt(hrPrice.quote_value) : 0,
       status: 'active',
       protocol: n.serviceType || null,
       country: n.country || n.location?.country || null,
@@ -1043,7 +1051,7 @@ async function _getPlanStatsImpl(planId) {
 
   // null quote_value => price unknown (read failed); keep dvpnAmount null so the
   // UI shows "—" instead of a fabricated 0. Only a real on-chain value divides.
-  const quoteNum = price.quote_value != null ? parseInt(price.quote_value) : null;
+  const quoteNum = price.quote_value != null ? safeInt(price.quote_value, null) : null;
   return {
     planId,
     totalSubscriptions: onchainSubsCount + addedMembers,
@@ -1062,7 +1070,7 @@ async function _getPlanStatsImpl(planId) {
       denom: p.denom,
       quoteValue: p.quote_value,
       baseValue: p.base_value,
-      dvpnAmount: p.denom === 'udvpn' ? (parseInt(p.quote_value || '0') / 1e6) : null,
+      dvpnAmount: p.denom === 'udvpn' ? (safeInt(p.quote_value) / 1e6) : null,
     })),
     renewalPolicy,
     activeSubs: activeSubs + activeAddedMembers,
@@ -1182,8 +1190,8 @@ async function getAllNodeInfo() {
         const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
         const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
         nodeMap[n.address] = {
-          hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
-          gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
+          hourlyUdvpn: hourlyPrice ? safeInt(hourlyPrice.quote_value) : 0,
+          gbUdvpn: gbPrice ? safeInt(gbPrice.quote_value) : 0,
         };
       }
       console.log(`[RPC] getAllNodeInfo: ${Object.keys(nodeMap).length} nodes loaded`);
@@ -1202,8 +1210,8 @@ async function getAllNodeInfo() {
       const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
       const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
       nodeMap[n.address] = {
-        hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
-        gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
+        hourlyUdvpn: hourlyPrice ? safeInt(hourlyPrice.quote_value) : 0,
+        gbUdvpn: gbPrice ? safeInt(gbPrice.quote_value) : 0,
       };
     }
     nextKey = d.pagination?.next_key || null;
@@ -1280,7 +1288,7 @@ async function buildLeaseMsg(nodeAddress, hours = 24) {
   const hp = (nodeInfo.hourly_prices || []).find(p => p.denom === 'udvpn');
   if (!hp) throw new Error('Node has no udvpn hourly price');
 
-  const totalCost = (parseInt(hp.quote_value) * hours / 1e6).toFixed(1);
+  const totalCost = (safeInt(hp.quote_value) * hours / 1e6).toFixed(1);
   console.log(`[LEASE] Lease msg for ${nodeAddress} ${hours}h (${hp.quote_value} udvpn/hr = ~${totalCost} P2P)`);
 
   return {
@@ -1889,10 +1897,14 @@ app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req,
 // server-side so frontend-only failures (e.g. keplr.signDirect throwing before
 // the broadcast POST fires) show up in server-out.log. Remove once Keplr create
 // flow is verified.
-app.post('/api/_clientlog', (req, res) => {
+// The global CSRF middleware already blocks cross-site callers; rate-limit on
+// top so a same-origin page can't flood server logs. Tag is clamped too so a
+// caller can't pad each line to the 1500-char data cap.
+app.post('/api/_clientlog', rateLimit('clog', 120, 60_000), (req, res) => {
   try {
     const { tag, data } = req.body || {};
-    console.log('[clientlog] %s %s', tag || '?', JSON.stringify(data ?? {}).slice(0, 1500));
+    const safeTag = String(tag ?? '?').slice(0, 80);
+    console.log('[clientlog] %s %s', safeTag, JSON.stringify(data ?? {}).slice(0, 1500));
   } catch (e) {
     console.warn('[clientlog] failed:', e.message);
   }
@@ -2967,10 +2979,21 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
     if (!address || !String(address).startsWith('sent1')) {
       return res.status(400).json({ error: 'valid sent1... address required' });
     }
-    console.log(`Adding subscriber ${address} to plan ${planId} via self-subscribe + share...`);
-    const result = await _addSubscriberViaShare(parseInt(planId), address, { denom, allocBytes });
+
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
+
+    // Ownership gate: _addSubscriberViaShare broadcasts a subscribe TX paid from
+    // THIS operator's wallet, so reject add-subscriber against a plan we don't own
+    // — otherwise any authenticated caller could drain our balance via a foreign
+    // planId.
+    const ownErr = await assertPlanOwnership(planIdNum);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
+
+    console.log(`Adding subscriber ${address} to plan ${planIdNum} via self-subscribe + share...`);
+    const result = await _addSubscriberViaShare(planIdNum, address, { denom, allocBytes });
     console.log(`Added ${address}: sub=${result.subscriptionId} subTx=${result.subTx} shareTx=${result.shareTx}`);
-    invalidatePlanSubs(parseInt(planId, 10));
+    invalidatePlanSubs(planIdNum);
     res.json(result);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
@@ -2984,23 +3007,36 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
   try {
     const { planId, addresses, denom, allocBytes } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
+
+    const planIdNum = parseInt(planId, 10);
+    if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
+
     const list = Array.isArray(addresses)
       ? addresses.map(a => String(a).trim()).filter(a => a.startsWith('sent1'))
       : [];
     if (!list.length) return res.status(400).json({ error: 'addresses[] with valid sent1... entries required' });
+    // Cap the batch: each entry triggers a serialized subscribe+share broadcast
+    // from this wallet, so an unbounded list would pin the broadcast queue for
+    // minutes and block every other caller (and risk gas exhaustion).
+    if (list.length > 500) return res.status(400).json({ error: 'Maximum 500 addresses per request' });
+
+    // Ownership gate: every entry broadcasts a subscribe TX from THIS operator's
+    // wallet, so reject bulk-add against a plan we don't own.
+    const ownErr = await assertPlanOwnership(planIdNum);
+    if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
 
     const results = [];
     // Sequential — each address needs its own subscribe+share, and back-to-back
     // signing from one wallet must serialize to avoid account-sequence collisions.
     for (const addr of list) {
       try {
-        const r = await _addSubscriberViaShare(parseInt(planId), addr, { denom, allocBytes });
+        const r = await _addSubscriberViaShare(planIdNum, addr, { denom, allocBytes });
         results.push({ address: addr, ok: true, subscriptionId: r.subscriptionId, reused: r.reused, subTx: r.subTx, shareTx: r.shareTx });
       } catch (e) {
         results.push({ address: addr, ok: false, error: parseChainError(e.message) });
       }
     }
-    invalidatePlanSubs(parseInt(planId, 10));
+    invalidatePlanSubs(planIdNum);
     const added = results.filter(r => r.ok).length;
     res.json({ ok: added > 0, added, failed: results.length - added, results });
   } catch (err) {
