@@ -14,6 +14,10 @@ LICENSE
 .env.local
 .wallet.json
 wallet.json
+.session-key
+privy-wallets.json
+auto-grant.json
+an.json
 my-plans.json
 nodes-cache.json
 sellers.json
