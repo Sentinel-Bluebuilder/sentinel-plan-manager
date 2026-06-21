@@ -99,6 +99,21 @@ function invalidatePlanSubs(planId) {
   _planSubsKeys.delete(id);
 }
 
+// Drop the operator-scoped read caches that derive from a plan's subscriber set
+// (members list, own-subscription banner, plan stats, unique-wallet count) so
+// they reflect a just-committed subscribe / add-subscriber instead of serving a
+// pre-mutation snapshot for up to the 30-120s TTL. Keyed by getAddr() at call
+// time, matching how those caches were written.
+function invalidateSubscriberCaches(planId) {
+  const id = Number(planId);
+  if (!Number.isFinite(id)) return;
+  const op = getAddr() || '_anon';
+  cacheInvalidate(`planMembers:${id}:${op}`);
+  cacheInvalidate(`ownSub:${id}:${op}`);
+  cacheInvalidate(`planStats:${id}:${op}`);
+  cacheInvalidate(`uniqueWallets:${id}`);
+}
+
 // ─── Demo Mode ────────────────────────────────────────────────────────────────
 // Read-only browse: any visitor sees the UI mounted on a watch-only address
 // without supplying a mnemonic. Every TX-broadcasting endpoint returns 403.
@@ -778,7 +793,15 @@ async function discoverPlanIds() {
   return [...ids].sort((a, b) => a - b);
 }
 
+// Cached wrapper — this is hit on every GET /api/plans/:id (card expand / detail)
+// and fires a full up-to-10k subscription query each time. Same data, same churn
+// rate as planStats, so share its 120s TTL. Keyed by plan only (the subscriber
+// set is identical regardless of which operator is viewing).
 async function getUniqueWallets(planId) {
+  return cached(`uniqueWallets:${planId}`, 120_000, () => _getUniqueWalletsImpl(planId));
+}
+
+async function _getUniqueWalletsImpl(planId) {
   const wallets = new Set();
 
   // RPC-first: single protobuf call returns the full set (~912x faster than paginated LCD).
@@ -2804,6 +2827,11 @@ app.post('/api/plan/subscribe', async (req, res) => {
       }
       resp.subscriptionId = subscriptionId;
       console.log(`Subscribed: subscription_id=${subscriptionId} tx=${resp.txHash}`);
+      // Drop the operator-scoped read caches so the own-subscription banner,
+      // members list and subscriber totals reflect the new sub on next fetch
+      // instead of serving the pre-subscribe snapshot for up to 30-120s.
+      invalidatePlanSubs(planId);
+      invalidateSubscriberCaches(planId);
       res.json(resp);
     } else {
       console.log(`Subscribe FAIL: code=${resp.code} ${resp.rawLog}`);
@@ -2971,6 +2999,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
     const result = await _addSubscriberViaShare(parseInt(planId), address, { denom, allocBytes });
     console.log(`Added ${address}: sub=${result.subscriptionId} subTx=${result.subTx} shareTx=${result.shareTx}`);
     invalidatePlanSubs(parseInt(planId, 10));
+    invalidateSubscriberCaches(parseInt(planId, 10));
     res.json(result);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
@@ -3001,6 +3030,7 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
       }
     }
     invalidatePlanSubs(parseInt(planId, 10));
+    invalidateSubscriberCaches(parseInt(planId, 10));
     const added = results.filter(r => r.ok).length;
     res.json({ ok: added > 0, added, failed: results.length - added, results });
   } catch (err) {
