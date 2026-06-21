@@ -1657,7 +1657,11 @@ html[data-theme="light"] .plan-card:hover {
 .plan-card-price-denom {
   font-size: 13px; font-weight: 600; color: var(--text-dim);
   margin-left: 5px;
+  display: inline-flex; align-items: center; gap: 5px;
 }
+/* Shrink the IBC brand disc to fit the small inline denom labels on plan cards. */
+.plan-card-price-denom .denom-brand-mark { width: 18px; height: 18px; }
+.plan-card-denom-pill .denom-brand-mark { width: 15px; height: 15px; }
 .plan-card-price-usd {
   font-size: 14px; font-weight: 600; color: var(--accent);
 }
@@ -1706,6 +1710,7 @@ html[data-theme="light"] .plan-card:hover {
   border-radius: 999px;
   padding: 3px 9px;
   font-family: var(--font-mono);
+  display: inline-flex; align-items: center; gap: 4px;
 }
 .plan-card-denom-pill strong {
   font-weight: 700; color: var(--text-muted);
@@ -4474,6 +4479,17 @@ html[data-theme="light"] .rail-card-mark-light { background: transparent; border
   border-radius: 8px;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
+/* Brand mark for a denom in the accepted-currencies list — the real chain logo
+   (same source as the Create Plan picker), sized to sit on the row like the
+   emoji it replaces. White disc behind the mark so dark SVGs stay legible on
+   both themes. */
+.denom-brand-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex: 0 0 auto;
+  border-radius: 50%; background: #fff; overflow: hidden;
+}
+.denom-brand-mark img,
+.denom-brand-mark svg { width: 100%; height: 100%; object-fit: contain; padding: 2px; box-sizing: border-box; }
 .badge-locked {
   background: rgba(217, 119, 6, 0.15);
   color: var(--yellow, #d97706);
@@ -5889,6 +5905,11 @@ const S = {
   mgrPlanId: '', mgrNodes: null, mgrPage: 1, myPlans: null, myPlansLoading: false,
   subsPage: 1, fgPage: 1,
   leaseHours: 24, addSet: new Set(), removeSet: new Set(),
+  // Optimistic per-plan node-count floor (planId -> count). Set after a
+  // successful link/unlink TX so a stale-lagging /api/my-plans read can't
+  // visibly revert the plan-pill count to the pre-TX value while the chain
+  // catches up. Cleared per plan by refetchMyPlans once chain >= floor.
+  planNodeFloor: {},
   nodePriceCache: {},
   // Create
   creating: false,
@@ -7537,22 +7558,6 @@ async function txFetch(url, opts = {}) {
   return data;
 }
 
-// TEMP DIAG — beacon a tagged event to the server so it lands in server-out.log
-// (lets the dev read frontend-only failures without the browser console). Fire-
-// and-forget; never let logging break the flow. Remove with the server endpoint.
-function clientLog(tag, data) {
-  try {
-    fetch('/api/_clientlog', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-      body: JSON.stringify({ tag, data: data ?? {} }),
-      keepalive: true,
-    }).catch((e) => console.warn('[clientLog] beacon failed:', e?.message));
-  } catch (e) {
-    console.warn('[clientLog] threw:', e?.message);
-  }
-}
-
 async function signAndBroadcast(signDoc) {
   // Privy sessions have no browser extension — the privkey lives in Privy's
   // enclave. Relay the unsigned signDoc to the server, which calls Privy
@@ -7582,40 +7587,24 @@ async function signAndBroadcast(signDoc) {
     bodyBytes,
     authInfoBytes,
   };
-  clientLog('signDirect:start', { chainId: signDoc.chainId, addr });
   let signed;
   try {
     signed = await window.keplr.signDirect(signDoc.chainId, addr, direct);
   } catch (e) {
-    clientLog('signDirect:threw', { msg: String(e?.message || e) });
     throw new Error('Keplr signing failed: ' + (e?.message || e));
   }
-  clientLog('signDirect:ok', {
-    hasBody: !!signed?.signed?.bodyBytes,
-    hasAuth: !!signed?.signed?.authInfoBytes,
-    hasSig: !!signed?.signature?.signature,
-  });
   // signed.signed.* echoes the doc; signed.signature.signature is base64 sig.
   let broadcast, out;
-  try {
-    broadcast = await fetch('/api/tx/broadcast-signed', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-      body: JSON.stringify({
-        bodyBytes: uint8ToB64(signed.signed.bodyBytes),
-        authInfoBytes: uint8ToB64(signed.signed.authInfoBytes),
-        signature: signed.signature.signature,
-      }),
-    });
-  } catch (e) {
-    clientLog('broadcastPost:fetchThrew', { msg: String(e?.message || e) });
-    throw e;
-  }
-  out = await broadcast.json().catch((e) => {
-    clientLog('broadcastPost:badJson', { status: broadcast.status, msg: String(e?.message || e) });
-    return {};
+  broadcast = await fetch('/api/tx/broadcast-signed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({
+      bodyBytes: uint8ToB64(signed.signed.bodyBytes),
+      authInfoBytes: uint8ToB64(signed.signed.authInfoBytes),
+      signature: signed.signature.signature,
+    }),
   });
-  clientLog('broadcastPost:resp', { status: broadcast.status, out });
+  out = await broadcast.json().catch(() => ({}));
   return out;
 }
 
@@ -8782,7 +8771,6 @@ async function activateProvider() {
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: JSON.stringify({ status: 1 }),
     });
-    clientLog('activateProvider:resp', { ok: a?.ok, txHash: a?.txHash, error: a?.error, rawLog: a?.rawLog });
     if (a?.ok) {
       toast('Provider activated! TX: ' + String(a.txHash || '').slice(0, 16) + '...', 'success');
       invalidateCache('/api/wallet');
@@ -8793,7 +8781,6 @@ async function activateProvider() {
       toast('Activation failed: ' + friendlyError(a?.error || a?.rawLog || 'unknown'), 'error');
     }
   } catch (e) {
-    clientLog('activateProvider:threw', { msg: String(e?.message || e) });
     toast(friendlyError(e.message), 'error');
   }
   if (btn) { btn.disabled = false; btn.innerHTML = '<span>Activate Provider</span><span class="btn-cost">1 signature</span>'; }
@@ -8893,7 +8880,6 @@ async function createPlan() {
         meta: aud === 'real-world' ? { audience: 'real-world', appPriceUsd: S.create.rwAppPrice || null } : { audience: 'ibc' },
       }),
     });
-    clientLog('createPlan:resp', { ok: d.ok, planId: d.planId, hasActivation: !!d.activation, activationError: d.activationError, txHash: d.txHash, error: d.error });
     if (d.ok) {
       const planMsg = d.planId ? `Plan #${d.planId} created!` : 'Plan created!';
       toast(planMsg + (d.txHash ? ' TX: ' + d.txHash.slice(0, 16) + '...' : ''), 'success');
@@ -9128,7 +9114,7 @@ async function _ensurePlansLoaded(forPage) {
  *  the current page so plan-pill counts (totalNodes, totalSubscriptions) reflect
  *  the post-TX chain state. Retries with backoff because the chain can lag a
  *  beat after a successful broadcast. */
-async function refetchMyPlans({ attempts = 4, baseMs = 1000 } = {}) {
+async function refetchMyPlans({ attempts = 6, baseMs = 1000 } = {}) {
   const epoch = _currentNavEpoch();
   for (let i = 0; i < attempts; i++) {
     try {
@@ -9136,12 +9122,37 @@ async function refetchMyPlans({ attempts = 4, baseMs = 1000 } = {}) {
       const d = await r.json();
       if (!d || d.error) throw new Error(d?.error || 'no data');
       if (!_navStillCurrent(epoch, S.page)) return;
-      _dataCache['/api/my-plans'] = { data: d, ts: Date.now() };
-      _lastMyPlansJson = JSON.stringify(d);
-      S.myPlans = d.plans || [];
+      const plans = d.plans || [];
+      // Apply the optimistic node-count floor: if the chain read still lags
+      // behind a just-broadcast link/unlink, hold the post-TX count instead of
+      // letting the pill snap back. Drop the floor for a plan once the chain
+      // result actually reaches it (or exceeds it), so future genuine changes
+      // are never masked. `chainCaughtUp` gates whether we keep retrying.
+      const floor = S.planNodeFloor || {};
+      let chainCaughtUp = true;
+      for (const p of plans) {
+        const f = floor[String(p.planId)];
+        if (f == null) continue;
+        const chainVal = p.totalNodes || 0;
+        // f.op === 'add'    → chain may lag LOW  (catches up once chainVal >= expected)
+        // f.op === 'remove' → chain may lag HIGH (catches up once chainVal <= expected)
+        const caught = f.op === 'remove' ? chainVal <= f.expected : chainVal >= f.expected;
+        if (caught) {
+          delete floor[String(p.planId)]; // chain reflects the TX — floor done
+        } else {
+          p.totalNodes = f.expected;      // hold optimistic value for now
+          chainCaughtUp = false;          // ...and keep polling
+        }
+      }
+      _dataCache['/api/my-plans'] = { data: { ...d, plans }, ts: Date.now() };
+      _lastMyPlansJson = JSON.stringify({ ...d, plans });
+      S.myPlans = plans;
       const handler = { 'add-nodes': loadAddNodes, 'your-nodes': loadYourNodes, pricing: loadPricing, 'your-plans': loadYourPlans, subscribers: loadSubscribers, 'fee-grants': loadFeeGrants };
       if (handler[S.page]) coalesceRender('plans:' + S.page, handler[S.page]);
-      return;
+      // If a floor is still pending, the chain hasn't indexed the TX yet —
+      // keep retrying so the pill reconciles to real chain truth on its own.
+      if (chainCaughtUp) return;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, i)));
     } catch (e) {
       if (i < attempts - 1) await new Promise(r => setTimeout(r, baseMs * Math.pow(2, i)));
     }
@@ -9596,6 +9607,7 @@ function renderAddNodes() {
   const filtersHost = document.getElementById('addNodesFilters');
   const chipsHost = document.getElementById('addNodesChips');
   const contentHost = document.getElementById('addNodesContent');
+  const pickerHost = document.getElementById('addNodesPicker');
   const sameChrome = filtersHost && chipsHost && contentHost
     && S.page === 'add-nodes'
     && contentHost.dataset.planId === (S.mgrPlanId || '');
@@ -9605,6 +9617,10 @@ function renderAddNodes() {
     const activeEl = document.activeElement;
     const wasSearch = activeEl && activeEl.tagName === 'INPUT' && activeEl.placeholder === 'Search address...';
     const caret = wasSearch ? activeEl.selectionStart : null;
+    // The plan picker lives OUTSIDE #addNodesContent (direct child of .page), so
+    // the partial swap below would otherwise leave a STALE pill count (e.g. the
+    // node count not bumping after a link until a full re-render). Repaint it.
+    if (pickerHost) pickerHost.innerHTML = planPicker;
     filtersHost.innerHTML = filtersBarHtml;
     chipsHost.innerHTML = chipsInnerHtml;
     contentHost.innerHTML = contentHtml;
@@ -9621,7 +9637,7 @@ function renderAddNodes() {
 
   $('app').innerHTML = `<div class="page${!S.mgrPlanId ? ' page-locked' : ''}" style="${addCount > 0 ? 'padding-bottom:80px' : ''}">
     ${heroHtml}
-    ${planPicker}
+    <div id="addNodesPicker">${planPicker}</div>
     ${noPlanWarningHtml}
     ${paidBannerHtml}
     ${leaseSliderHtml}
@@ -10245,7 +10261,11 @@ async function linkBatch() {
       // then refetch to reconcile with chain truth.
       if (!d.alreadyLinked && S.myPlans) {
         const p = S.myPlans.find(pl => String(pl.planId) === String(S.mgrPlanId));
-        if (p) p.totalNodes = (p.totalNodes || 0) + count;
+        if (p) {
+          p.totalNodes = (p.totalNodes || 0) + count;
+          // Floor so refetchMyPlans won't let a lagging chain read revert it.
+          S.planNodeFloor[String(S.mgrPlanId)] = { expected: p.totalNodes, op: 'add' };
+        }
       }
       S.addSet.clear();
       invalidateCache(/^\/api\/all-nodes/);
@@ -10297,7 +10317,12 @@ async function unlinkBatch() {
       // Optimistic plan-pill decrement, then refetch.
       if (S.myPlans) {
         const p = S.myPlans.find(pl => String(pl.planId) === String(S.mgrPlanId));
-        if (p) p.totalNodes = Math.max(0, (p.totalNodes || 0) - count);
+        if (p) {
+          p.totalNodes = Math.max(0, (p.totalNodes || 0) - count);
+          // Floor so refetchMyPlans won't let a lagging (still-high) chain read
+          // bump the count back up while the unlink indexes.
+          S.planNodeFloor[String(S.mgrPlanId)] = { expected: p.totalNodes, op: 'remove' };
+        }
       }
       S.removeSet.clear();
       // The floating bar may have been created by refreshRemoveActionBar() as a
@@ -10327,15 +10352,27 @@ async function unlinkBatch() {
 // ─── Pricing Page ─────────────────────────────────────────────────────────────
 const DENOM_NAMES = {
   'udvpn': { symbol: 'P2P', name: 'Sentinel P2P', icon: '🔵' },
-  'ibc/A8C2D23A1E6F95DA4E48BA349667E322BD7A6C996D8A4AAE8BA72E190F3D1477': { symbol: 'ATOM', name: 'Cosmos Hub', icon: 'âš›ï¸' },
+  'ibc/A8C2D23A1E6F95DA4E48BA349667E322BD7A6C996D8A4AAE8BA72E190F3D1477': { symbol: 'ATOM', name: 'Cosmos Hub', icon: '⚛️' },
   'ibc/ED07A3391A112B175915CD8FAF43A2DA8E4790EDE12566649D0C2F97716B8518': { symbol: 'OSMO', name: 'Osmosis', icon: '🧪' },
   'ibc/1A09D79819407F87DD64E884E5B46349E4A5191A0A9BCBFE1D9B425F4D273CFE': { symbol: 'JUNO', name: 'Juno', icon: '🟠' },
   'ibc/2E4CF68617591638A6CBD7DA3E8CAF8C9C0B34AAB4878775A0B16ADDC56E4389': { symbol: 'AKT', name: 'Akash', icon: '🔴' },
 };
+// Brand mark for a denom, sourced from the SAME table the Create Plan page uses
+// (IBC_DENOMS) so the Pricing page renders identical logos instead of emoji.
+// Returns the inline SVG (P2P shield) or a brand <img> (chain-registry SVGs).
+// Falls back to the DENOM_NAMES emoji for any denom not in IBC_DENOMS.
+function denomBrandMark(d, fallbackIcon) {
+  const meta = IBC_DENOMS.find(x => x.id === d);
+  if (meta) {
+    if (meta.logoSvg) return `<span class="denom-brand-mark">${meta.logoSvg}</span>`;
+    if (meta.logo) return `<span class="denom-brand-mark"><img src="${escapeAttr(meta.logo)}" alt="${escapeAttr(meta.display)}" loading="lazy"></span>`;
+  }
+  return fallbackIcon || '\u{1FA99}';
+}
 function denomDisplay(d) {
   const known = DENOM_NAMES[d];
-  if (known) return known;
-  return { symbol: d.startsWith('ibc/') ? 'IBC/' + d.slice(4, 10) : d, name: d, icon: '🪙' };
+  if (known) return { ...known, icon: denomBrandMark(d, known.icon) };
+  return { symbol: d.startsWith('ibc/') ? 'IBC/' + d.slice(4, 10) : d, name: d, icon: denomBrandMark(d, '\u{1FA99}') };
 }
 
 function setRailTab(tab) {
@@ -11662,7 +11699,7 @@ function renderYourPlans() {
     const extraDenomsHtml = allPrices.length > 1
       ? `<div class="plan-card-denoms">${allPrices.slice(1).map(po => {
           const di = denomDisplay(po.denom);
-          return `<span class="plan-card-denom-pill">${formatPriceNum(po)} <strong>${escapeHtml(di.symbol)}</strong></span>`;
+          return `<span class="plan-card-denom-pill">${formatPriceNum(po)} ${denomBrandMark(po.denom, '')}<strong>${escapeHtml(di.symbol)}</strong></span>`;
         }).join('')}</div>`
       : '';
     const denomFootLbl = allPrices.length > 1
@@ -11682,7 +11719,7 @@ function renderYourPlans() {
       </div>
 
       <div class="plan-card-price-row">
-        <div class="plan-card-price-num">${priceStr}<span class="plan-card-price-denom">${denomInfo.symbol}</span></div>
+        <div class="plan-card-price-num">${priceStr}<span class="plan-card-price-denom">${denomBrandMark(primary.denom || 'udvpn', '')}${denomInfo.symbol}</span></div>
         ${usdStr ? `<div class="plan-card-price-usd">${usdStr}</div>` : ''}
         <div class="plan-card-price-dur">· ${durStr}</div>
       </div>
@@ -11886,7 +11923,7 @@ async function renderPricing() {
             </div>
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
               <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Denom</div>
-              <div style="font-size:14px;font-weight:600;color:var(--text)">${denomDisplay(price.denom || 'udvpn').symbol}</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">${denomBrandMark(price.denom || 'udvpn', '')}${denomDisplay(price.denom || 'udvpn').symbol}</div>
             </div>
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
               <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Nodes</div>

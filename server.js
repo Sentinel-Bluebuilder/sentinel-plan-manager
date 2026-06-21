@@ -1885,20 +1885,6 @@ app.post('/api/wallet/privy-login', rateLimit('plogin', 20, 60_000), async (req,
   }
 });
 
-// TEMP DIAG — client error/event beacon. Browser POSTs {tag, data}; we log it
-// server-side so frontend-only failures (e.g. keplr.signDirect throwing before
-// the broadcast POST fires) show up in server-out.log. Remove once Keplr create
-// flow is verified.
-app.post('/api/_clientlog', (req, res) => {
-  try {
-    const { tag, data } = req.body || {};
-    console.log('[clientlog] %s %s', tag || '?', JSON.stringify(data ?? {}).slice(0, 1500));
-  } catch (e) {
-    console.warn('[clientlog] failed:', e.message);
-  }
-  res.json({ ok: true });
-});
-
 // Keplr- and Privy-signed TXs are broadcast through the two generic endpoints
 // below, NOT through the inline server-signed routes. The inline routes (e.g.
 // /api/provider/register) call cacheInvalidate() AFTER safeBroadcast() returns —
@@ -1978,7 +1964,6 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
     })).finish();
     const result = await broadcastSignedTx(toBase64(txRaw));
     if (result.code !== 0) {
-      console.log('[broadcast-signed][diag] TX REJECTED code=%s hash=%s rawLog=%s', result.code, result.transactionHash, (result.rawLog || '').slice(0, 600));
       return res.json({ ok: false, error: parseChainError(result.rawLog || 'Broadcast failed'), errorCode: 'tx-failed', txHash: result.transactionHash, code: result.code, rawLog: (result.rawLog || '').slice(0, 600) });
     }
     cacheInvalidate(`balance:${getAddr()}`);
@@ -1994,24 +1979,6 @@ app.post('/api/tx/broadcast-signed', async (req, res) => {
     const events = result.events;
     const planId = extractEventId(events, /plan/i, ['plan_id', 'id']);
     const subscriptionId = extractEventId(events, /subscription/i, ['subscription_id', 'id']);
-    // TEMP DIAG — trace why Keplr create activation isn't firing. Remove once fixed.
-    try {
-      console.log('[broadcast-signed][diag] pending=%s eventCount=%s planId=%s subId=%s',
-        result.pending || false, Array.isArray(events) ? events.length : 'none', planId, subscriptionId);
-      if (Array.isArray(events)) {
-        for (const ev of events) {
-          if (/plan|subscription|create/i.test(ev.type || '')) {
-            const attrs = (ev.attributes || []).map((a) => {
-              const dec = (x) => { try { return Buffer.from(x || '', 'base64').toString('utf8'); } catch { return String(x); } };
-              const k = typeof a.key === 'string' ? a.key : dec(a.key);
-              const v = typeof a.value === 'string' ? a.value : dec(a.value);
-              return `${k}=${v}`;
-            }).join(' | ');
-            console.log('[broadcast-signed][diag] type=%s attrs=%s', ev.type, attrs);
-          }
-        }
-      }
-    } catch (e) { console.warn('[broadcast-signed][diag] failed:', e.message); }
     if (planId) { saveMyPlanId(planId); cacheInvalidate('allPlans'); }
     return res.json({
       ok: true,
