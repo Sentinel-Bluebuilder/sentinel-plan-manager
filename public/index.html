@@ -5472,7 +5472,7 @@ button.fiat-rail-tile:hover {
 
       <!-- Privy / email pane -->
       <div id="privyPane" style="display:none">
-        <button class="auth-back" type="button" onclick="backToChooser()">â† Back</button>
+        <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
         <div class="import-form-title">Sign in with email</div>
         <div class="import-form-sub">
           Enter your email. Privy will send a one-time code, then create or unlock an embedded Sentinel wallet for your account. Powered by <a href="https://privy.io" target="_blank" rel="noopener" style="color:var(--accent)">Privy</a>.
@@ -5483,7 +5483,7 @@ button.fiat-rail-tile:hover {
 
       <!-- Recovery phrase pane (was: Import pane) -->
       <div id="importPane" style="display:none">
-        <button class="auth-back" type="button" onclick="backToChooser()">â† Back</button>
+        <button class="auth-back" type="button" onclick="backToChooser()">← Back</button>
         <div class="import-form-title">Sign in with recovery phrase</div>
         <div class="import-form-sub">
           Paste your 12 or 24-word mnemonic. It is encrypted with AES-256-GCM and stored only in an httpOnly cookie scoped to your browser. The server never writes plaintext to disk.
@@ -7573,7 +7573,14 @@ async function signAndBroadcast(signDoc) {
         accountNumber: signDoc.accountNumber,
       }),
     });
-    return await r.json();
+    // Guard against non-JSON responses (e.g. an HTML error page from a
+    // body-parser/413/404 failure) — calling r.json() on HTML throws the
+    // opaque "Unexpected token '<', "<!DOCTYPE "... is not valid JSON".
+    const out = await r.json().catch(() => null);
+    if (out === null) {
+      throw new Error(`Server returned a non-JSON response (HTTP ${r.status}). The request may have failed before reaching the signer.`);
+    }
+    return out;
   }
   if (!window.keplr) throw new Error('Keplr not available');
   const addr = walletAddress || (S.keplrKey && S.keplrKey.bech32Address);
@@ -9383,7 +9390,7 @@ function renderAddNodes() {
         <option value="desc" ${S.nodeFilters.priceSort==='desc'?'selected':''}>Price: High → Low</option>
       </select>
       <button class="btn btn-ghost btn-sm" onclick="openCountryPicker()" ${countryList.length === 0 ? 'disabled' : ''}>
-        <span style="margin-right:6px">ðŸŒ</span>Browse by country${countryList.length ? ` (${countryList.length})` : ''}
+        <span style="margin-right:6px">🌐</span>Browse by country${countryList.length ? ` (${countryList.length})` : ''}
       </button>
       <button class="btn btn-ghost btn-sm" onclick="resetNodeFilters()" ${(!S.nodeFilters.search && !S.nodeFilters.country && !S.nodeFilters.protocol && !S.nodeFilters.priceSort && !S.nodeFilters.sortKey) ? 'disabled' : ''}>Reset</button>
       ${hasData ? `<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${fmt(d.total)} nodes${S.mgrPlanId && d.planNodesCount > 0 ? ` &middot; ${fmt(d.planNodesCount)} paid hidden` : ''}</span>` : ''}
@@ -9391,7 +9398,7 @@ function renderAddNodes() {
   const chipsInnerHtml = (() => {
     const chips = [];
     if (S.nodeFilters.search) chips.push({ key: 'search', label: `Search: "${escapeHtml(S.nodeFilters.search)}"` });
-    if (S.nodeFilters.country) chips.push({ key: 'country', label: `${countryFlag(S.nodeFilters.country) || 'ðŸŒ'} ${escapeHtml(S.nodeFilters.country)}` });
+    if (S.nodeFilters.country) chips.push({ key: 'country', label: `${countryFlag(S.nodeFilters.country) || '🌐'} ${escapeHtml(S.nodeFilters.country)}` });
     if (S.nodeFilters.protocol) chips.push({ key: 'protocol', label: `Protocol: ${escapeHtml(S.nodeFilters.protocol)}` });
     if (S.nodeFilters.priceSort) chips.push({ key: 'priceSort', label: `Price: ${S.nodeFilters.priceSort === 'asc' ? 'Low → High' : 'High → Low'}` });
     if (S.nodeFilters.sortKey) chips.push({ key: 'sortKey', label: `Sort: ${escapeHtml(S.nodeFilters.sortKey)} ${S.nodeFilters.sortDir === 'asc' ? '↑' : '↓'}` });
@@ -9708,12 +9715,12 @@ function openCountryPicker() {
     // string parser without needing quote-aware escaping.
     const enc = btoa(unescape(encodeURIComponent(val || '')));
     return `<button type="button" class="country-tile ${active ? 'active' : ''}" onclick="setCountryFilter(decodeURIComponent(escape(atob('${enc}'))))" title="${escapeHtml(label)}">
-      <span class="country-tile-flag">${flag || 'ðŸŒ'}</span>
+      <span class="country-tile-flag">${flag || '🌐'}</span>
       <span class="country-tile-name">${escapeHtml(label)}</span>
       <span class="country-tile-count">${count != null ? fmt(count) : ''}</span>
     </button>`;
   };
-  const allTile = tile('All countries', '', data.total || null, !S.nodeFilters.country, 'ðŸŒ');
+  const allTile = tile('All countries', '', data.total || null, !S.nodeFilters.country, '🌐');
   const tiles = sorted.map(c => tile(c, c, data.counts[c], S.nodeFilters.country === c, countryFlag(c))).join('');
 
   const existing = $('countryPickerOverlay');
@@ -10416,7 +10423,7 @@ function buildFiatDetailHtml(tile, RAIL_LOGOS, origin, planId) {
   // Shared self-subscription status block. EVERY rail delivers bandwidth by
   // sharing an allocation from a subscription the operator holds — so the
   // operator must be subscribed to this plan first. This surfaces the same
-  // âš ï¸/✅ indicator + Self-subscribe button the Free tile shows, so the
+  // ⚠️/✅ indicator + Self-subscribe button the Free tile shows, so the
   // operator can see whether the whole flow is even possible and fix it in
   // one click before wiring a single webhook. Filled by renderOwnSubStatus().
   const ownSubBlock = `
@@ -10471,7 +10478,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
     setTimeout(() => renderOwnSubStatus(), 0);
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.stripe}</span>
@@ -10498,7 +10505,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
           <div class="fiat-detail-section-sub">Node + Express. Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code>, register the URL in your Stripe dashboard, ship.</div>
           ${codeBlock('Stripe webhook · Node.js', stripeCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">âš ï¸</span>
+            <span class="fiat-detail-callout-icon">⚠️</span>
             <div class="fiat-detail-callout-body"><strong><code>express.raw()</code> is required.</strong> If a JSON parser touches the body before <code>constructEvent</code>, the signature check will always fail.</div>
           </div>
         </div>
@@ -10558,7 +10565,7 @@ app.post('/webhooks/paypal', async (req, res) => {
     setTimeout(() => renderOwnSubStatus(), 0);
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark fiat-rail-mark-light">${RAIL_LOGOS.paypal}</span>
@@ -10775,7 +10782,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
           <div class="fiat-detail-section-sub">Zero infrastructure. Public REST. Poll a deposit address every 30s; fire once <code>vout</code> credits the address with the expected sats and the tx has cleared <code>CONFIRMATIONS</code> blocks. Quote each buyer a unique deposit address so you can map the settled payment back to their Sentinel wallet.</div>
           ${codeBlock('mempool.space poller · Node.js', mempoolCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">â±</span>
+            <span class="fiat-detail-callout-icon">⏱</span>
             <div class="fiat-detail-callout-body"><strong>Finality.</strong> 3 confirmations ≈ 30 min. Drop to 1 for low-value plans, raise to 6 for high-value.</div>
           </div>
         </div>`;
@@ -10786,7 +10793,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
           <div class="fiat-detail-section-sub"><code>ethers</code> v6 against any public JSON-RPC (Alchemy, Infura, or <code>ethereum-rpc.publicnode.com</code>). For USDC, filter the <code>Transfer</code> event on the contract by your deposit address. For native ETH, walk every new block. <code>tx.wait(N)</code> blocks until <code>N</code> confirmations land before triggering Plan Manager. Map the depositor to their Sentinel wallet (a unique deposit address per buyer is simplest) before delivering.</div>
           ${codeBlock('ethers v6 · Node.js', ethCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">â±</span>
+            <span class="fiat-detail-callout-icon">⏱</span>
             <div class="fiat-detail-callout-body"><strong>Finality.</strong> 3 confirmations ≈ 36 sec. USDC mainnet contract: <code>0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48</code>.</div>
           </div>
         </div>`;
@@ -10797,7 +10804,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
           <div class="fiat-detail-section-sub"><code>@solana/web3.js</code> v1 against <code>api.mainnet-beta.solana.com</code> at <code>'finalized'</code> — 31 slots, supermajority vote, the strongest guarantee Solana offers. <code>onAccountChange</code> fires on every lamport delta. For USDC, derive the associated token account via <code>@solana/spl-token</code> and watch its logs. Map the payer to their Sentinel wallet (a unique deposit address per buyer is simplest) before delivering.</div>
           ${codeBlock('@solana/web3.js · Node.js', solCode)}
           <div class="fiat-detail-callout">
-            <span class="fiat-detail-callout-icon">â±</span>
+            <span class="fiat-detail-callout-icon">⏱</span>
             <div class="fiat-detail-callout-body"><strong>Finality.</strong> <code>'finalized'</code> commitment ≈ 13 sec. USDC mainnet mint: <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code>.</div>
           </div>
         </div>`;
@@ -10806,7 +10813,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
     setTimeout(() => renderOwnSubStatus(), 0);
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark">${RAIL_LOGOS.btc}</span>
@@ -10851,7 +10858,7 @@ connection.onLogs(USDC_ATA, async ({ signature, logs, err }) => {
 
     return `
       <div class="fiat-detail">
-        <button class="fiat-detail-back" onclick="setFiatTile(null)">â† All payment rails</button>
+        <button class="fiat-detail-back" onclick="setFiatTile(null)">← All payment rails</button>
         <div class="fiat-detail-hero">
           <div class="fiat-detail-marks">
             <span class="fiat-rail-mark">${RAIL_LOGOS.free}</span>
@@ -11084,7 +11091,7 @@ function setTriggerTab(tab) {
         </div>
 
         <div class="trig-security">
-          <span class="trig-security-icon">ðŸ”</span>
+          <span class="trig-security-icon">🔐</span>
           <div>
             <strong>Bind this endpoint to your backend only.</strong> Plan Manager signs every TX with the
             wallet you loaded — leaking the URL externally lets anyone burn your fees. Front it with an API
@@ -11302,7 +11309,7 @@ async function runTrigTest() {
     return;
   }
   btn.disabled = true;
-  btn.innerHTML = '<span class="trig-test-btn-icon">â³</span> Broadcasting…';
+  btn.innerHTML = '<span class="trig-test-btn-icon">⏳</span> Broadcasting…';
   out.style.display = 'block';
   out.className = 'trig-test-result trig-test-result-pending';
   out.innerHTML = '<strong>Broadcasting subscribe TX…</strong> Signing with your loaded wallet.';
@@ -11373,7 +11380,7 @@ async function renderOwnSubStatus() {
     if (!data?.subscribed) {
       el.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.35);border-radius:var(--radius-sm)">
-          <span style="font-size:20px;line-height:1">âš ï¸</span>
+          <span style="font-size:20px;line-height:1">⚠️</span>
           <div style="flex:1">
             <div style="font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--text)">Not subscribed to plan #${escapeHtml(String(planId))} yet</div>
             <div style="font-family:var(--font-display);font-size:12.5px;color:var(--text-muted);margin-top:3px">You hold no subscription to this plan. You can self-subscribe now to mint a bandwidth allocation, or just add a subscriber below — that self-subscribes you automatically before sharing their allocation.</div>
@@ -11886,7 +11893,7 @@ async function renderPricing() {
     const focusMarks = railTab === 'onchain' ? onchainMarksHtml : fiatMarksHtml;
     const focusHeroHtml = railTab ? `
       <div class="rail-toggle-bar">
-        <button class="rail-toggle-back" onclick="setRailTab(null)">â† Back to options</button>
+        <button class="rail-toggle-back" onclick="setRailTab(null)">← Back to options</button>
         <div class="rail-toggle-switch" role="tablist" aria-label="Payment rail">
           <button class="rail-toggle-option ${railTab === 'onchain' ? 'active' : ''}" onclick="setRailTab('onchain')">On-Chain</button>
           <button class="rail-toggle-option ${railTab === 'fiat' ? 'active' : ''}" onclick="setRailTab('fiat')">Fiat &amp; Non-IBC</button>
@@ -11967,7 +11974,7 @@ async function renderPricing() {
             </div>
           </div>
           <div class="immutable-banner">
-            <span class="immutable-banner-icon">â„¹ï¸</span>
+            <span class="immutable-banner-icon">ℹ️</span>
             <div class="immutable-banner-body">
               <div class="immutable-banner-title">${plans.length > 0 ? 'Select a plan above to see live pricing.' : 'You don’t have a plan yet.'}</div>
               <div class="immutable-banner-sub">${plans.length > 0
