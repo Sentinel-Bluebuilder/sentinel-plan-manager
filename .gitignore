@@ -24,3 +24,5 @@ scripts/wallet-audit.mjs
 # Brand assets — ship these despite the global image rule above.
 !public/logo.png
 !public/logo-dark.png
+!public/sentinel-shield.png
+!public/chain-logos/*.png
