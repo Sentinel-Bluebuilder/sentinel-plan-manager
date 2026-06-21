@@ -20,5 +20,10 @@ sellers.json
 *.log
 *.jpg
 *.png
+# Brand assets — ship these despite the global image rule above.
+!public/logo.png
+!public/logo-dark.png
+!public/sentinel-shield.png
+!public/chain-logos/*.png
 .claude
 .DS_Store
