@@ -2976,7 +2976,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
   try {
     const { planId, address, denom, allocBytes } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
-    if (!address || !String(address).startsWith('sent1')) {
+    if (!address || !SENT_ADDR_RE.test(String(address).trim())) {
       return res.status(400).json({ error: 'valid sent1... address required' });
     }
 
@@ -3012,7 +3012,7 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
     if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
 
     const list = Array.isArray(addresses)
-      ? addresses.map(a => String(a).trim()).filter(a => a.startsWith('sent1'))
+      ? addresses.map(a => String(a).trim()).filter(a => SENT_ADDR_RE.test(a))
       : [];
     if (!list.length) return res.status(400).json({ error: 'addresses[] with valid sent1... entries required' });
     // Cap the batch: each entry triggers a serialized subscribe+share broadcast
@@ -3587,6 +3587,9 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     const planIdNum = parseInt(planId, 10);
     if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
     const addrs = [...new Set(nodeAddresses)];
+    // Cap batch size to keep one TX under the chain block-gas limit and avoid
+    // saturating the RPC pool. 100 keeps a single bundled TX well under limit.
+    if (addrs.length > 100) return res.status(400).json({ error: 'Maximum 100 nodes per batch' });
     const badAddr = addrs.find(a => !NODE_ADDR_RE.test(a));
     if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
     const ownErr = await assertPlanOwnership(planIdNum);
@@ -3726,6 +3729,9 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
     const planIdNum = parseInt(planId, 10);
     if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
     const addrs = [...new Set(nodeAddresses)];
+    // Cap batch size to keep one TX under the chain block-gas limit and avoid
+    // saturating the RPC pool. 100 keeps a single bundled TX well under limit.
+    if (addrs.length > 100) return res.status(400).json({ error: 'Maximum 100 nodes per batch' });
     const badAddr = addrs.find(a => !NODE_ADDR_RE.test(a));
     if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
     const ownErr = await assertPlanOwnership(planIdNum);
