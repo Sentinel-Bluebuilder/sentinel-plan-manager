@@ -21,6 +21,11 @@ social/
 CLAUDE.md
 scripts/wallet-audit.mjs
 
+# Local PR-splitting / review work artifacts — never commit.
+.split-snapshot/
+PLATFORM-MAP.md
+*.orig
+
 # Brand assets — ship these despite the global image rule above.
 !public/logo.png
 !public/logo-dark.png
