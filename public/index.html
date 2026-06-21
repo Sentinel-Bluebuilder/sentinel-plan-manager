@@ -7171,7 +7171,7 @@ async function mountPrivyWidget() {
     const r = await fetch('/api/wallet/privy-config', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
     cfg = await r.json();
   } catch (e) {
-    mount.innerHTML = `<div style="padding:18px;border:1px dashed rgba(255,80,80,0.35);border-radius:10px;color:var(--text-muted);font-size:13px">Could not reach the Privy config endpoint: ${e.message}</div>`;
+    mount.innerHTML = `<div style="padding:18px;border:1px dashed rgba(255,80,80,0.35);border-radius:10px;color:var(--text-muted);font-size:13px">Could not reach the Privy config endpoint: ${escapeHtml(e && e.message || String(e))}</div>`;
     return;
   }
 
