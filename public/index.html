@@ -12970,6 +12970,14 @@ function renderGasCosts() {
 
 function streamGrantAll() {
   if (!S.mgrPlanId) { toast('Select a plan first', 'error'); return; }
+  // Keplr/Privy wallets can't use the SSE stream — it broadcasts server-side and
+  // can't relay a signDoc back through an EventSource. Route them to the bundled
+  // POST path, which packs every grant into ONE signature the browser signs.
+  const kind = S.wallet?.kind;
+  if (kind === 'keplr' || kind === 'privy') {
+    grantAllSubscribers();
+    return;
+  }
   const spendLimit = parseFloat($('fgSpendLimit')?.value) || 0;
   const expDays = parseInt($('fgExpDays')?.value, 10) || 0;
   const btn = $('fgGrantAllBtn');

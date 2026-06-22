@@ -1608,6 +1608,52 @@ function relayKeplrSign(err, res) {
   return false;
 }
 
+/**
+ * True when the active wallet signs in the browser (Keplr extension or Privy
+ * enclave) rather than server-side from a mnemonic. For these sessions the
+ * server holds no privkey: it can build exactly ONE signDoc per HTTP round-trip
+ * and must relay it to the client to sign. Any route that loops safeBroadcast()
+ * across multiple chunks for a server-signed wallet must instead BUNDLE all
+ * messages into a single signDoc here — otherwise the first chunk throws
+ * KEPLR_SIGN_REQUIRED and a per-chunk catch silently swallows it (the bug that
+ * made grant-subscribers / revoke-all / revoke-list / add-subscribers dead on
+ * Privy + Keplr).
+ */
+function isClientSigned() {
+  const k = currentSession()?.kind;
+  return k === 'keplr' || k === 'privy';
+}
+
+/**
+ * For client-signed sessions: bundle every message into ONE TX and relay the
+ * resulting signDoc to the browser. Returns true if it relayed (caller must
+ * `return` immediately). Returns false for server-signed sessions so the caller
+ * falls through to its normal multi-TX server-side loop. A genuine build error
+ * (e.g. missing pubkey) is surfaced as JSON, not swallowed.
+ *
+ * NOTE: bundling means the whole batch is one atomic TX — all-or-nothing. That
+ * removes the per-chunk "retry one-by-one so the rest still go through" fallback
+ * the server-signed path has, but a client wallet can only sign once per
+ * request anyway, so atomic-batch is the only correct shape here.
+ */
+async function relayBundledOrNull(msgs, res, memo) {
+  if (!isClientSigned()) return false;
+  if (!msgs.length) return false;
+  try {
+    await safeBroadcast(msgs, memo);
+    // safeBroadcast on a client-signed session ALWAYS throws KEPLR_SIGN_REQUIRED
+    // before touching the chain; reaching here means it unexpectedly didn't.
+    return false;
+  } catch (err) {
+    if (relayKeplrSign(err, res)) return true;
+    // Not a sign-required signal — a real build failure (e.g. account not found,
+    // missing pubkey). Surface it as JSON instead of letting the caller's loop
+    // bury it.
+    res.status(400).json({ error: parseChainError(err.message || String(err)) });
+    return true;
+  }
+}
+
 // ADR-36 verification:
 //   - signDoc is an amino StdSignDoc with chain_id="", account_number="0",
 //     sequence="0", fee={gas:"0",amount:[]}, memo="", and a single
@@ -2812,6 +2858,52 @@ const DEFAULT_SHARE_BYTES = 1_000_000_000_000n; // 1 TB
  * Returns { ok, subscriptionId, bytes, reused, subTx, shareTx } or throws.
  * `reused` is true when no new subscription was paid for; `subTx` is null then.
  */
+/**
+ * Build ONLY the MsgShareSubscription for `member`, reusing an existing active
+ * operator subscription on `planId` that holds enough spare bytes. Returns the
+ * proto msg object, or null when no reusable subscription can cover the
+ * allocation (i.e. a new paid subscription would be required — not buildable as
+ * a single relayable msg). Used by client-signed (Keplr/Privy) bulk add, where
+ * the server can't run the subscribe+share loop and must bundle share msgs into
+ * one signDoc. Mirrors the reuse-scan in _addSubscriberViaShare.
+ */
+async function buildReuseShareMsgOrNull(planId, member, { allocBytes } = {}) {
+  const operator = getAddr();
+  let requestedBytes;
+  try {
+    requestedBytes = allocBytes != null ? BigInt(allocBytes) : DEFAULT_SHARE_BYTES;
+  } catch {
+    requestedBytes = DEFAULT_SHARE_BYTES;
+  }
+  if (requestedBytes <= 0n) requestedBytes = DEFAULT_SHARE_BYTES;
+
+  const rpc = await getRpcClient();
+  if (!rpc) return null;
+  const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+  const planSubs = accSubs.filter(s =>
+    Number(s.plan_id ?? s.planId) === Number(planId) &&
+    (typeof s.status === 'number' ? s.status === 1 : s.status === 'active'));
+  let best = null;
+  let bestBytes = -1n;
+  for (const sub of planSubs) {
+    try {
+      const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 100 });
+      const own = allocs.find(a => a.address === operator);
+      if (!own) continue;
+      const have = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
+      if (have > bestBytes) { bestBytes = have; best = sub; }
+    } catch (e) {
+      console.log(`[ReuseShare] allocations for sub ${sub.id} failed: ${e.message}`);
+    }
+  }
+  if (!best || bestBytes < requestedBytes) return null;
+  const shareBytes = requestedBytes > bestBytes ? bestBytes : requestedBytes;
+  return {
+    typeUrl: C.MSG_SHARE_SUBSCRIPTION_TYPE,
+    value: { from: operator, id: BigInt(String(best.id)), accAddress: member, bytes: String(shareBytes) },
+  };
+}
+
 async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBytes } = {}) {
   const operator = getAddr();
   let requestedBytes;
@@ -2869,6 +2961,22 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
   // 2. No reusable subscription — operator self-subscribes (pays the plan price).
   //    Use the operator's own fee-grant grantor for gas if one is configured.
   if (!reused) {
+    // Client-signed wallets (Keplr/Privy): the self-subscribe path needs TWO
+    // dependent on-chain TXs — MsgStartSubscription, then (after reading the new
+    // subscription_id back from its events) MsgShareSubscription. A client wallet
+    // can sign exactly one signDoc per HTTP round-trip, so the share could never
+    // fire and we'd leave a paid-but-unshared subscription. Fail loudly with an
+    // actionable message instead of starting an un-completable flow. The reuse
+    // path above is a single share TX and relays fine through the route's catch.
+    if (isClientSigned()) {
+      const e = new Error(
+        `No existing subscription on plan ${planId} can cover this allocation. ` +
+        `With a Keplr/Privy wallet, first subscribe to the plan yourself (Subscribe), ` +
+        `then add members — sharing from an existing subscription needs only one signature.`
+      );
+      e.clientSignedTwoTx = true;
+      throw e;
+    }
     const subMsg = {
       typeUrl: C.MSG_START_SUBSCRIPTION_TYPE,
       value: { from: operator, id: BigInt(planId), denom, renewalPricePolicy: 0 },
@@ -2946,6 +3054,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
     res.json(result);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
+    if (err.clientSignedTwoTx) return res.status(400).json({ error: err.message, needSubscription: true });
     console.error('Add subscriber error:', err.message);
     res.status(500).json({ error: parseChainError(err.message) });
   }
@@ -2960,6 +3069,43 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
       ? addresses.map(a => String(a).trim()).filter(a => a.startsWith('sent1'))
       : [];
     if (!list.length) return res.status(400).json({ error: 'addresses[] with valid sent1... entries required' });
+
+    // Client-signed wallets (Keplr/Privy): the server holds no key, so it can't
+    // run the per-address subscribe+share loop below (each address needs its own
+    // signature, and a self-subscribe needs two dependent TXs). Instead, build a
+    // single share msg per address from an EXISTING reusable subscription and
+    // bundle them all into ONE signDoc to relay. Any address that would require a
+    // new (paid) subscription is reported back so the operator can subscribe
+    // first — sharing then needs only one signature.
+    if (isClientSigned()) {
+      const planNum = parseInt(planId, 10);
+      const shareMsgs = [];
+      const needSubscription = [];
+      for (const addr of list) {
+        try {
+          const msg = await buildReuseShareMsgOrNull(planNum, addr, { allocBytes });
+          if (msg) shareMsgs.push(msg);
+          else needSubscription.push(addr);
+        } catch (e) {
+          needSubscription.push(addr);
+          console.log(`[add-subscribers] reuse-share build for ${addr} failed: ${e.message}`);
+        }
+      }
+      if (!shareMsgs.length) {
+        return res.status(400).json({
+          error: `No existing subscription on plan ${planNum} can cover these allocations. ` +
+            `With a Keplr/Privy wallet, subscribe to the plan yourself first, then add members.`,
+          needSubscription,
+        });
+      }
+      // Stash the addresses that couldn't be bundled so the relay caller can see
+      // them — relayBundledOrNull writes the signDoc response, so attach via a
+      // header the frontend ignores but logs surface.
+      if (needSubscription.length) {
+        console.log(`[add-subscribers] ${needSubscription.length} address(es) need a new subscription, not bundled: ${needSubscription.join(', ')}`);
+      }
+      if (await relayBundledOrNull(shareMsgs, res, `Share to ${shareMsgs.length} members of plan ${planNum}`)) return;
+    }
 
     const results = [];
     // Sequential — each address needs its own subscribe+share, and back-to-back
@@ -4099,6 +4245,19 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
     }
   }
 
+  // Client-signed wallets (Keplr/Privy) can't use this SSE path: once the
+  // stream opens we can no longer return a signDoc for the browser to sign, and
+  // an EventSource can't carry a signature back anyway. Refuse here with a JSON
+  // 400 (headers not yet written) so the frontend falls back to the POST
+  // /api/feegrant/grant-subscribers route, which bundles every grant into one
+  // signDoc and relays it for a single client-side signature.
+  if (isClientSigned()) {
+    return res.status(400).json({
+      error: 'Streaming fee-grant is unavailable for Keplr/Privy wallets — use the bundled grant instead.',
+      errorCode: 'use-bundled-grant',
+    });
+  }
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -4310,6 +4469,14 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
       opts.expiration = new Date(Date.now() + expirationDays * 86400000);
     }
 
+    // Client-signed wallets (Keplr/Privy) can't run the per-chunk server loop
+    // below — the server holds no key. Bundle every grant into ONE signDoc and
+    // relay it for a single client-side signature.
+    if (isClientSigned()) {
+      const allMsgs = needGrant.map(grantee => buildFeeGrantMsg(getAddr(), grantee, opts));
+      if (await relayBundledOrNull(allMsgs, res, `Fee grant ${needGrant.length} subscribers`)) return;
+    }
+
     const BATCH = 5;
     const totalBatches = Math.ceil(needGrant.length / BATCH);
     let granted = 0;
@@ -4380,6 +4547,12 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
   if (list.length === 0) return res.status(400).json({ error: 'no valid grantees in list' });
 
   try {
+    // Client-signed wallets: bundle all revokes into ONE signDoc to relay.
+    if (isClientSigned()) {
+      const allMsgs = list.map(grantee => buildRevokeFeeGrantMsg(getAddr(), grantee));
+      if (await relayBundledOrNull(allMsgs, res, `Revoke ${list.length} grants`)) return;
+    }
+
     const BATCH = 5;
     let revoked = 0;
     let alreadyGone = 0;
@@ -4449,6 +4622,12 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
     if (grantees.length === 0) {
       cacheInvalidate(`feegrants:${getAddr()}`);
       return res.json({ ok: true, revoked: 0, alreadyGone: 0, message: 'No grants to revoke' });
+    }
+
+    // Client-signed wallets: bundle all revokes into ONE signDoc to relay.
+    if (isClientSigned()) {
+      const allMsgs = grantees.map(grantee => buildRevokeFeeGrantMsg(getAddr(), grantee));
+      if (await relayBundledOrNull(allMsgs, res, `Revoke ${grantees.length} grants`)) return;
     }
 
     const BATCH = 5;
