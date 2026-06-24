@@ -1082,7 +1082,24 @@ async function _getPlanStatsImpl(planId) {
   };
 }
 
+// Cached wrapper around the (expensive) plan-nodes query. The impl does an RPC
+// QueryNodesForPlan PLUS a per-member rpcQueryLeasesForNode fan-out, so re-running
+// it on every Add-Nodes keystroke / filter / post-link refetch was the root of the
+// "big delay before added nodes show" symptom. Scope the key by provider because the
+// per-node lease lookup picks OUR lease (prov_address === getProvAddr()). Short TTL
+// (15s) keeps it fresh; link/unlink success paths invalidate it explicitly so a
+// just-added node is reflected on the very next refetch (subject to chain indexing).
+function invalidatePlanNodes(planId) {
+  const prov = getProvAddr() || '_anon';
+  cacheInvalidate(`planNodes:${planId}:${prov}`);
+}
+
 async function getNodesForPlan(planId) {
+  const prov = getProvAddr() || '_anon';
+  return cached(`planNodes:${planId}:${prov}`, 15_000, () => _getNodesForPlanImpl(planId));
+}
+
+async function _getNodesForPlanImpl(planId) {
   const nodes = [];
 
   // RPC-first
@@ -3533,6 +3550,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
 
     const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
+    // Drop the cached plan-nodes snapshot so the next /api/all-nodes refetch
+    // re-queries chain truth instead of serving a pre-link cache (TTL 15s).
+    invalidatePlanNodes(planIdNum);
 
     const linkMsg = {
       typeUrl: C.MSG_LINK_TYPE,
@@ -3674,6 +3694,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
     const hours = parseInt(reqLeaseHours) || 24;
+    invalidatePlanNodes(planIdNum);
     console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
 
 
@@ -3762,6 +3783,7 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
 
     const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
+    invalidatePlanNodes(planIdNum);
 
     const msg = {
       typeUrl: C.MSG_UNLINK_TYPE,
@@ -3812,6 +3834,7 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
     if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
     const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
+    invalidatePlanNodes(planIdNum);
     console.log(`\n[BATCH-UNLINK] ${addrs.length} nodes from plan ${planId}`);
 
     const msgs = addrs.map(addr => ({
