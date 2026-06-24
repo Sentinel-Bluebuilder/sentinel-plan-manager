@@ -99,6 +99,21 @@ function invalidatePlanSubs(planId) {
   _planSubsKeys.delete(id);
 }
 
+// ─── planStats cache invalidation ────────────────────────────────────────────
+// getPlanStats caches `planStats:<planId>:<operator>` for 120s — this is what
+// drives `totalNodes`/`totalSubscriptions` on the plan card. After a link/unlink
+// (or subscribe/share) the cached count is stale for the full TTL, so the card
+// never reflects the just-added node until the cache expires. Invalidate the
+// exact operator-scoped key right after the broadcast so the next /api/my-plans
+// re-queries chain truth. cacheInvalidate is an EXACT-key delete, and the route
+// always knows both planId and getAddr(), so no prefix tracking is needed.
+function invalidatePlanStats(planId) {
+  const id = Number(planId);
+  if (!Number.isFinite(id)) return;
+  const op = getAddr() || '_anon';
+  cacheInvalidate(`planStats:${id}:${op}`);
+}
+
 // ─── Demo Mode ────────────────────────────────────────────────────────────────
 // Read-only browse: any visitor sees the UI mounted on a watch-only address
 // without supplying a mnemonic. Every TX-broadcasting endpoint returns 403.
@@ -3642,7 +3657,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
         if (out2.relayed) return;
         if (out2.err) return res.status(400).json({ error: parseChainError(out2.err.message) });
         const resp2 = txResponse(out2.result);
-        if (resp2.ok) { console.log(`[LINK] OK (link-only): tx=${resp2.txHash}`); return res.json(resp2); }
+        if (resp2.ok) { console.log(`[LINK] OK (link-only): tx=${resp2.txHash}`); invalidatePlanStats(planIdNum); return res.json(resp2); }
         if (isDuplicateNode(resp2.rawLog)) return res.json({ ok: true, alreadyLinked: true, msg: 'Node is already in this plan' });
         console.log(`[LINK] Still failed link-only: ${(resp2.rawLog || '').slice(0, 150)}`);
         return res.status(400).json({ error: parseChainError(resp2.rawLog) });
@@ -3651,6 +3666,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
     }
 
     console.log(`[LINK] OK (bundled lease+link): tx=${resp.txHash}`);
+    invalidatePlanStats(planIdNum);
     res.json(resp);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
@@ -3733,7 +3749,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
         if (out2.relayed) return;
         if (out2.err) return res.status(400).json({ error: parseChainError(out2.err.message) });
         const resp2 = txResponse(out2.result);
-        if (resp2.ok) { console.log(`[BATCH-LINK] OK (links-only): tx=${resp2.txHash}`); return res.json({ ...resp2, linked: addrs.length }); }
+        if (resp2.ok) { console.log(`[BATCH-LINK] OK (links-only): tx=${resp2.txHash}`); invalidatePlanStats(planIdNum); return res.json({ ...resp2, linked: addrs.length }); }
         if (isDuplicateNode(resp2.rawLog)) return res.json({ ok: true, linked: 0, alreadyLinked: addrs.length, msg: 'Nodes already in plan' });
         console.log(`[BATCH-LINK] Still failed links-only: ${(resp2.rawLog || '').slice(0, 150)}`);
         return res.status(400).json({ error: parseChainError(resp2.rawLog) });
@@ -3742,6 +3758,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     }
 
     console.log(`[BATCH-LINK] OK (bundled lease+link): ${addrs.length} nodes linked, tx=${resp.txHash}`);
+    invalidatePlanStats(planIdNum);
     res.json({ ...resp, linked: addrs.length });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
@@ -3784,6 +3801,7 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
     const resp = txResponse(result);
     if (resp.ok) {
       console.log(`Unlinked OK: tx=${resp.txHash}`);
+      invalidatePlanStats(planIdNum);
       res.json(resp);
     } else {
       if (resp.rawLog && (resp.rawLog.includes('does not exist') || resp.rawLog.includes('not found'))) {
@@ -3826,6 +3844,7 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
       return res.status(400).json({ error: parseChainError(resp.rawLog) });
     }
     console.log(`[BATCH-UNLINK] OK: ${addrs.length} nodes removed, tx=${resp.txHash}`);
+    invalidatePlanStats(planIdNum);
     res.json({ ...resp, unlinked: addrs.length });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
