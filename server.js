@@ -3166,6 +3166,9 @@ app.post('/api/plan/start-session', async (req, res) => {
         }
       }
       resp.sessionId = sessionId;
+      // The node's cached session list (nodeSessions:<addr>, 120s TTL) is now
+      // stale — drop it so the next /sessions read reflects this new session.
+      cacheInvalidate(`nodeSessions:${nodeAddress}`);
       console.log(`Session started: session_id=${sessionId} tx=${resp.txHash}`);
       res.json(resp);
     } else {
@@ -3495,24 +3498,31 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
     if (typeof addr !== 'string' || !/^sentnode1[02-9ac-hj-np-z]{38,}$/.test(addr)) {
       return res.status(400).json({ error: 'valid sentnode1... node address required' });
     }
-    const allSessions = [];
-    let nextKey = undefined;
-    let pages = 0;
+    // Each request walks up to 50 LCD pages (25k sessions) client-filtering for
+    // this node. Session data is append-mostly — cache 2 min so a panel refresh
+    // (or two operators looking at the same node) doesn't repeat the full scan.
+    const result = await cached(`nodeSessions:${addr}`, 120_000, async () => {
+      const allSessions = [];
+      let nextKey = undefined;
+      let pages = 0;
 
-    do {
-      // No chain-wide RPC sessions query — LCD only
-      const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
-      const d = await lcd(`/sentinel/session/v3/sessions?pagination.limit=500${keyParam}`);
-      for (const s of d.sessions || []) {
-        if (s.base_session?.node_address === addr) {
-          allSessions.push(s);
+      do {
+        // No chain-wide RPC sessions query — LCD only
+        const keyParam = nextKey ? `&pagination.key=${encodeURIComponent(nextKey)}` : '';
+        const d = await lcd(`/sentinel/session/v3/sessions?pagination.limit=500${keyParam}`);
+        for (const s of d.sessions || []) {
+          if (s.base_session?.node_address === addr) {
+            allSessions.push(s);
+          }
         }
-      }
-      nextKey = d.pagination?.next_key || null;
-      pages++;
-    } while (nextKey && pages < 50);
+        nextKey = d.pagination?.next_key || null;
+        pages++;
+      } while (nextKey && pages < 50);
 
-    res.json({ sessions: allSessions, total: allSessions.length });
+      return { sessions: allSessions, total: allSessions.length };
+    });
+
+    res.json(result);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     res.status(500).json({ error: parseChainError(err.message) });
@@ -4689,70 +4699,94 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
   if (!Number.isFinite(planIdNum) || planIdNum <= 0) return res.status(400).json({ error: 'planId must be a positive integer' });
 
   try {
-    const subsCacheKey = `planSubs:${planId}:500:`;
-    registerPlanSubsKey(planId, subsCacheKey);
-    const subData = await cached(subsCacheKey, 60_000, async () => {
-      // RPC-first: returns array directly; wrap to match LCD shape { subscriptions: [...] }.
-      try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
-          if (rpcResult) return { subscriptions: rpcResult };
+    // The accumulator below fires one LCD tx-search PER subscriber address —
+    // for a 900-subscriber plan that's ~900 sequential 30s-timeout calls (minutes
+    // of wall-clock). The data is historical/append-only, so cache the whole
+    // computed result 5 min. Key includes the operator (granter filter is
+    // fee.granter === getAddr()) so a different signer can't read a stale total.
+    const result = await cached(`gasCosts:${planIdNum}:${getAddr()}`, 300_000, async () => {
+      const subsCacheKey = `planSubs:${planId}:500:`;
+      registerPlanSubsKey(planId, subsCacheKey);
+      const subData = await cached(subsCacheKey, 60_000, async () => {
+        // RPC-first: returns array directly; wrap to match LCD shape { subscriptions: [...] }.
+        try {
+          const rpc = await getRpcClient();
+          if (rpc) {
+            const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+            if (rpcResult) return { subscriptions: rpcResult };
+          }
+        } catch (err) {
+          // Inside cached() — never write to res from here. Read-only RPC can't
+          // produce KEPLR_SIGN_REQUIRED. Fall through to LCD.
+          console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} — LCD fallback`);
         }
-      } catch (err) {
-        // Inside cached() — never write to res from here. Read-only RPC can't
-        // produce KEPLR_SIGN_REQUIRED. Fall through to LCD.
-        console.log(`[RPC] gas-costs subs(${planId}) failed: ${err.message} — LCD fallback`);
+        return { subscriptions: await lcdAllSubscriptions(planId) };
+      });
+      const subs = subData.subscriptions || [];
+      const subscriberAddrs = [...new Set(subs.map(s => s.acc_address))].filter(a => a !== getAddr());
+
+      if (subscriberAddrs.length === 0) {
+        return { ok: true, totalUdvpn: 0, txCount: 0, byAddress: {}, subscriberCount: 0 };
       }
-      return { subscriptions: await lcdAllSubscriptions(planId) };
-    });
-    const subs = subData.subscriptions || [];
-    const subscriberAddrs = [...new Set(subs.map(s => s.acc_address))].filter(a => a !== getAddr());
 
-    if (subscriberAddrs.length === 0) {
-      return res.json({ ok: true, totalUdvpn: 0, txCount: 0, byAddress: {}, subscriberCount: 0 });
-    }
+      let totalUdvpn = 0;
+      let txCount = 0;
+      const byAddress = {};
 
-    let totalUdvpn = 0;
-    let txCount = 0;
-    const byAddress = {};
+      console.log(`[GasCosts] Checking ${subscriberAddrs.length} subscriber addresses...`);
+      // These are read-only LCD tx-search probes (no TX broadcast, no
+      // account-sequence concern), so run them in bounded-concurrency batches
+      // instead of one-at-a-time. A cold-cache 900-subscriber plan drops from
+      // ~900 serial 30s-timeout calls (minutes) to ceil(900/8) waves. Cap at 8
+      // to avoid saturating the LCD connection pool (node scan already uses 30).
+      const GAS_CONCURRENCY = 8;
+      const granter = getAddr();
+      const probeAddr = async (addr) => {
+        try {
+          const searchUrl = `/cosmos/tx/v1beta1/txs?events=${encodeURIComponent("message.sender='" + addr + "'")}&pagination.limit=100&order_by=2`;
+          const txData = await lcd(searchUrl, 30000);
+          const rawTxs = txData.txs || [];
 
-    console.log(`[GasCosts] Checking ${subscriberAddrs.length} subscriber addresses...`);
-    for (const addr of subscriberAddrs) {
-      try {
-        const searchUrl = `/cosmos/tx/v1beta1/txs?events=${encodeURIComponent("message.sender='" + addr + "'")}&pagination.limit=100&order_by=2`;
-        const txData = await lcd(searchUrl, 30000);
-        const rawTxs = txData.txs || [];
+          let addrGas = 0;
+          let addrTxCount = 0;
 
-        let addrGas = 0;
-        let addrTxCount = 0;
-
-        for (let i = 0; i < rawTxs.length; i++) {
-          const fee = rawTxs[i]?.auth_info?.fee;
-          if (fee?.granter === getAddr()) {
-            const udvpnFee = (fee.amount || []).find(f => f.denom === 'udvpn');
-            if (udvpnFee) {
-              addrGas += parseInt(udvpnFee.amount);
-              addrTxCount++;
+          for (let i = 0; i < rawTxs.length; i++) {
+            const fee = rawTxs[i]?.auth_info?.fee;
+            if (fee?.granter === granter) {
+              const udvpnFee = (fee.amount || []).find(f => f.denom === 'udvpn');
+              if (udvpnFee) {
+                addrGas += parseInt(udvpnFee.amount);
+                addrTxCount++;
+              }
             }
           }
+          console.log(`[GasCosts] ${addr.slice(0, 12)}...: ${rawTxs.length} txs checked, ${addrTxCount} fee-granted`);
+          return { addr, addrGas, addrTxCount };
+        } catch (err) {
+          // Per-address LCD probe — never KEPLR_SIGN_REQUIRED. Don't bail the
+          // whole batch on a single address failure; report zero for this addr.
+          console.error(`[GasCosts] ${addr.slice(0, 12)}... failed: ${err.message}`);
+          return { addr, addrGas: 0, addrTxCount: 0 };
         }
+      };
 
-        if (addrTxCount > 0) {
-          byAddress[addr] = { udvpn: addrGas, txCount: addrTxCount };
-          totalUdvpn += addrGas;
-          txCount += addrTxCount;
+      for (let i = 0; i < subscriberAddrs.length; i += GAS_CONCURRENCY) {
+        const wave = subscriberAddrs.slice(i, i + GAS_CONCURRENCY);
+        const settled = await Promise.all(wave.map(probeAddr));
+        for (const { addr, addrGas, addrTxCount } of settled) {
+          if (addrTxCount > 0) {
+            byAddress[addr] = { udvpn: addrGas, txCount: addrTxCount };
+            totalUdvpn += addrGas;
+            txCount += addrTxCount;
+          }
         }
-        console.log(`[GasCosts] ${addr.slice(0, 12)}...: ${rawTxs.length} txs checked, ${addrTxCount} fee-granted`);
-      } catch (err) {
-        // Per-address LCD probe inside accumulator loop — never KEPLR_SIGN_REQUIRED.
-        // Don't bail the whole loop on a single address failure.
-        console.error(`[GasCosts] ${addr.slice(0, 12)}... failed: ${err.message}`);
       }
-    }
-    console.log(`[GasCosts] Done: ${totalUdvpn} udvpn across ${txCount} txs from ${Object.keys(byAddress).length} addresses`);
+      console.log(`[GasCosts] Done: ${totalUdvpn} udvpn across ${txCount} txs from ${Object.keys(byAddress).length} addresses`);
 
-    res.json({ ok: true, totalUdvpn, txCount, byAddress, subscriberCount: subscriberAddrs.length });
+      return { ok: true, totalUdvpn, txCount, byAddress, subscriberCount: subscriberAddrs.length };
+    });
+
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: parseChainError(e.message) });
   }
