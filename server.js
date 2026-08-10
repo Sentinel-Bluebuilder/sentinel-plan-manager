@@ -8,6 +8,7 @@ import { randomBytes as _cryptoRandomBytes } from 'crypto';
 import express from 'express';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'url';
+import { fromBech32 as fromBech32Sync } from '@cosmjs/encoding';
 import { dirname, join } from 'path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import {
@@ -848,6 +849,16 @@ const CLIENT_ERROR_RE = new RegExp([
   'invalid price',
   'unauthorized',
   'out of gas',
+  // Malformed input the caller supplied. A bad bech32 address can never become
+  // valid by retrying, so it must never present as a 5xx — that tells retry
+  // middleware and alerting to treat a typo as an outage.
+  'decoding bech32 failed',
+  'invalid acc_address',
+  'invalid bech32',
+  'invalid address',
+  'invalid separator index',
+  'invalid checksum',
+  'empty address string',
 ].join('|'), 'i');
 
 // ─── Lease Duration Validation ───────────────────────────────────────────────
@@ -884,6 +895,24 @@ function chainErrorStatus(err) {
     return 500;
   }
   return CLIENT_ERROR_RE.test(msg) ? 400 : 500;
+}
+
+// ─── Address Validation ──────────────────────────────────────────────────────
+// `startsWith('sent1')` is not validation — "sent1nope" passes it, then costs a
+// paid chain round-trip (a self-subscribe TX on the add-subscriber path) before
+// the chain rejects the bech32. Checksum-verify locally instead: it is free,
+// instant, and the failure is unambiguously the caller's.
+function isValidSentAddress(addr, prefix = 'sent') {
+  if (typeof addr !== 'string' || !addr.startsWith(`${prefix}1`)) return false;
+  try {
+    const { prefix: got, data } = fromBech32Sync(addr);
+    return got === prefix && data.length === 20;
+  } catch (e) {
+    // Malformed bech32 (bad checksum/separator) — a normal rejection, not a
+    // fault. Bound and ignore; the caller turns `false` into a 400.
+    void e;
+    return false;
+  }
 }
 
 // Retry a thunk up to `attempts` times with exponential backoff.
@@ -3096,7 +3125,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
   try {
     const { planId, address, denom, allocBytes } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
-    if (!address || !String(address).startsWith('sent1')) {
+    if (!isValidSentAddress(String(address || '').trim())) {
       return res.status(400).json({ error: 'valid sent1... address required' });
     }
     console.log(`Adding subscriber ${address} to plan ${planId} via self-subscribe + share...`);
@@ -3117,10 +3146,18 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
   try {
     const { planId, addresses, denom, allocBytes } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
-    const list = Array.isArray(addresses)
-      ? addresses.map(a => String(a).trim()).filter(a => a.startsWith('sent1'))
-      : [];
-    if (!list.length) return res.status(400).json({ error: 'addresses[] with valid sent1... entries required' });
+    // Checksum-validate here too: an invalid entry used to survive the prefix
+    // filter and burn a paid subscribe attempt before the chain rejected it.
+    const submitted = Array.isArray(addresses) ? addresses.map(a => String(a).trim()) : [];
+    const list = submitted.filter(a => isValidSentAddress(a));
+    const invalid = submitted.filter(a => !isValidSentAddress(a));
+    if (!list.length) {
+      return res.status(400).json({
+        error: 'addresses[] with valid sent1... entries required',
+        ...(invalid.length ? { invalid } : {}),
+      });
+    }
+    if (invalid.length) console.log(`[add-subscribers] skipping ${invalid.length} invalid address(es): ${invalid.join(', ')}`);
 
     // Client-signed wallets (Keplr/Privy): the server holds no key, so it can't
     // run the per-address subscribe+share loop below (each address needs its own
@@ -3167,12 +3204,42 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
         const r = await _addSubscriberViaShare(parseInt(planId), addr, { denom, allocBytes });
         results.push({ address: addr, ok: true, subscriptionId: r.subscriptionId, reused: r.reused, subTx: r.subTx, shareTx: r.shareTx });
       } catch (e) {
-        results.push({ address: addr, ok: false, error: parseChainError(e.message) });
+        // Keep the RAW message alongside the friendly one. parseChainError
+        // rewrites text ("...insufficient funds" → "Insufficient P2P balance"),
+        // and the rewritten form no longer matches CLIENT_ERROR_RE — classifying
+        // the parsed string would score real client errors as 500. Non-enumerable
+        // so it never reaches the client in `results`.
+        const entry = { address: addr, ok: false, error: parseChainError(e.message) };
+        Object.defineProperty(entry, 'rawError', { value: e.message, enumerable: false });
+        results.push(entry);
       }
     }
     invalidatePlanSubs(parseInt(planId, 10));
     const added = results.filter(r => r.ok).length;
-    res.json({ ok: added > 0, added, failed: results.length - added, results });
+    // Partial success is a real outcome here (some addresses can land while
+    // others are rejected), so a mixed result stays 200 and the caller reads
+    // `results`. But when NOTHING was added this is a plain failure, and
+    // answering 200 made `res.ok` report success on a request that did nothing —
+    // a client checking only the HTTP status would show "subscribers added" for
+    // a batch where every single one was rejected. Status the total failure.
+    // Report skipped-as-invalid addresses explicitly — dropping them from the
+    // filter without saying so would let an operator believe a name was added.
+    const body = {
+      ok: added > 0,
+      added,
+      failed: results.length - added,
+      results,
+      ...(invalid.length ? { invalid, skipped: invalid.length } : {}),
+    };
+    if (added === 0) {
+      const firstFail = results.find(r => !r.ok);
+      // Classify on the RAW chain text, not the friendly rewrite (see above).
+      return res.status(chainErrorStatus(firstFail?.rawError)).json({
+        ...body,
+        error: firstFail?.error || 'No subscribers could be added',
+      });
+    }
+    res.json(body);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Add subscribers (bulk) error:', err.message);
