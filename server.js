@@ -426,20 +426,15 @@ async function filterOwnedPlanIds(planIds) {
   const myProv = getProvAddr();
   if (!myProv) return [];
   return cached(`myPlansOwned:${myProv}:${planIds.slice().sort().join(',')}`, 60_000, async () => {
-    const client = await getRpcClient();
-    if (!client) {
-      // No RPC — can't make ownership decisions. Return list as-is, do not
-      // prune. Better to show possibly-stale plans than to nuke the list on
-      // a transient outage.
-      return planIds.map(Number).sort((a, b) => a - b);
-    }
     const kept = [];
     const foreign = [];
     await Promise.all(planIds.map(async (id) => {
-      // RPC first.
+      // RPC first. Per-probe rpcCall so one dead endpoint can't fail the whole
+      // fan-out and dump every plan onto the slow LCD path — each probe
+      // re-resolves and fails over on its own.
       let provAddress = null;
       try {
-        const p = await rpcQueryPlan(client, id);
+        const p = await rpcCall((c) => rpcQueryPlan(c, id), { label: `ownership:plan(${id})`, attempts: 2 });
         if (p?.prov_address) provAddress = p.prov_address;
       } catch (err) {
         console.log(`[ownership] RPC plan(${id}) probe failed: ${err.message} — LCD fallback`);
@@ -489,8 +484,7 @@ async function discoverChainPlans() {
   return cached(`planDiscovery:${myProv}`, 60_000, async () => {
     let plans = null;
     try {
-      const client = await getRpcClient();
-      if (client) plans = await rpcQueryPlansForProvider(client, myProv);
+      plans = await rpcCall((c) => rpcQueryPlansForProvider(c, myProv), { label: 'discovery:plansForProvider' });
     } catch (e) {
       console.warn(`[discovery] RPC plans-for-provider failed: ${e.message}`);
     }
@@ -1251,8 +1245,7 @@ async function scanSessions() {
 async function buildLeaseMsg(nodeAddress, hours = 24) {
   let nodeInfo = null;
   try {
-    const rpcClient = await getRpcClient();
-    nodeInfo = await rpcQueryNode(rpcClient, nodeAddress);
+    nodeInfo = await rpcCall((c) => rpcQueryNode(c, nodeAddress), { label: `lease:node(${nodeAddress})` });
     if (nodeInfo) console.log(`[LEASE] Node found via RPC: ${nodeAddress}`);
   } catch (err) {
     console.log(`[LEASE] RPC lookup failed (${err.message}), falling back to LCD`);
@@ -1312,14 +1305,17 @@ async function buildLeaseMsgs(addrs, hours = 24) {
   // Falls back to LCD if RPC unavailable.
   let rawMap = {};
   try {
-    const rpcClient = await getRpcClient();
-    if (!rpcClient) throw new Error('no RPC client available');
     // allSettled, not all: a single node's RPC lookup rejecting must NOT discard
     // every other resolved node and force the whole batch onto the slow LCD
     // paginated fallback. A rejected lookup just leaves that node out of rawMap,
     // and the start-msg loop below already treats "not found on chain" as a skip.
+    // Each lookup goes through rpcCall independently — sharing one pinned client
+    // meant a single dead endpoint rejected EVERY node, and "not found" reads as
+    // "skip", so a transient RPC blip silently dropped nodes from the user's
+    // batch lease instead of failing loudly.
     const settled = await Promise.allSettled(
-      addrs.map(addr => rpcQueryNode(rpcClient, addr).then(node => ({ addr, node })))
+      addrs.map(addr => rpcCall((c) => rpcQueryNode(c, addr), { label: `batchLease:node(${addr})`, attempts: 2 })
+        .then(node => ({ addr, node })))
     );
     for (const s of settled) {
       if (s.status === 'fulfilled') {
@@ -1364,23 +1360,27 @@ async function buildLeaseMsgs(addrs, hours = 24) {
   const endMsgs = [];            // stale leases to end before re-leasing
   let reconciled = 0;            // nodes we touched the lease state for
   try {
-    const rpcClient = await getRpcClient();
-    if (rpcClient) {
+    {
       const myProv = getProvAddr();
       const now = Date.now();
-      const perNode = await Promise.all(addrs.map(async (addr) => {
-        try {
-          const leases = await rpcQueryLeasesForNode(rpcClient, addr);
-          const mine = leases
-            .filter(l => l.prov_address === myProv &&
-              (!l.expires_at || new Date(l.expires_at).getTime() > now))
-            .sort((a, b) => (b.hours || 0) - (a.hours || 0));
-          return { addr, lease: mine[0] || null };
-        } catch (e) {
-          console.log(`[BATCH-LEASE] lease pre-check ${addr} failed: ${e.message}`);
-          return { addr, lease: null };
-        }
-      }));
+      // ONE QueryLeasesForProvider instead of one QueryLeasesForNode per address.
+      // The per-node fan-out fired hundreds of concurrent ABCI calls at a single
+      // endpoint and drove it into repeated timeouts; the provider-scoped query
+      // returns the same information in a single round trip.
+      const wanted = new Set(addrs);
+      const allLeases = await rpcCall((c) => rpcQueryLeasesForProvider(c, myProv),
+        { label: 'batchLease:leasesForProvider', fallback: [] });
+      const bestByNode = new Map();
+      for (const l of allLeases || []) {
+        const addr = l.node_address ?? l.nodeAddress;
+        if (!wanted.has(addr)) continue;
+        if (l.prov_address !== myProv) continue;
+        if (l.expires_at && new Date(l.expires_at).getTime() <= now) continue;
+        const cur = bestByNode.get(addr);
+        // Keep the longest-duration active lease, matching the previous sort.
+        if (!cur || (l.hours || 0) > (cur.hours || 0)) bestByNode.set(addr, l);
+      }
+      const perNode = addrs.map((addr) => ({ addr, lease: bestByNode.get(addr) || null }));
       for (const { addr, lease } of perNode) {
         if (!lease) continue; // no existing lease → fresh start below
         if ((lease.hours || 0) >= hours) {
@@ -2352,9 +2352,9 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     let d;
     if (!key && limit <= 500) {
       try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+        {
+          const rpcResult = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+            { label: `subsForPlan(${planId})` });
           if (rpcResult) {
             // Normalize numeric status → string to match LCD shape ({status:'active'|'inactive_pending'|'inactive'}).
             // Reverse ordering to match LCD pagination.reverse=true behavior (newest first).
@@ -2408,16 +2408,16 @@ app.get('/api/plans/:id/members', async (req, res) => {
     if (!Number.isFinite(planId)) return res.status(400).json({ error: 'Invalid plan ID' });
     const operator = getAddr();
     const members = await cached(`planMembers:${planId}:${operator}`, 30_000, async () => {
-      const rpc = await getRpcClient();
-      if (!rpc) return [];
       // The operator's subscriptions to this specific plan.
-      const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+      const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+        { label: `members:accSubs(${planId})`, fallback: [] });
       const planSubs = accSubs.filter(s => Number(s.plan_id ?? s.planId) === planId);
       const out = [];
       for (const sub of planSubs) {
         let allocs = [];
         try {
-          allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 10000 });
+          allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 10000 }),
+            { label: `members:allocs(${sub.id})`, attempts: 2 });
         } catch (e) {
           console.log(`[Members] allocations for sub ${sub.id} failed: ${e.message}`);
         }
@@ -2457,9 +2457,8 @@ app.get('/api/plans/:id/own-subscription', async (req, res) => {
     if (!Number.isFinite(planId)) return res.status(400).json({ error: 'Invalid plan ID' });
     const operator = getAddr();
     const result = await cached(`ownSub:${planId}:${operator}`, 30_000, async () => {
-      const rpc = await getRpcClient();
-      if (!rpc) return { subscribed: false, subscriptions: [], activeCount: 0, inactiveCount: 0 };
-      const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+      const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+        { label: `ownSub:accSubs(${planId})`, fallback: [] });
       const planSubs = accSubs.filter(s => Number(s.plan_id ?? s.planId) === planId);
       const subscriptions = [];
       for (const sub of planSubs) {
@@ -2468,7 +2467,8 @@ app.get('/api/plans/:id/own-subscription', async (req, res) => {
         let grantedBytes = '0';
         let utilisedBytes = '0';
         try {
-          const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 10000 });
+          const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 10000 }),
+            { label: `ownSub:allocs(${sub.id})`, attempts: 2 });
           const own = allocs.find(a => a.address === operator);
           if (own) {
             grantedBytes = String(own.granted_bytes ?? own.grantedBytes ?? '0');
@@ -2519,8 +2519,7 @@ app.get('/api/my-plans', async (req, res) => {
     const [bal, ...myPlanResults] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
         try {
-          const rpc = await getRpcClient();
-          if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
+          return await rpcCall((c) => rpcQueryBalance(c, getAddr(), 'udvpn'), { label: 'myPlans:balance' });
         } catch (e) {
           console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
         }
@@ -2758,9 +2757,7 @@ app.post('/api/plan/status', async (req, res) => {
 async function pickActiveGrantor(grantee) {
   if (!grantee) return null;
   try {
-    const rpc = await getRpcClient();
-    if (!rpc) return null;
-    const grants = await rpcQueryFeeGrants(rpc, grantee);
+    const grants = await rpcCall((c) => rpcQueryFeeGrants(c, grantee), { label: `feegrant:grants(${grantee})` });
     if (!grants || !grants.length) return null;
     const now = Date.now();
     const usable = grants.find((g) => {
@@ -2864,9 +2861,11 @@ async function buildReuseShareMsgOrNull(planId, member, { allocBytes } = {}) {
   }
   if (requestedBytes <= 0n) requestedBytes = DEFAULT_SHARE_BYTES;
 
-  const rpc = await getRpcClient();
-  if (!rpc) return null;
-  const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+  // Failover matters here: if these reads fail we return null, and the caller
+  // then BUYS a brand-new subscription instead of reusing one the operator
+  // already paid for. A transient endpoint blip must not cost real money.
+  const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+    { label: `reuseShare:accSubs(${planId})`, fallback: [] });
   const planSubs = accSubs.filter(s =>
     Number(s.plan_id ?? s.planId) === Number(planId) &&
     (typeof s.status === 'number' ? s.status === 1 : s.status === 'active'));
@@ -2874,7 +2873,8 @@ async function buildReuseShareMsgOrNull(planId, member, { allocBytes } = {}) {
   let bestBytes = -1n;
   for (const sub of planSubs) {
     try {
-      const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 100 });
+      const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 100 }),
+        { label: `reuseShare:allocs(${sub.id})`, attempts: 2 });
       const own = allocs.find(a => a.address === operator);
       if (!own) continue;
       const have = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
@@ -2914,9 +2914,11 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
   let reused = false;
   let subTx = null;
   try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+    {
+      // Same money-safety note as buildReuseShareMsg: failing these reads sends
+      // us down the self-subscribe path below, which SPENDS. Fail over instead.
+      const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+        { label: `addSub:accSubs(${planId})`, fallback: [] });
       const planSubs = accSubs.filter(s =>
         Number(s.plan_id ?? s.planId) === Number(planId) &&
         (typeof s.status === 'number' ? s.status === 1 : s.status === 'active'));
@@ -2925,7 +2927,8 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
       let bestBytes = -1n;
       for (const sub of planSubs) {
         try {
-          const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 100 });
+          const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 100 }),
+            { label: `addSub:allocs(${sub.id})`, attempts: 2 });
           const own = allocs.find(a => a.address === operator);
           if (!own) continue;
           const have = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
@@ -2994,9 +2997,9 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
 
     // Read the fresh subscription's granted bytes (the operator's own row).
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        const allocs = await rpcQuerySubscriptionAllocations(rpc, subscriptionId, { limit: 100 });
+      {
+        const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, subscriptionId, { limit: 100 }),
+          { label: `addSub:freshAllocs(${subscriptionId})` });
         const own = allocs.find(a => a.address === operator) || allocs[0];
         if (own) availableBytes = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
       }
@@ -3553,11 +3556,11 @@ app.post('/api/plan-manager/link', async (req, res) => {
     // Best-effort: a query failure falls back to bundling a fresh lease.
     let existingLease = null;      // our active lease, if any
     try {
-      const rpcClient = await getRpcClient();
-      if (rpcClient) {
+      {
         const myProv = getProvAddr();
         const now = Date.now();
-        const leases = await rpcQueryLeasesForNode(rpcClient, nodeAddress);
+        const leases = await rpcCall((c) => rpcQueryLeasesForNode(c, nodeAddress),
+          { label: `link:leasesForNode(${nodeAddress})`, attempts: 2 });
         existingLease = leases
           .filter(l => l.prov_address === myProv &&
             (!l.expires_at || new Date(l.expires_at).getTime() > now))
@@ -3837,8 +3840,9 @@ app.post('/api/lease/start', async (req, res) => {
     // all identical). RPC-first lookup of the node's current price.
     let nodePrice = null;
     try {
-      const rpcClient = await getRpcClient();
-      const node = await rpcQueryNode(rpcClient, nodeAddress);
+      // Failover matters: without it a dead endpoint surfaced as "node may be
+      // offline or unreachable" (HTTP 400) — blaming the node for our problem.
+      const node = await rpcCall((c) => rpcQueryNode(c, nodeAddress), { label: `leaseV1:node(${nodeAddress})` });
       const prices = node?.hourly_prices || node?.hourlyPrices;
       if (Array.isArray(prices) && prices.length) {
         const denom = maxPriceDenom || 'udvpn';
@@ -3955,9 +3959,8 @@ app.post('/api/provider/register', async (req, res) => {
     let alreadyExists = false;
     // RPC-first: direct lookup by sentprov address — exact match, no substring heuristic.
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        const prov = await rpcQueryProvider(rpc, getProvAddr());
+      {
+        const prov = await rpcCall((c) => rpcQueryProvider(c, getProvAddr()), { label: 'provider:existsProbe' });
         if (prov) alreadyExists = true;
       }
     } catch (err) {
@@ -4164,8 +4167,8 @@ app.post('/api/feegrant/grant', async (req, res) => {
     let alreadyGranted = false;
     try {
       let existing = [];
-      const rpc = await getRpcClient().catch((e) => { console.log(`[grant] rpc client unavailable for grant-check: ${e.message}`); return null; });
-      if (rpc) existing = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 }).catch((e) => { console.log(`[grant] rpc issued-grants check failed: ${e.message}`); return []; });
+      existing = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+        { label: 'grant:issuedCheck', fallback: [] });
       if (!existing.length) {
         const d = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`).catch((e) => { console.log(`[grant] lcd issued-grants check failed: ${e.message}`); return {}; });
         existing = d.allowances || [];
@@ -4262,9 +4265,9 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
     let subs = [];
     let subsFromRpc = false;
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+      {
+        subs = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+          { label: `sse:subsForPlan(${planId})` });
         subsFromRpc = true;
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
@@ -4293,9 +4296,9 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
     send('status', { msg: 'Checking existing grants...' });
     let existingAllowances = [];
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        existingAllowances = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+      {
+        existingAllowances = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+          { label: 'sse:issuedGrants' });
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowances.length}`);
       }
     } catch (err) {
@@ -4396,9 +4399,9 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     let subs = [];
     let subsFromRpc = false;
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+      {
+        subs = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+          { label: `grantSubs:subsForPlan(${planId})` });
         subsFromRpc = true;
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
@@ -4425,9 +4428,9 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     // fall through to LCD when empty so we don't miss real grants.
     let existingAllowancesPost = [];
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        existingAllowancesPost = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+      {
+        existingAllowancesPost = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+          { label: 'grantSubs:issuedGrants' });
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowancesPost.length}`);
       }
     } catch (err) {
@@ -4588,9 +4591,9 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
   try {
     let revokeAllowances = [];
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        revokeAllowances = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+      {
+        revokeAllowances = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+          { label: 'revokeAll:issuedGrants' });
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${revokeAllowances.length}`);
       }
     } catch (err) {
@@ -4678,9 +4681,9 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
     const subData = await cached(subsCacheKey, 60_000, async () => {
       // RPC-first: returns array directly; wrap to match LCD shape { subscriptions: [...] }.
       try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+        {
+          const rpcResult = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+            { label: `gasCosts:subsForPlan(${planId})` });
           if (rpcResult) return { subscriptions: rpcResult };
         }
       } catch (err) {
