@@ -8,6 +8,7 @@ import { randomBytes as _cryptoRandomBytes } from 'crypto';
 import express from 'express';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'url';
+import { fromBech32 as fromBech32Sync } from '@cosmjs/encoding';
 import { dirname, join } from 'path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import {
@@ -36,6 +37,8 @@ import {
   resetSigningClient,
   safeBroadcast,
   getRpcClient,
+  rpcCall,
+  rpcCooldownState,
   rpcQueryNode,
   rpcQueryNodes,
   rpcQueryNodesForPlan,
@@ -381,16 +384,15 @@ async function assertPlanOwnership(planId) {
   // transient blip vs missing plan are indistinguishable, so we MUST verify
   // via LCD before allowing the TX, or doomed "is not authorized" broadcasts
   // sneak through and burn gas).
+  // Retry across endpoints before falling back: a transport blip here used to
+  // send an OWNED plan down the LCD path (and, if LCD also blipped, block a
+  // legitimate operator's TX outright).
   let provAddress = null;
-  try {
-    const client = await getRpcClient();
-    if (client) {
-      const plan = await rpcQueryPlan(client, planId);
-      if (plan?.prov_address) provAddress = plan.prov_address;
-    }
-  } catch (e) {
-    console.warn(`[ownership] RPC ownership probe threw for plan ${planId}: ${e.message}`);
-  }
+  const plan = await rpcCall(
+    (c) => rpcQueryPlan(c, planId),
+    { label: `ownership(${planId})`, fallback: null },
+  );
+  if (plan?.prov_address) provAddress = plan.prov_address;
 
   if (!provAddress) {
     try {
@@ -425,20 +427,15 @@ async function filterOwnedPlanIds(planIds) {
   const myProv = getProvAddr();
   if (!myProv) return [];
   return cached(`myPlansOwned:${myProv}:${planIds.slice().sort().join(',')}`, 60_000, async () => {
-    const client = await getRpcClient();
-    if (!client) {
-      // No RPC — can't make ownership decisions. Return list as-is, do not
-      // prune. Better to show possibly-stale plans than to nuke the list on
-      // a transient outage.
-      return planIds.map(Number).sort((a, b) => a - b);
-    }
     const kept = [];
     const foreign = [];
     await Promise.all(planIds.map(async (id) => {
-      // RPC first.
+      // RPC first. Per-probe rpcCall so one dead endpoint can't fail the whole
+      // fan-out and dump every plan onto the slow LCD path — each probe
+      // re-resolves and fails over on its own.
       let provAddress = null;
       try {
-        const p = await rpcQueryPlan(client, id);
+        const p = await rpcCall((c) => rpcQueryPlan(c, id), { label: `ownership:plan(${id})`, attempts: 2 });
         if (p?.prov_address) provAddress = p.prov_address;
       } catch (err) {
         console.log(`[ownership] RPC plan(${id}) probe failed: ${err.message} — LCD fallback`);
@@ -488,8 +485,7 @@ async function discoverChainPlans() {
   return cached(`planDiscovery:${myProv}`, 60_000, async () => {
     let plans = null;
     try {
-      const client = await getRpcClient();
-      if (client) plans = await rpcQueryPlansForProvider(client, myProv);
+      plans = await rpcCall((c) => rpcQueryPlansForProvider(c, myProv), { label: 'discovery:plansForProvider' });
     } catch (e) {
       console.warn(`[discovery] RPC plans-for-provider failed: ${e.message}`);
     }
@@ -647,16 +643,20 @@ async function runNodeScan() {
     // Pull the full chain catalog via RPC directly. SDK's fetchAllNodes()
     // hardcodes limit=500 via fetchActiveNodes default — that's why we were
     // missing half the network. Go straight to rpcQueryNodes with limit=10000.
-    const rpc = await getRpcClient();
-    if (!rpc) {
-      // All RPC endpoints failed. rpcQueryNodes(null, ...) would throw an opaque
-      // "Cannot read properties of null" deep in the SDK; surface a clear cause
-      // and bail cleanly so the next scan can retry once RPC recovers.
+    // rpcCall retries across endpoints: the catalog is the backbone of every
+    // node view, so a single flaky endpoint must not blank the whole UI.
+    // fallback:null => "couldn't reach the chain" instead of throwing.
+    const rawNodes = await rpcCall(
+      (c) => rpcQueryNodes(c, { status: 1, limit: 10000 }),
+      { label: 'scan:catalog', fallback: null },
+    );
+    if (!rawNodes) {
+      // All RPC endpoints failed. Bail cleanly, KEEPING the existing cache, so
+      // the next scan retries once RPC recovers.
       console.warn('[scan] No RPC client available — skipping node catalog refresh, will retry next scan.');
       nodeCache.scanning = false;
       return;
     }
-    const rawNodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
     // Resolve remote URLs and filter to nodes that accept udvpn.
     const catalog = rawNodes
       .map(n => {
@@ -752,23 +752,20 @@ async function fetchAllNodes() {
 
 async function discoverPlanIds() {
   const ids = new Set();
-  // Fetch RPC client once outside the loop — reused for every probe.
-  let rpc = null;
-  try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
   for (let batch = 0; batch < 10; batch++) {
     const checks = [];
     for (let i = batch * 10 + 1; i <= (batch + 1) * 10; i++) {
       checks.push((async (planId) => {
         // RPC-first: if RPC returns a non-empty array the plan exists.
         // Empty array is ambiguous (truly empty OR not-on-chain) — fall back to LCD count_total.
-        if (rpc) {
-          try {
-            const result = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 1 });
-            if (result && result.length > 0) { ids.add(planId); return; }
-          } catch (err) {
-            console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} — LCD fallback`);
-          }
-        }
+        // Each probe fails over independently; previously all 100 shared one
+        // pinned client, so a single dead endpoint dropped the whole discovery
+        // sweep onto the (much slower) LCD path.
+        const result = await rpcCall(
+          (c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 1 }),
+          { label: `discover(${planId})`, attempts: 2, fallback: null },
+        );
+        if (result && result.length > 0) { ids.add(planId); return; }
         // LCD fallback — count_total is authoritative for empty-vs-nonexistent distinction.
         await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`)
           .then(d => {
@@ -787,15 +784,13 @@ async function getUniqueWallets(planId) {
   const wallets = new Set();
 
   // RPC-first: single protobuf call returns the full set (~912x faster than paginated LCD).
-  try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
-      for (const s of subs) wallets.add(s.acc_address);
-      return wallets.size;
-    }
-  } catch (err) {
-    console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} — LCD fallback`);
+  const subs = await rpcCall(
+    (c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+    { label: `uniqueWallets(${planId})`, fallback: null },
+  );
+  if (subs) {
+    for (const s of subs) wallets.add(s.acc_address);
+    return wallets.size;
   }
 
   // LCD fallback
@@ -833,6 +828,91 @@ async function lcdAllSubscriptions(planId, timeout) {
     pages++;
   } while (nextKey && pages < MAX_PAGES);
   return subs;
+}
+
+// ─── Chain-Error HTTP Status ─────────────────────────────────────────────────
+// A chain rejection is the chain answering, not the server breaking. Routes used
+// to return 500 for things like "Plan is inactive — activate first" or "Lease
+// already exists for this node", which reads as an outage to clients, monitoring
+// and retry logic — and invites a pointless retry of a request that will always
+// fail the same way. Map those to 4xx and reserve 5xx for genuine server/RPC
+// faults (transport failures, exhausted endpoints, bugs).
+const CLIENT_ERROR_RE = new RegExp([
+  'insufficient funds',
+  'invalid status inactive',
+  'already exists',
+  'duplicate node for plan',
+  'duplicate provider',
+  'does not exist',
+  'not found',
+  'not active',
+  'invalid price',
+  'unauthorized',
+  'out of gas',
+  // Malformed input the caller supplied. A bad bech32 address can never become
+  // valid by retrying, so it must never present as a 5xx — that tells retry
+  // middleware and alerting to treat a typo as an outage.
+  'decoding bech32 failed',
+  'invalid acc_address',
+  'invalid bech32',
+  'invalid address',
+  'invalid separator index',
+  'invalid checksum',
+  'empty address string',
+].join('|'), 'i');
+
+// ─── Lease Duration Validation ───────────────────────────────────────────────
+// `parseInt(x) || 24` silently turned 0 into 24 HOURS. A node at 50 P2P/hr then
+// costs 1200 P2P instead of the nothing the caller asked for — a 0 from a UI
+// field or a cleared input became a four-figure charge. It also swallowed
+// negatives, NaN and "abc" into the same silent default. Only an ABSENT value
+// means "use the default"; anything present must be a sane positive integer or
+// the request is rejected.
+const MAX_LEASE_HOURS = 24 * 365; // one year — well past any legitimate lease
+
+function parseLeaseHours(raw, { fallback = 24 } = {}) {
+  if (raw === undefined || raw === null || raw === '') return { hours: fallback };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    return { error: 'leaseHours must be a whole number of hours' };
+  }
+  if (n <= 0) {
+    return { error: 'leaseHours must be at least 1 (use unlink to remove a node, not a 0-hour lease)' };
+  }
+  if (n > MAX_LEASE_HOURS) {
+    return { error: `leaseHours must be ${MAX_LEASE_HOURS} or fewer` };
+  }
+  return { hours: n };
+}
+
+/** 400 when the chain rejected the request on its merits; 500 otherwise. */
+function chainErrorStatus(err) {
+  const msg = String((err && err.message) || err || '');
+  // Transport failures are OURS to own — the user can meaningfully retry those,
+  // and they must not be mistaken for a permanent rejection.
+  if (/fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|Bad status|50[234]|timed out|timeout/i.test(msg)
+      && !CLIENT_ERROR_RE.test(msg)) {
+    return 500;
+  }
+  return CLIENT_ERROR_RE.test(msg) ? 400 : 500;
+}
+
+// ─── Address Validation ──────────────────────────────────────────────────────
+// `startsWith('sent1')` is not validation — "sent1nope" passes it, then costs a
+// paid chain round-trip (a self-subscribe TX on the add-subscriber path) before
+// the chain rejects the bech32. Checksum-verify locally instead: it is free,
+// instant, and the failure is unambiguously the caller's.
+function isValidSentAddress(addr, prefix = 'sent') {
+  if (typeof addr !== 'string' || !addr.startsWith(`${prefix}1`)) return false;
+  try {
+    const { prefix: got, data } = fromBech32Sync(addr);
+    return got === prefix && data.length === 20;
+  } catch (e) {
+    // Malformed bech32 (bad checksum/separator) — a normal rejection, not a
+    // fault. Bound and ignore; the caller turns `false` into a 400.
+    void e;
+    return false;
+  }
 }
 
 // Retry a thunk up to `attempts` times with exponential backoff.
@@ -876,23 +956,16 @@ async function getPlanStats(planId) {
 }
 
 async function _getPlanStatsImpl(planId) {
-  // Fetch RPC client once for this call — shared by RPC-first paths below.
-  let rpc = null;
-  try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
-
-  // Single RPC call replaces two LCD calls (count_total + reverse-paginated 200).
-  // Pulls up to 10000 subs in one shot; we derive total + sample from that array.
-  // Falls back to LCD only if RPC fails or is unavailable.
+  // Each sub-query runs through rpcCall independently: they no longer share one
+  // pinned client, so a single dead endpoint can't fail all three at once —
+  // each one fails over on its own and only drops to LCD if the pool is truly out.
   const [subsResult, nodesData, planRecord] = await Promise.all([
     (async () => {
-      if (rpc) {
-        try {
-          const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
-          return { source: 'rpc', subs };
-        } catch (err) {
-          console.log(`[RPC] _getPlanStatsImpl subs(${planId}) failed: ${err.message} — LCD fallback`);
-        }
-      }
+      const subs = await rpcCall(
+        (c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+        { label: `planStats:subs(${planId})`, fallback: null },
+      );
+      if (subs) return { source: 'rpc', subs };
       // LCD fallback: two calls — count_total + reverse sample.
       const [countD, latestD] = await Promise.all([
         lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`).catch(() => ({})),
@@ -901,36 +974,27 @@ async function _getPlanStatsImpl(planId) {
       return { source: 'lcd', countTotal: parseInt(countD.pagination?.total || '0'), subs: latestD.subscriptions || [] };
     })(),
     (async () => {
-      if (rpc) {
-        try {
-          // status:0 (all members) to match the no-filter LCD fallback below and
-          // reflect the true plan size — not just active members.
-          const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
-          if (nodes) return { nodes };
-        } catch (err) {
-          console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
-        }
-      }
+      // status:0 (all members) to match the no-filter LCD fallback below and
+      // reflect the true plan size — not just active members.
+      const nodes = await rpcCall(
+        (c) => rpcQueryNodesForPlan(c, planId, { status: 0, limit: 5000 }),
+        { label: `planStats:nodes(${planId})`, fallback: null },
+      );
+      if (nodes) return { nodes };
       return lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=500`).catch(() => ({ nodes: [] }));
     })(),
     (async () => {
       // The plan record is the ONLY authoritative price source (set immutably at
       // creation). LCD's v3 single-plan endpoint returns "Not Implemented" on
-      // every provider, so RPC is effectively the sole path — give it its own
-      // retry across the failover pool rather than failing over to a dead LCD.
-      // Without this, a single RPC blip on a plan with no sampleable subscribers
-      // silently renders the price as 0 (and caches it for 2 minutes).
-      if (rpc) {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const p = await rpcQueryPlan(rpc, planId);
-            if (p) return p;
-          } catch (err) {
-            console.log(`[RPC] _getPlanStatsImpl plan(${planId}) attempt ${attempt + 1}/3 failed: ${err.message}`);
-          }
-          if (attempt < 2) await new Promise(r => setTimeout(r, 400 * Math.pow(2, attempt)));
-        }
-      }
+      // every provider, so RPC is effectively the sole path. The old loop here
+      // retried 3× against the SAME pinned client, so a dead endpoint burned
+      // every attempt and silently rendered the price as 0 (cached 2 min).
+      // rpcCall retries across DIFFERENT endpoints, which is what was intended.
+      const p = await rpcCall(
+        (c) => rpcQueryPlan(c, planId),
+        { label: `planStats:plan(${planId})`, attempts: 3, fallback: null },
+      );
+      if (p) return p;
       try {
         const lp = await lcd(`/sentinel/plan/v3/plans/${planId}`);
         return lp?.plan || null;
@@ -1017,7 +1081,7 @@ async function _getPlanStatsImpl(planId) {
   const operator = getAddr();
   let addedMembers = 0;
   let activeAddedMembers = 0;
-  if (rpc && operator) {
+  if (operator) {
     try {
       const ownPlanSubs = normSubs.filter(s => s.acc_address === operator);
       const addedAddrs = new Set();
@@ -1025,12 +1089,10 @@ async function _getPlanStatsImpl(planId) {
       for (const sub of ownPlanSubs) {
         // A shared member is active only while the host subscription is active.
         const hostActive = sub.status === 'active' && new Date(sub.inactive_at) > now;
-        let allocs = [];
-        try {
-          allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 10000 });
-        } catch (e) {
-          console.log(`[PlanStats] allocations for sub ${sub.id} failed: ${e.message}`);
-        }
+        const allocs = await rpcCall(
+          (c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 10000 }),
+          { label: `allocations(${sub.id})`, attempts: 2, fallback: [] },
+        );
         for (const a of allocs) {
           if (a.address && a.address !== operator) {
             addedAddrs.add(a.address);
@@ -1087,14 +1149,16 @@ async function getNodesForPlan(planId) {
 
   // RPC-first
   try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      // status:0 (unspecified) = ALL plan members, not just active ones. The
-      // LCD fallback below has no status filter, so this aligns RPC with LCD.
-      // Critical for Add Nodes exclusion (excludeInPlan) and Your Nodes: a
-      // just-linked or temporarily-inactive member must still count as "in plan"
-      // or it reappears in the browse list as if it were never added.
-      const rpcNodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
+    // status:0 (unspecified) = ALL plan members, not just active ones. The
+    // LCD fallback below has no status filter, so this aligns RPC with LCD.
+    // Critical for Add Nodes exclusion (excludeInPlan) and Your Nodes: a
+    // just-linked or temporarily-inactive member must still count as "in plan"
+    // or it reappears in the browse list as if it were never added.
+    const rpcNodes = await rpcCall(
+      (c) => rpcQueryNodesForPlan(c, planId, { status: 0, limit: 5000 }),
+      { label: `nodesForPlan(${planId})`, fallback: null },
+    );
+    if (rpcNodes) {
       for (const n of rpcNodes) {
         const rawAddr = (n.remote_addrs || [])[0] || '';
         nodes.push({
@@ -1113,21 +1177,31 @@ async function getNodesForPlan(planId) {
       // sentinel.lease.v1 Lease (start_at + hours). A node can hold leases from
       // several providers; we take OUR lease (prov_address === getProvAddr()),
       // preferring the one expiring last. Per-node query, run in parallel.
+      // ONE QueryLeasesForProvider replaces N per-node queries. The per-node
+      // fan-out hammered a single endpoint with hundreds of concurrent ABCI
+      // calls, which is what pushed it into repeated 8s timeouts; the provider
+      // holds at most a few hundred leases, so one call is both faster and far
+      // gentler. Falls back to [] => lease fields render as "--", never wrong.
       const myProv = getProvAddr();
-      await Promise.all(nodes.map(async (node) => {
-        try {
-          const leases = await rpcQueryLeasesForNode(rpc, node.address);
-          const mine = leases
-            .filter(l => l.prov_address === myProv && l.expires_at)
-            .sort((a, b) => new Date(b.expires_at) - new Date(a.expires_at));
-          node.leaseExpiresAt = mine[0]?.expires_at || null;
-          node.leaseHours = mine[0]?.hours ?? null;
-          node.leaseMaxHours = mine[0]?.max_hours ?? null;
-        } catch (e) {
-          console.log(`[LEASE] leases-for-node ${node.address} failed: ${e.message}`);
-          node.leaseExpiresAt = null;
+      const allLeases = await rpcCall(
+        (c) => rpcQueryLeasesForProvider(c, myProv),
+        { label: `leasesForProvider(${planId})`, fallback: [] },
+      );
+      const bestByNode = new Map();
+      for (const l of allLeases) {
+        if (l.prov_address !== myProv || !l.expires_at || !l.node_address) continue;
+        const cur = bestByNode.get(l.node_address);
+        // Keep the lease expiring LAST, matching the previous per-node sort.
+        if (!cur || new Date(l.expires_at) > new Date(cur.expires_at)) {
+          bestByNode.set(l.node_address, l);
         }
-      }));
+      }
+      for (const node of nodes) {
+        const mine = bestByNode.get(node.address);
+        node.leaseExpiresAt = mine?.expires_at || null;
+        node.leaseHours = mine?.hours ?? null;
+        node.leaseMaxHours = mine?.max_hours ?? null;
+      }
       return nodes;
     }
   } catch (err) {
@@ -1179,23 +1253,21 @@ async function getAllNodeInfo() {
   const nodeMap = {};
 
   // RPC-first: single call returns full list, no pagination needed.
-  try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const nodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
-      for (const n of nodes) {
-        const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
-        const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
-        nodeMap[n.address] = {
-          hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
-          gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
-        };
-      }
-      console.log(`[RPC] getAllNodeInfo: ${Object.keys(nodeMap).length} nodes loaded`);
-      return nodeMap;
+  const nodes = await rpcCall(
+    (c) => rpcQueryNodes(c, { status: 1, limit: 10000 }),
+    { label: 'allNodeInfo', fallback: null },
+  );
+  if (nodes) {
+    for (const n of nodes) {
+      const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
+      const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
+      nodeMap[n.address] = {
+        hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
+        gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
+      };
     }
-  } catch (err) {
-    console.log(`[RPC] getAllNodeInfo failed (${err.message}), falling back to LCD`);
+    console.log(`[RPC] getAllNodeInfo: ${Object.keys(nodeMap).length} nodes loaded`);
+    return nodeMap;
   }
 
   // LCD fallback: paginated scan.
@@ -1259,8 +1331,7 @@ async function scanSessions() {
 async function buildLeaseMsg(nodeAddress, hours = 24) {
   let nodeInfo = null;
   try {
-    const rpcClient = await getRpcClient();
-    nodeInfo = await rpcQueryNode(rpcClient, nodeAddress);
+    nodeInfo = await rpcCall((c) => rpcQueryNode(c, nodeAddress), { label: `lease:node(${nodeAddress})` });
     if (nodeInfo) console.log(`[LEASE] Node found via RPC: ${nodeAddress}`);
   } catch (err) {
     console.log(`[LEASE] RPC lookup failed (${err.message}), falling back to LCD`);
@@ -1320,14 +1391,17 @@ async function buildLeaseMsgs(addrs, hours = 24) {
   // Falls back to LCD if RPC unavailable.
   let rawMap = {};
   try {
-    const rpcClient = await getRpcClient();
-    if (!rpcClient) throw new Error('no RPC client available');
     // allSettled, not all: a single node's RPC lookup rejecting must NOT discard
     // every other resolved node and force the whole batch onto the slow LCD
     // paginated fallback. A rejected lookup just leaves that node out of rawMap,
     // and the start-msg loop below already treats "not found on chain" as a skip.
+    // Each lookup goes through rpcCall independently — sharing one pinned client
+    // meant a single dead endpoint rejected EVERY node, and "not found" reads as
+    // "skip", so a transient RPC blip silently dropped nodes from the user's
+    // batch lease instead of failing loudly.
     const settled = await Promise.allSettled(
-      addrs.map(addr => rpcQueryNode(rpcClient, addr).then(node => ({ addr, node })))
+      addrs.map(addr => rpcCall((c) => rpcQueryNode(c, addr), { label: `batchLease:node(${addr})`, attempts: 2 })
+        .then(node => ({ addr, node })))
     );
     for (const s of settled) {
       if (s.status === 'fulfilled') {
@@ -1372,23 +1446,27 @@ async function buildLeaseMsgs(addrs, hours = 24) {
   const endMsgs = [];            // stale leases to end before re-leasing
   let reconciled = 0;            // nodes we touched the lease state for
   try {
-    const rpcClient = await getRpcClient();
-    if (rpcClient) {
+    {
       const myProv = getProvAddr();
       const now = Date.now();
-      const perNode = await Promise.all(addrs.map(async (addr) => {
-        try {
-          const leases = await rpcQueryLeasesForNode(rpcClient, addr);
-          const mine = leases
-            .filter(l => l.prov_address === myProv &&
-              (!l.expires_at || new Date(l.expires_at).getTime() > now))
-            .sort((a, b) => (b.hours || 0) - (a.hours || 0));
-          return { addr, lease: mine[0] || null };
-        } catch (e) {
-          console.log(`[BATCH-LEASE] lease pre-check ${addr} failed: ${e.message}`);
-          return { addr, lease: null };
-        }
-      }));
+      // ONE QueryLeasesForProvider instead of one QueryLeasesForNode per address.
+      // The per-node fan-out fired hundreds of concurrent ABCI calls at a single
+      // endpoint and drove it into repeated timeouts; the provider-scoped query
+      // returns the same information in a single round trip.
+      const wanted = new Set(addrs);
+      const allLeases = await rpcCall((c) => rpcQueryLeasesForProvider(c, myProv),
+        { label: 'batchLease:leasesForProvider', fallback: [] });
+      const bestByNode = new Map();
+      for (const l of allLeases || []) {
+        const addr = l.node_address ?? l.nodeAddress;
+        if (!wanted.has(addr)) continue;
+        if (l.prov_address !== myProv) continue;
+        if (l.expires_at && new Date(l.expires_at).getTime() <= now) continue;
+        const cur = bestByNode.get(addr);
+        // Keep the longest-duration active lease, matching the previous sort.
+        if (!cur || (l.hours || 0) > (cur.hours || 0)) bestByNode.set(addr, l);
+      }
+      const perNode = addrs.map((addr) => ({ addr, lease: bestByNode.get(addr) || null }));
       for (const { addr, lease } of perNode) {
         if (!lease) continue; // no existing lease → fresh start below
         if ((lease.hours || 0) >= hours) {
@@ -2175,12 +2253,11 @@ app.get('/api/wallet', async (req, res) => {
         // sessions (which have no signing client; getClient() throws
         // 'client-signs') can still fetch their balance. Falls back to the
         // LCD if RPC is unavailable.
-        try {
-          const rpc = await getRpcClient();
-          if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
-        } catch (e) {
-          console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
-        }
+        const viaRpc = await rpcCall(
+          (c) => rpcQueryBalance(c, getAddr(), 'udvpn'),
+          { label: 'balance', fallback: null },
+        );
+        if (viaRpc) return viaRpc;
         const data = await lcd(`/cosmos/bank/v1beta1/balances/${getAddr()}`);
         const bal = data.balances?.find(b => b.denom === 'udvpn');
         return { denom: 'udvpn', amount: bal ? bal.amount : '0' };
@@ -2188,17 +2265,13 @@ app.get('/api/wallet', async (req, res) => {
       getDvpnPrice(),
       cached(`provider:${getAddr()}`, 600_000, async () => {
         // RPC-first: direct lookup by sentprov address — single round trip vs scanning 500 providers.
-        try {
-          const rpc = await getRpcClient();
-          if (rpc) {
-            const prov = await rpcQueryProvider(rpc, getProvAddr());
-            if (prov) return prov;
-          }
-        } catch (err) {
-          // Read-only query — never produces KEPLR_SIGN_REQUIRED. Don't write
-          // to `res` from inside a cached() callback or we'd double-respond.
-          console.log(`[RPC] provider lookup failed: ${err.message} — LCD fallback`);
-        }
+        // Read-only query — never produces KEPLR_SIGN_REQUIRED. Don't write to
+        // `res` from inside a cached() callback or we'd double-respond.
+        const prov = await rpcCall(
+          (c) => rpcQueryProvider(c, getProvAddr()),
+          { label: 'provider', fallback: null },
+        );
+        if (prov) return prov;
         // LCD fallback
         try {
           const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
@@ -2233,7 +2306,7 @@ app.get('/api/wallet', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2330,7 +2403,7 @@ app.get('/api/plans', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Error fetching plans:', err);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2347,7 +2420,7 @@ app.get('/api/plans/:id', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching plan ${req.params.id}:`, err);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2365,9 +2438,9 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     let d;
     if (!key && limit <= 500) {
       try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+        {
+          const rpcResult = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+            { label: `subsForPlan(${planId})` });
           if (rpcResult) {
             // Normalize numeric status → string to match LCD shape ({status:'active'|'inactive_pending'|'inactive'}).
             // Reverse ordering to match LCD pagination.reverse=true behavior (newest first).
@@ -2405,7 +2478,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     res.json(d);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2421,16 +2494,16 @@ app.get('/api/plans/:id/members', async (req, res) => {
     if (!Number.isFinite(planId)) return res.status(400).json({ error: 'Invalid plan ID' });
     const operator = getAddr();
     const members = await cached(`planMembers:${planId}:${operator}`, 30_000, async () => {
-      const rpc = await getRpcClient();
-      if (!rpc) return [];
       // The operator's subscriptions to this specific plan.
-      const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+      const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+        { label: `members:accSubs(${planId})`, fallback: [] });
       const planSubs = accSubs.filter(s => Number(s.plan_id ?? s.planId) === planId);
       const out = [];
       for (const sub of planSubs) {
         let allocs = [];
         try {
-          allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 10000 });
+          allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 10000 }),
+            { label: `members:allocs(${sub.id})`, attempts: 2 });
         } catch (e) {
           console.log(`[Members] allocations for sub ${sub.id} failed: ${e.message}`);
         }
@@ -2454,7 +2527,7 @@ app.get('/api/plans/:id/members', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching members for plan ${req.params.id}:`, err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2470,9 +2543,8 @@ app.get('/api/plans/:id/own-subscription', async (req, res) => {
     if (!Number.isFinite(planId)) return res.status(400).json({ error: 'Invalid plan ID' });
     const operator = getAddr();
     const result = await cached(`ownSub:${planId}:${operator}`, 30_000, async () => {
-      const rpc = await getRpcClient();
-      if (!rpc) return { subscribed: false, subscriptions: [], activeCount: 0, inactiveCount: 0 };
-      const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+      const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+        { label: `ownSub:accSubs(${planId})`, fallback: [] });
       const planSubs = accSubs.filter(s => Number(s.plan_id ?? s.planId) === planId);
       const subscriptions = [];
       for (const sub of planSubs) {
@@ -2481,7 +2553,8 @@ app.get('/api/plans/:id/own-subscription', async (req, res) => {
         let grantedBytes = '0';
         let utilisedBytes = '0';
         try {
-          const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 10000 });
+          const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 10000 }),
+            { label: `ownSub:allocs(${sub.id})`, attempts: 2 });
           const own = allocs.find(a => a.address === operator);
           if (own) {
             grantedBytes = String(own.granted_bytes ?? own.grantedBytes ?? '0');
@@ -2511,7 +2584,7 @@ app.get('/api/plans/:id/own-subscription', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching own subscription for plan ${req.params.id}:`, err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2532,8 +2605,7 @@ app.get('/api/my-plans', async (req, res) => {
     const [bal, ...myPlanResults] = await Promise.all([
       cached(`balance:${getAddr()}`, 30_000, async () => {
         try {
-          const rpc = await getRpcClient();
-          if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
+          return await rpcCall((c) => rpcQueryBalance(c, getAddr(), 'udvpn'), { label: 'myPlans:balance' });
         } catch (e) {
           console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
         }
@@ -2593,7 +2665,7 @@ app.get('/api/my-plans', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2721,7 +2793,7 @@ app.post('/api/plan/create', async (req, res) => {
     res.json(resp);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2757,7 +2829,7 @@ app.post('/api/plan/status', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Plan status error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2771,9 +2843,7 @@ app.post('/api/plan/status', async (req, res) => {
 async function pickActiveGrantor(grantee) {
   if (!grantee) return null;
   try {
-    const rpc = await getRpcClient();
-    if (!rpc) return null;
-    const grants = await rpcQueryFeeGrants(rpc, grantee);
+    const grants = await rpcCall((c) => rpcQueryFeeGrants(c, grantee), { label: `feegrant:grants(${grantee})` });
     if (!grants || !grants.length) return null;
     const now = Date.now();
     const usable = grants.find((g) => {
@@ -2825,12 +2895,17 @@ app.post('/api/plan/subscribe', async (req, res) => {
       res.json(resp);
     } else {
       console.log(`Subscribe FAIL: code=${resp.code} ${resp.rawLog}`);
-      res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
+      // resp.txContext (non-enumerable) tells parseChainError whether an
+      // `insufficient funds` belongs to the user or to the fee grantor.
+      res.status(400).json({ ...resp, error: parseChainError(resp.rawLog, resp.txContext) });
     }
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Subscribe error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    // Pass the ERROR, not err.message: safeBroadcast stamps fee-grant context on
+    // it so an `insufficient funds` from the GRANTOR is reported as such instead
+    // of blaming the user's own balance.
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2877,9 +2952,11 @@ async function buildReuseShareMsgOrNull(planId, member, { allocBytes } = {}) {
   }
   if (requestedBytes <= 0n) requestedBytes = DEFAULT_SHARE_BYTES;
 
-  const rpc = await getRpcClient();
-  if (!rpc) return null;
-  const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+  // Failover matters here: if these reads fail we return null, and the caller
+  // then BUYS a brand-new subscription instead of reusing one the operator
+  // already paid for. A transient endpoint blip must not cost real money.
+  const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+    { label: `reuseShare:accSubs(${planId})`, fallback: [] });
   const planSubs = accSubs.filter(s =>
     Number(s.plan_id ?? s.planId) === Number(planId) &&
     (typeof s.status === 'number' ? s.status === 1 : s.status === 'active'));
@@ -2887,7 +2964,8 @@ async function buildReuseShareMsgOrNull(planId, member, { allocBytes } = {}) {
   let bestBytes = -1n;
   for (const sub of planSubs) {
     try {
-      const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 100 });
+      const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 100 }),
+        { label: `reuseShare:allocs(${sub.id})`, attempts: 2 });
       const own = allocs.find(a => a.address === operator);
       if (!own) continue;
       const have = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
@@ -2927,9 +3005,11 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
   let reused = false;
   let subTx = null;
   try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const accSubs = await rpcQuerySubscriptionsForAccount(rpc, operator, { limit: 10000 });
+    {
+      // Same money-safety note as buildReuseShareMsg: failing these reads sends
+      // us down the self-subscribe path below, which SPENDS. Fail over instead.
+      const accSubs = await rpcCall((c) => rpcQuerySubscriptionsForAccount(c, operator, { limit: 10000 }),
+        { label: `addSub:accSubs(${planId})`, fallback: [] });
       const planSubs = accSubs.filter(s =>
         Number(s.plan_id ?? s.planId) === Number(planId) &&
         (typeof s.status === 'number' ? s.status === 1 : s.status === 'active'));
@@ -2938,7 +3018,8 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
       let bestBytes = -1n;
       for (const sub of planSubs) {
         try {
-          const allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 100 });
+          const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 100 }),
+            { label: `addSub:allocs(${sub.id})`, attempts: 2 });
           const own = allocs.find(a => a.address === operator);
           if (!own) continue;
           const have = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
@@ -3007,9 +3088,9 @@ async function _addSubscriberViaShare(planId, member, { denom = 'udvpn', allocBy
 
     // Read the fresh subscription's granted bytes (the operator's own row).
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        const allocs = await rpcQuerySubscriptionAllocations(rpc, subscriptionId, { limit: 100 });
+      {
+        const allocs = await rpcCall((c) => rpcQuerySubscriptionAllocations(c, subscriptionId, { limit: 100 }),
+          { label: `addSub:freshAllocs(${subscriptionId})` });
         const own = allocs.find(a => a.address === operator) || allocs[0];
         if (own) availableBytes = BigInt(own.granted_bytes ?? own.grantedBytes ?? '0');
       }
@@ -3044,7 +3125,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
   try {
     const { planId, address, denom, allocBytes } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
-    if (!address || !String(address).startsWith('sent1')) {
+    if (!isValidSentAddress(String(address || '').trim())) {
       return res.status(400).json({ error: 'valid sent1... address required' });
     }
     console.log(`Adding subscriber ${address} to plan ${planId} via self-subscribe + share...`);
@@ -3056,7 +3137,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
     if (relayKeplrSign(err, res)) return;
     if (err.clientSignedTwoTx) return res.status(400).json({ error: err.message, needSubscription: true });
     console.error('Add subscriber error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3065,10 +3146,18 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
   try {
     const { planId, addresses, denom, allocBytes } = req.body;
     if (!planId) return res.status(400).json({ error: 'planId required' });
-    const list = Array.isArray(addresses)
-      ? addresses.map(a => String(a).trim()).filter(a => a.startsWith('sent1'))
-      : [];
-    if (!list.length) return res.status(400).json({ error: 'addresses[] with valid sent1... entries required' });
+    // Checksum-validate here too: an invalid entry used to survive the prefix
+    // filter and burn a paid subscribe attempt before the chain rejected it.
+    const submitted = Array.isArray(addresses) ? addresses.map(a => String(a).trim()) : [];
+    const list = submitted.filter(a => isValidSentAddress(a));
+    const invalid = submitted.filter(a => !isValidSentAddress(a));
+    if (!list.length) {
+      return res.status(400).json({
+        error: 'addresses[] with valid sent1... entries required',
+        ...(invalid.length ? { invalid } : {}),
+      });
+    }
+    if (invalid.length) console.log(`[add-subscribers] skipping ${invalid.length} invalid address(es): ${invalid.join(', ')}`);
 
     // Client-signed wallets (Keplr/Privy): the server holds no key, so it can't
     // run the per-address subscribe+share loop below (each address needs its own
@@ -3115,16 +3204,46 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
         const r = await _addSubscriberViaShare(parseInt(planId), addr, { denom, allocBytes });
         results.push({ address: addr, ok: true, subscriptionId: r.subscriptionId, reused: r.reused, subTx: r.subTx, shareTx: r.shareTx });
       } catch (e) {
-        results.push({ address: addr, ok: false, error: parseChainError(e.message) });
+        // Keep the RAW message alongside the friendly one. parseChainError
+        // rewrites text ("...insufficient funds" → "Insufficient P2P balance"),
+        // and the rewritten form no longer matches CLIENT_ERROR_RE — classifying
+        // the parsed string would score real client errors as 500. Non-enumerable
+        // so it never reaches the client in `results`.
+        const entry = { address: addr, ok: false, error: parseChainError(e.message) };
+        Object.defineProperty(entry, 'rawError', { value: e.message, enumerable: false });
+        results.push(entry);
       }
     }
     invalidatePlanSubs(parseInt(planId, 10));
     const added = results.filter(r => r.ok).length;
-    res.json({ ok: added > 0, added, failed: results.length - added, results });
+    // Partial success is a real outcome here (some addresses can land while
+    // others are rejected), so a mixed result stays 200 and the caller reads
+    // `results`. But when NOTHING was added this is a plain failure, and
+    // answering 200 made `res.ok` report success on a request that did nothing —
+    // a client checking only the HTTP status would show "subscribers added" for
+    // a batch where every single one was rejected. Status the total failure.
+    // Report skipped-as-invalid addresses explicitly — dropping them from the
+    // filter without saying so would let an operator believe a name was added.
+    const body = {
+      ok: added > 0,
+      added,
+      failed: results.length - added,
+      results,
+      ...(invalid.length ? { invalid, skipped: invalid.length } : {}),
+    };
+    if (added === 0) {
+      const firstFail = results.find(r => !r.ok);
+      // Classify on the RAW chain text, not the friendly rewrite (see above).
+      return res.status(chainErrorStatus(firstFail?.rawError)).json({
+        ...body,
+        error: firstFail?.error || 'No subscribers could be added',
+      });
+    }
+    res.json(body);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Add subscribers (bulk) error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3175,7 +3294,7 @@ app.post('/api/plan/start-session', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Start session error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3195,9 +3314,11 @@ app.get('/api/nodes/chain-count', async (req, res) => {
     return res.json({ count: chainCountCache.count, cached: true });
   }
   try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const nodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
+    const nodes = await rpcCall(
+      (c) => rpcQueryNodes(c, { status: 1, limit: 10000 }),
+      { label: 'chainCount', fallback: null },
+    );
+    if (nodes) {
       chainCountCache = { count: nodes.length, ts: now };
       return res.json({ count: nodes.length, cached: false });
     }
@@ -3364,14 +3485,14 @@ app.get('/api/all-nodes', async (req, res) => {
     const leasedAddrs = new Set();
     if (excludeInPlan) {
       try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const now = Date.now();
-          const leases = await rpcQueryLeasesForProvider(rpc, getProvAddr());
-          for (const l of leases) {
-            if (l.node_address && (!l.expires_at || new Date(l.expires_at).getTime() > now)) {
-              leasedAddrs.add(l.node_address);
-            }
+        const now = Date.now();
+        const leases = await rpcCall(
+          (c) => rpcQueryLeasesForProvider(c, getProvAddr()),
+          { label: 'leasesForProvider', fallback: [] },
+        );
+        for (const l of leases) {
+          if (l.node_address && (!l.expires_at || new Date(l.expires_at).getTime() > now)) {
+            leasedAddrs.add(l.node_address);
           }
         }
       } catch (err) {
@@ -3481,7 +3602,7 @@ app.get('/api/all-nodes', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3515,7 +3636,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
     res.json({ sessions: allSessions, total: allSessions.length });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3539,7 +3660,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
       value: { from: getProvAddr(), id: BigInt(planIdNum), nodeAddress },
     };
 
-    const hours = parseInt(reqLeaseHours) || 24;
+    const parsedHours = parseLeaseHours(reqLeaseHours);
+    if (parsedHours.error) return res.status(400).json({ error: parsedHours.error });
+    const hours = parsedHours.hours;
     console.log(`\n[LINK] Node ${nodeAddress} → plan ${planId} (lease: ${hours}h)`);
 
     // Linking a node requires an active lease for it first. The old flow tried
@@ -3564,11 +3687,11 @@ app.post('/api/plan-manager/link', async (req, res) => {
     // Best-effort: a query failure falls back to bundling a fresh lease.
     let existingLease = null;      // our active lease, if any
     try {
-      const rpcClient = await getRpcClient();
-      if (rpcClient) {
+      {
         const myProv = getProvAddr();
         const now = Date.now();
-        const leases = await rpcQueryLeasesForNode(rpcClient, nodeAddress);
+        const leases = await rpcCall((c) => rpcQueryLeasesForNode(c, nodeAddress),
+          { label: `link:leasesForNode(${nodeAddress})`, attempts: 2 });
         existingLease = leases
           .filter(l => l.prov_address === myProv &&
             (!l.expires_at || new Date(l.expires_at).getTime() > now))
@@ -3655,7 +3778,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Link error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3673,7 +3796,9 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
     const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
-    const hours = parseInt(reqLeaseHours) || 24;
+    const parsedHours = parseLeaseHours(reqLeaseHours);
+    if (parsedHours.error) return res.status(400).json({ error: parsedHours.error });
+    const hours = parsedHours.hours;
     console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
 
 
@@ -3746,7 +3871,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('[BATCH-LINK] Error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3794,7 +3919,7 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Unlink error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3830,7 +3955,7 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('[BATCH-UNLINK] Error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3848,8 +3973,9 @@ app.post('/api/lease/start', async (req, res) => {
     // all identical). RPC-first lookup of the node's current price.
     let nodePrice = null;
     try {
-      const rpcClient = await getRpcClient();
-      const node = await rpcQueryNode(rpcClient, nodeAddress);
+      // Failover matters: without it a dead endpoint surfaced as "node may be
+      // offline or unreachable" (HTTP 400) — blaming the node for our problem.
+      const node = await rpcCall((c) => rpcQueryNode(c, nodeAddress), { label: `leaseV1:node(${nodeAddress})` });
       const prices = node?.hourly_prices || node?.hourlyPrices;
       if (Array.isArray(prices) && prices.length) {
         const denom = maxPriceDenom || 'udvpn';
@@ -3909,7 +4035,7 @@ app.post('/api/lease/start', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Lease start error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3940,7 +4066,7 @@ app.post('/api/lease/end', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Lease end error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3952,7 +4078,7 @@ app.get('/api/providers', async (req, res) => {
     res.json({ providers });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3966,9 +4092,8 @@ app.post('/api/provider/register', async (req, res) => {
     let alreadyExists = false;
     // RPC-first: direct lookup by sentprov address — exact match, no substring heuristic.
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        const prov = await rpcQueryProvider(rpc, getProvAddr());
+      {
+        const prov = await rpcCall((c) => rpcQueryProvider(c, getProvAddr()), { label: 'provider:existsProbe' });
         if (prov) alreadyExists = true;
       }
     } catch (err) {
@@ -4031,7 +4156,7 @@ app.post('/api/provider/register', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Provider register/update error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4063,7 +4188,7 @@ app.post('/api/provider/status', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Provider status error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4082,7 +4207,7 @@ app.get('/api/params', async (req, res) => {
     res.json(result);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4096,18 +4221,13 @@ app.get('/api/feegrant/grants', async (req, res) => {
       // SDK swallows protobuf decode errors and returns []; we can't distinguish
       // "zero grants" from "decode failed". Fall through to LCD when empty so
       // users see real data if any exists.
-      try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
-          if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
-        }
-      } catch (err) {
-        // Inside cached() callback — never write to res from here (callers
-        // wait on the promise then write). Read-only RPC can't produce
-        // KEPLR_SIGN_REQUIRED anyway. Fall through to LCD.
-        console.log(`[RPC] feegrant/grants failed: ${err.message} — LCD fallback`);
-      }
+      // Inside cached() callback — never write to res from here (callers wait on
+      // the promise then write). Read-only RPC can't produce KEPLR_SIGN_REQUIRED.
+      const rpcResult = await rpcCall(
+        (c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+        { label: 'feegrant:issued', fallback: null },
+      );
+      if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
       return lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
     });
     const allowances = (d.allowances || []).map(a => {
@@ -4138,7 +4258,7 @@ app.get('/api/feegrant/grants', async (req, res) => {
     });
     res.json({ allowances, total: allowances.length });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4177,16 +4297,30 @@ app.post('/api/feegrant/grant', async (req, res) => {
     // There is no update message, so re-authorizing means revoke + re-grant.
     // Detect an existing grant and bundle a revoke ahead of the grant in ONE
     // TX so the new spend-limit/expiration replaces the old one atomically.
+    // This check is a fast-path OPTIMISATION, not a correctness requirement: the
+    // `allowance already exists` handler below re-runs the broadcast as
+    // revoke+grant, so a missed detection still succeeds. It must therefore
+    // never dominate the request.
+    //
+    // Measured on mainnet 2026-08-10: the feegrant index is slow across the
+    // whole network (see CLAUDE.md "LCD feegrant endpoint is slow ~15-17s"). The
+    // old code spent 3 × 8s of RPC timeouts and then fell through to LCD for
+    // ~100s more — a 124s pre-flight on a grant that broadcasts in 2s. Worse,
+    // the LCD leg ran whenever RPC returned an EMPTY list, which is the normal
+    // "no grants yet" answer, so first-time granters paid the full penalty.
+    //
+    // Now: one short RPC attempt, no LCD fallback, and an empty result is taken
+    // at face value. Worst case we skip the bundled revoke and the retry below
+    // handles it.
     let alreadyGranted = false;
     try {
-      let existing = [];
-      const rpc = await getRpcClient().catch((e) => { console.log(`[grant] rpc client unavailable for grant-check: ${e.message}`); return null; });
-      if (rpc) existing = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 }).catch((e) => { console.log(`[grant] rpc issued-grants check failed: ${e.message}`); return []; });
-      if (!existing.length) {
-        const d = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`).catch((e) => { console.log(`[grant] lcd issued-grants check failed: ${e.message}`); return {}; });
-        existing = d.allowances || [];
+      const existing = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 500 }),
+        { label: 'grant:issuedCheck', attempts: 1, timeoutMs: 4000, fallback: null });
+      if (existing == null) {
+        console.log('[FeeGrant] issued-grants check unavailable — proceeding with a plain grant');
+      } else {
+        alreadyGranted = existing.some(a => a.grantee === grantee);
       }
-      alreadyGranted = existing.some(a => a.grantee === grantee);
     } catch (err) {
       // Non-fatal: if the existence check fails, fall through to a plain grant
       // and let the revoke-on-conflict retry below handle a duplicate.
@@ -4221,7 +4355,7 @@ app.post('/api/feegrant/grant', async (req, res) => {
     // chain — relay the signDoc so the frontend can client-sign, rather than
     // surfacing the raw error to the user.
     if (relayKeplrSign(e, res)) return;
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4278,9 +4412,9 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
     let subs = [];
     let subsFromRpc = false;
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+      {
+        subs = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+          { label: `sse:subsForPlan(${planId})` });
         subsFromRpc = true;
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
@@ -4309,9 +4443,9 @@ app.get('/api/feegrant/grant-subscribers-stream', async (req, res) => {
     send('status', { msg: 'Checking existing grants...' });
     let existingAllowances = [];
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        existingAllowances = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+      {
+        existingAllowances = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+          { label: 'sse:issuedGrants' });
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowances.length}`);
       }
     } catch (err) {
@@ -4412,9 +4546,9 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     let subs = [];
     let subsFromRpc = false;
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+      {
+        subs = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+          { label: `grantSubs:subsForPlan(${planId})` });
         subsFromRpc = true;
         console.log(`[RPC] rpcQuerySubscriptionsForPlan plan=${planId} count=${subs.length}`);
       }
@@ -4441,9 +4575,9 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     // fall through to LCD when empty so we don't miss real grants.
     let existingAllowancesPost = [];
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        existingAllowancesPost = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+      {
+        existingAllowancesPost = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+          { label: 'grantSubs:issuedGrants' });
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${existingAllowancesPost.length}`);
       }
     } catch (err) {
@@ -4506,7 +4640,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     res.json({ ok: true, granted, skipped: uniqueAddrs.length - needGrant.length, errors: errors.length ? errors : undefined });
   } catch (e) {
     console.error(`[FeeGrant] Fatal error: ${e.message}`);
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4594,7 +4728,7 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
       errors: errors.length ? errors : undefined,
     });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4604,9 +4738,9 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
   try {
     let revokeAllowances = [];
     try {
-      const rpc = await getRpcClient();
-      if (rpc) {
-        revokeAllowances = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
+      {
+        revokeAllowances = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+          { label: 'revokeAll:issuedGrants' });
         console.log(`[RPC] rpcQueryFeeGrantsIssued granter=${getAddr()} count=${revokeAllowances.length}`);
       }
     } catch (err) {
@@ -4675,7 +4809,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
       errors: errors.length ? errors : undefined,
     });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4694,9 +4828,9 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
     const subData = await cached(subsCacheKey, 60_000, async () => {
       // RPC-first: returns array directly; wrap to match LCD shape { subscriptions: [...] }.
       try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
+        {
+          const rpcResult = await rpcCall((c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+            { label: `gasCosts:subsForPlan(${planId})` });
           if (rpcResult) return { subscriptions: rpcResult };
         }
       } catch (err) {
@@ -4754,7 +4888,7 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
 
     res.json({ ok: true, totalUdvpn, txCount, byAddress, subscriberCount: subscriberAddrs.length });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4880,7 +5014,7 @@ app.get('/api/node-rankings', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Error scanning sessions:', err);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -5047,12 +5181,43 @@ app.get('/api/rpc-providers', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// RPC transport health — which endpoint is serving, what is cooling down, and
+// whether the chain is reachable at all. Read-only and unauthenticated (it
+// exposes no wallet or session data), so it can be curled from prod to tell
+// "the chain is down" apart from "we are pinned to a bad endpoint" without
+// tailing logs.
+app.get('/health/rpc', async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const height = await rpcCall(
+      async (c) => Number((await c.tmClient.status()).syncInfo.latestBlockHeight),
+      { label: 'health', attempts: 2, fallback: null },
+    );
+    const client = await getRpcClient();
+    res.json({
+      status: height ? 'ok' : 'degraded',
+      endpoint: client?.url ?? null,
+      height,
+      latencyMs: Date.now() - t0,
+      cooldown: rpcCooldownState(),
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(503).json({
+      status: 'down',
+      error: err.message,
+      cooldown: rpcCooldownState(),
+      checkedAt: new Date().toISOString(),
+    });
+  }
 });
 
 // SPA fallback — any non-API GET returns index.html so deep-link refreshes work.
