@@ -829,6 +829,63 @@ async function lcdAllSubscriptions(planId, timeout) {
   return subs;
 }
 
+// ─── Chain-Error HTTP Status ─────────────────────────────────────────────────
+// A chain rejection is the chain answering, not the server breaking. Routes used
+// to return 500 for things like "Plan is inactive — activate first" or "Lease
+// already exists for this node", which reads as an outage to clients, monitoring
+// and retry logic — and invites a pointless retry of a request that will always
+// fail the same way. Map those to 4xx and reserve 5xx for genuine server/RPC
+// faults (transport failures, exhausted endpoints, bugs).
+const CLIENT_ERROR_RE = new RegExp([
+  'insufficient funds',
+  'invalid status inactive',
+  'already exists',
+  'duplicate node for plan',
+  'duplicate provider',
+  'does not exist',
+  'not found',
+  'not active',
+  'invalid price',
+  'unauthorized',
+  'out of gas',
+].join('|'), 'i');
+
+// ─── Lease Duration Validation ───────────────────────────────────────────────
+// `parseInt(x) || 24` silently turned 0 into 24 HOURS. A node at 50 P2P/hr then
+// costs 1200 P2P instead of the nothing the caller asked for — a 0 from a UI
+// field or a cleared input became a four-figure charge. It also swallowed
+// negatives, NaN and "abc" into the same silent default. Only an ABSENT value
+// means "use the default"; anything present must be a sane positive integer or
+// the request is rejected.
+const MAX_LEASE_HOURS = 24 * 365; // one year — well past any legitimate lease
+
+function parseLeaseHours(raw, { fallback = 24 } = {}) {
+  if (raw === undefined || raw === null || raw === '') return { hours: fallback };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    return { error: 'leaseHours must be a whole number of hours' };
+  }
+  if (n <= 0) {
+    return { error: 'leaseHours must be at least 1 (use unlink to remove a node, not a 0-hour lease)' };
+  }
+  if (n > MAX_LEASE_HOURS) {
+    return { error: `leaseHours must be ${MAX_LEASE_HOURS} or fewer` };
+  }
+  return { hours: n };
+}
+
+/** 400 when the chain rejected the request on its merits; 500 otherwise. */
+function chainErrorStatus(err) {
+  const msg = String((err && err.message) || err || '');
+  // Transport failures are OURS to own — the user can meaningfully retry those,
+  // and they must not be mistaken for a permanent rejection.
+  if (/fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|Bad status|50[234]|timed out|timeout/i.test(msg)
+      && !CLIENT_ERROR_RE.test(msg)) {
+    return 500;
+  }
+  return CLIENT_ERROR_RE.test(msg) ? 400 : 500;
+}
+
 // Retry a thunk up to `attempts` times with exponential backoff.
 // Used by getPlanStats so a transient RPC/LCD blip doesn't silently
 // drop a plan from the my-plans response.
@@ -2220,7 +2277,7 @@ app.get('/api/wallet', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2317,7 +2374,7 @@ app.get('/api/plans', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Error fetching plans:', err);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2334,7 +2391,7 @@ app.get('/api/plans/:id', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching plan ${req.params.id}:`, err);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2392,7 +2449,7 @@ app.get('/api/plans/:id/subscriptions', async (req, res) => {
     res.json(d);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2441,7 +2498,7 @@ app.get('/api/plans/:id/members', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching members for plan ${req.params.id}:`, err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2498,7 +2555,7 @@ app.get('/api/plans/:id/own-subscription', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error(`Error fetching own subscription for plan ${req.params.id}:`, err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2579,7 +2636,7 @@ app.get('/api/my-plans', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2707,7 +2764,7 @@ app.post('/api/plan/create', async (req, res) => {
     res.json(resp);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2743,7 +2800,7 @@ app.post('/api/plan/status', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Plan status error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -2809,12 +2866,17 @@ app.post('/api/plan/subscribe', async (req, res) => {
       res.json(resp);
     } else {
       console.log(`Subscribe FAIL: code=${resp.code} ${resp.rawLog}`);
-      res.status(400).json({ ...resp, error: parseChainError(resp.rawLog) });
+      // resp.txContext (non-enumerable) tells parseChainError whether an
+      // `insufficient funds` belongs to the user or to the fee grantor.
+      res.status(400).json({ ...resp, error: parseChainError(resp.rawLog, resp.txContext) });
     }
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Subscribe error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    // Pass the ERROR, not err.message: safeBroadcast stamps fee-grant context on
+    // it so an `insufficient funds` from the GRANTOR is reported as such instead
+    // of blaming the user's own balance.
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3046,7 +3108,7 @@ app.post('/api/plan/add-subscriber', async (req, res) => {
     if (relayKeplrSign(err, res)) return;
     if (err.clientSignedTwoTx) return res.status(400).json({ error: err.message, needSubscription: true });
     console.error('Add subscriber error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3114,7 +3176,7 @@ app.post('/api/plan/add-subscribers', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Add subscribers (bulk) error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3165,7 +3227,7 @@ app.post('/api/plan/start-session', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Start session error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3473,7 +3535,7 @@ app.get('/api/all-nodes', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3507,7 +3569,7 @@ app.get('/api/nodes/:addr/sessions', async (req, res) => {
     res.json({ sessions: allSessions, total: allSessions.length });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3531,7 +3593,9 @@ app.post('/api/plan-manager/link', async (req, res) => {
       value: { from: getProvAddr(), id: BigInt(planIdNum), nodeAddress },
     };
 
-    const hours = parseInt(reqLeaseHours) || 24;
+    const parsedHours = parseLeaseHours(reqLeaseHours);
+    if (parsedHours.error) return res.status(400).json({ error: parsedHours.error });
+    const hours = parsedHours.hours;
     console.log(`\n[LINK] Node ${nodeAddress} → plan ${planId} (lease: ${hours}h)`);
 
     // Linking a node requires an active lease for it first. The old flow tried
@@ -3647,7 +3711,7 @@ app.post('/api/plan-manager/link', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Link error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3665,7 +3729,9 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
     if (badAddr) return res.status(400).json({ error: `invalid node address: ${badAddr}` });
     const ownErr = await assertPlanOwnership(planIdNum);
     if (ownErr) return res.status(ownErr.status).json({ error: ownErr.error });
-    const hours = parseInt(reqLeaseHours) || 24;
+    const parsedHours = parseLeaseHours(reqLeaseHours);
+    if (parsedHours.error) return res.status(400).json({ error: parsedHours.error });
+    const hours = parsedHours.hours;
     console.log(`\n[BATCH-LINK] ${addrs.length} nodes → plan ${planId} (lease: ${hours}h)`);
 
 
@@ -3738,7 +3804,7 @@ app.post('/api/plan-manager/batch-link', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('[BATCH-LINK] Error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3786,7 +3852,7 @@ app.post('/api/plan-manager/unlink', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Unlink error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3822,7 +3888,7 @@ app.post('/api/plan-manager/batch-unlink', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('[BATCH-UNLINK] Error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3902,7 +3968,7 @@ app.post('/api/lease/start', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Lease start error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3933,7 +3999,7 @@ app.post('/api/lease/end', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Lease end error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -3945,7 +4011,7 @@ app.get('/api/providers', async (req, res) => {
     res.json({ providers });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4023,7 +4089,7 @@ app.post('/api/provider/register', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Provider register/update error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4055,7 +4121,7 @@ app.post('/api/provider/status', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Provider status error:', err.message);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4074,7 +4140,7 @@ app.get('/api/params', async (req, res) => {
     res.json(result);
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -4125,7 +4191,7 @@ app.get('/api/feegrant/grants', async (req, res) => {
     });
     res.json({ allowances, total: allowances.length });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4222,7 +4288,7 @@ app.post('/api/feegrant/grant', async (req, res) => {
     // chain — relay the signDoc so the frontend can client-sign, rather than
     // surfacing the raw error to the user.
     if (relayKeplrSign(e, res)) return;
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4507,7 +4573,7 @@ app.post('/api/feegrant/grant-subscribers', async (req, res) => {
     res.json({ ok: true, granted, skipped: uniqueAddrs.length - needGrant.length, errors: errors.length ? errors : undefined });
   } catch (e) {
     console.error(`[FeeGrant] Fatal error: ${e.message}`);
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4595,7 +4661,7 @@ app.post('/api/feegrant/revoke-list', async (req, res) => {
       errors: errors.length ? errors : undefined,
     });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4676,7 +4742,7 @@ app.post('/api/feegrant/revoke-all', async (req, res) => {
       errors: errors.length ? errors : undefined,
     });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4755,7 +4821,7 @@ app.get('/api/feegrant/gas-costs', async (req, res) => {
 
     res.json({ ok: true, totalUdvpn, txCount, byAddress, subscriberCount: subscriberAddrs.length });
   } catch (e) {
-    res.status(500).json({ error: parseChainError(e.message) });
+    res.status(chainErrorStatus(e)).json({ error: parseChainError(e) });
   }
 });
 
@@ -4881,7 +4947,7 @@ app.get('/api/node-rankings', async (req, res) => {
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
     console.error('Error scanning sessions:', err);
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
@@ -5048,7 +5114,7 @@ app.get('/api/rpc-providers', async (req, res) => {
     });
   } catch (err) {
     if (relayKeplrSign(err, res)) return;
-    res.status(500).json({ error: parseChainError(err.message) });
+    res.status(chainErrorStatus(err)).json({ error: parseChainError(err) });
   }
 });
 
