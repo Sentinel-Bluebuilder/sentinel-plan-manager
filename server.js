@@ -4164,16 +4164,30 @@ app.post('/api/feegrant/grant', async (req, res) => {
     // There is no update message, so re-authorizing means revoke + re-grant.
     // Detect an existing grant and bundle a revoke ahead of the grant in ONE
     // TX so the new spend-limit/expiration replaces the old one atomically.
+    // This check is a fast-path OPTIMISATION, not a correctness requirement: the
+    // `allowance already exists` handler below re-runs the broadcast as
+    // revoke+grant, so a missed detection still succeeds. It must therefore
+    // never dominate the request.
+    //
+    // Measured on mainnet 2026-08-10: the feegrant index is slow across the
+    // whole network (see CLAUDE.md "LCD feegrant endpoint is slow ~15-17s"). The
+    // old code spent 3 × 8s of RPC timeouts and then fell through to LCD for
+    // ~100s more — a 124s pre-flight on a grant that broadcasts in 2s. Worse,
+    // the LCD leg ran whenever RPC returned an EMPTY list, which is the normal
+    // "no grants yet" answer, so first-time granters paid the full penalty.
+    //
+    // Now: one short RPC attempt, no LCD fallback, and an empty result is taken
+    // at face value. Worst case we skip the bundled revoke and the retry below
+    // handles it.
     let alreadyGranted = false;
     try {
-      let existing = [];
-      existing = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
-        { label: 'grant:issuedCheck', fallback: [] });
-      if (!existing.length) {
-        const d = await lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`).catch((e) => { console.log(`[grant] lcd issued-grants check failed: ${e.message}`); return {}; });
-        existing = d.allowances || [];
+      const existing = await rpcCall((c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 500 }),
+        { label: 'grant:issuedCheck', attempts: 1, timeoutMs: 4000, fallback: null });
+      if (existing == null) {
+        console.log('[FeeGrant] issued-grants check unavailable — proceeding with a plain grant');
+      } else {
+        alreadyGranted = existing.some(a => a.grantee === grantee);
       }
-      alreadyGranted = existing.some(a => a.grantee === grantee);
     } catch (err) {
       // Non-fatal: if the existence check fails, fall through to a plain grant
       // and let the revoke-on-conflict retry below handle a duplicate.
