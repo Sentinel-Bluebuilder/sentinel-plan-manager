@@ -36,6 +36,8 @@ import {
   resetSigningClient,
   safeBroadcast,
   getRpcClient,
+  rpcCall,
+  rpcCooldownState,
   rpcQueryNode,
   rpcQueryNodes,
   rpcQueryNodesForPlan,
@@ -381,16 +383,15 @@ async function assertPlanOwnership(planId) {
   // transient blip vs missing plan are indistinguishable, so we MUST verify
   // via LCD before allowing the TX, or doomed "is not authorized" broadcasts
   // sneak through and burn gas).
+  // Retry across endpoints before falling back: a transport blip here used to
+  // send an OWNED plan down the LCD path (and, if LCD also blipped, block a
+  // legitimate operator's TX outright).
   let provAddress = null;
-  try {
-    const client = await getRpcClient();
-    if (client) {
-      const plan = await rpcQueryPlan(client, planId);
-      if (plan?.prov_address) provAddress = plan.prov_address;
-    }
-  } catch (e) {
-    console.warn(`[ownership] RPC ownership probe threw for plan ${planId}: ${e.message}`);
-  }
+  const plan = await rpcCall(
+    (c) => rpcQueryPlan(c, planId),
+    { label: `ownership(${planId})`, fallback: null },
+  );
+  if (plan?.prov_address) provAddress = plan.prov_address;
 
   if (!provAddress) {
     try {
@@ -647,16 +648,20 @@ async function runNodeScan() {
     // Pull the full chain catalog via RPC directly. SDK's fetchAllNodes()
     // hardcodes limit=500 via fetchActiveNodes default — that's why we were
     // missing half the network. Go straight to rpcQueryNodes with limit=10000.
-    const rpc = await getRpcClient();
-    if (!rpc) {
-      // All RPC endpoints failed. rpcQueryNodes(null, ...) would throw an opaque
-      // "Cannot read properties of null" deep in the SDK; surface a clear cause
-      // and bail cleanly so the next scan can retry once RPC recovers.
+    // rpcCall retries across endpoints: the catalog is the backbone of every
+    // node view, so a single flaky endpoint must not blank the whole UI.
+    // fallback:null => "couldn't reach the chain" instead of throwing.
+    const rawNodes = await rpcCall(
+      (c) => rpcQueryNodes(c, { status: 1, limit: 10000 }),
+      { label: 'scan:catalog', fallback: null },
+    );
+    if (!rawNodes) {
+      // All RPC endpoints failed. Bail cleanly, KEEPING the existing cache, so
+      // the next scan retries once RPC recovers.
       console.warn('[scan] No RPC client available — skipping node catalog refresh, will retry next scan.');
       nodeCache.scanning = false;
       return;
     }
-    const rawNodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
     // Resolve remote URLs and filter to nodes that accept udvpn.
     const catalog = rawNodes
       .map(n => {
@@ -752,23 +757,20 @@ async function fetchAllNodes() {
 
 async function discoverPlanIds() {
   const ids = new Set();
-  // Fetch RPC client once outside the loop — reused for every probe.
-  let rpc = null;
-  try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
   for (let batch = 0; batch < 10; batch++) {
     const checks = [];
     for (let i = batch * 10 + 1; i <= (batch + 1) * 10; i++) {
       checks.push((async (planId) => {
         // RPC-first: if RPC returns a non-empty array the plan exists.
         // Empty array is ambiguous (truly empty OR not-on-chain) — fall back to LCD count_total.
-        if (rpc) {
-          try {
-            const result = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 1 });
-            if (result && result.length > 0) { ids.add(planId); return; }
-          } catch (err) {
-            console.log(`[RPC] discoverPlanIds probe ${planId} failed: ${err.message} — LCD fallback`);
-          }
-        }
+        // Each probe fails over independently; previously all 100 shared one
+        // pinned client, so a single dead endpoint dropped the whole discovery
+        // sweep onto the (much slower) LCD path.
+        const result = await rpcCall(
+          (c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 1 }),
+          { label: `discover(${planId})`, attempts: 2, fallback: null },
+        );
+        if (result && result.length > 0) { ids.add(planId); return; }
         // LCD fallback — count_total is authoritative for empty-vs-nonexistent distinction.
         await lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`)
           .then(d => {
@@ -787,15 +789,13 @@ async function getUniqueWallets(planId) {
   const wallets = new Set();
 
   // RPC-first: single protobuf call returns the full set (~912x faster than paginated LCD).
-  try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
-      for (const s of subs) wallets.add(s.acc_address);
-      return wallets.size;
-    }
-  } catch (err) {
-    console.log(`[RPC] getUniqueWallets(${planId}) failed: ${err.message} — LCD fallback`);
+  const subs = await rpcCall(
+    (c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+    { label: `uniqueWallets(${planId})`, fallback: null },
+  );
+  if (subs) {
+    for (const s of subs) wallets.add(s.acc_address);
+    return wallets.size;
   }
 
   // LCD fallback
@@ -876,23 +876,16 @@ async function getPlanStats(planId) {
 }
 
 async function _getPlanStatsImpl(planId) {
-  // Fetch RPC client once for this call — shared by RPC-first paths below.
-  let rpc = null;
-  try { rpc = await getRpcClient(); } catch (_) { rpc = null; }
-
-  // Single RPC call replaces two LCD calls (count_total + reverse-paginated 200).
-  // Pulls up to 10000 subs in one shot; we derive total + sample from that array.
-  // Falls back to LCD only if RPC fails or is unavailable.
+  // Each sub-query runs through rpcCall independently: they no longer share one
+  // pinned client, so a single dead endpoint can't fail all three at once —
+  // each one fails over on its own and only drops to LCD if the pool is truly out.
   const [subsResult, nodesData, planRecord] = await Promise.all([
     (async () => {
-      if (rpc) {
-        try {
-          const subs = await rpcQuerySubscriptionsForPlan(rpc, planId, { limit: 10000 });
-          return { source: 'rpc', subs };
-        } catch (err) {
-          console.log(`[RPC] _getPlanStatsImpl subs(${planId}) failed: ${err.message} — LCD fallback`);
-        }
-      }
+      const subs = await rpcCall(
+        (c) => rpcQuerySubscriptionsForPlan(c, planId, { limit: 10000 }),
+        { label: `planStats:subs(${planId})`, fallback: null },
+      );
+      if (subs) return { source: 'rpc', subs };
       // LCD fallback: two calls — count_total + reverse sample.
       const [countD, latestD] = await Promise.all([
         lcd(`/sentinel/subscription/v3/plans/${planId}/subscriptions?pagination.limit=1&pagination.count_total=true`).catch(() => ({})),
@@ -901,36 +894,27 @@ async function _getPlanStatsImpl(planId) {
       return { source: 'lcd', countTotal: parseInt(countD.pagination?.total || '0'), subs: latestD.subscriptions || [] };
     })(),
     (async () => {
-      if (rpc) {
-        try {
-          // status:0 (all members) to match the no-filter LCD fallback below and
-          // reflect the true plan size — not just active members.
-          const nodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
-          if (nodes) return { nodes };
-        } catch (err) {
-          console.log(`[RPC] _getPlanStatsImpl nodes(${planId}) failed: ${err.message} — LCD fallback`);
-        }
-      }
+      // status:0 (all members) to match the no-filter LCD fallback below and
+      // reflect the true plan size — not just active members.
+      const nodes = await rpcCall(
+        (c) => rpcQueryNodesForPlan(c, planId, { status: 0, limit: 5000 }),
+        { label: `planStats:nodes(${planId})`, fallback: null },
+      );
+      if (nodes) return { nodes };
       return lcd(`/sentinel/node/v3/plans/${planId}/nodes?pagination.limit=500`).catch(() => ({ nodes: [] }));
     })(),
     (async () => {
       // The plan record is the ONLY authoritative price source (set immutably at
       // creation). LCD's v3 single-plan endpoint returns "Not Implemented" on
-      // every provider, so RPC is effectively the sole path — give it its own
-      // retry across the failover pool rather than failing over to a dead LCD.
-      // Without this, a single RPC blip on a plan with no sampleable subscribers
-      // silently renders the price as 0 (and caches it for 2 minutes).
-      if (rpc) {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const p = await rpcQueryPlan(rpc, planId);
-            if (p) return p;
-          } catch (err) {
-            console.log(`[RPC] _getPlanStatsImpl plan(${planId}) attempt ${attempt + 1}/3 failed: ${err.message}`);
-          }
-          if (attempt < 2) await new Promise(r => setTimeout(r, 400 * Math.pow(2, attempt)));
-        }
-      }
+      // every provider, so RPC is effectively the sole path. The old loop here
+      // retried 3× against the SAME pinned client, so a dead endpoint burned
+      // every attempt and silently rendered the price as 0 (cached 2 min).
+      // rpcCall retries across DIFFERENT endpoints, which is what was intended.
+      const p = await rpcCall(
+        (c) => rpcQueryPlan(c, planId),
+        { label: `planStats:plan(${planId})`, attempts: 3, fallback: null },
+      );
+      if (p) return p;
       try {
         const lp = await lcd(`/sentinel/plan/v3/plans/${planId}`);
         return lp?.plan || null;
@@ -1017,7 +1001,7 @@ async function _getPlanStatsImpl(planId) {
   const operator = getAddr();
   let addedMembers = 0;
   let activeAddedMembers = 0;
-  if (rpc && operator) {
+  if (operator) {
     try {
       const ownPlanSubs = normSubs.filter(s => s.acc_address === operator);
       const addedAddrs = new Set();
@@ -1025,12 +1009,10 @@ async function _getPlanStatsImpl(planId) {
       for (const sub of ownPlanSubs) {
         // A shared member is active only while the host subscription is active.
         const hostActive = sub.status === 'active' && new Date(sub.inactive_at) > now;
-        let allocs = [];
-        try {
-          allocs = await rpcQuerySubscriptionAllocations(rpc, sub.id, { limit: 10000 });
-        } catch (e) {
-          console.log(`[PlanStats] allocations for sub ${sub.id} failed: ${e.message}`);
-        }
+        const allocs = await rpcCall(
+          (c) => rpcQuerySubscriptionAllocations(c, sub.id, { limit: 10000 }),
+          { label: `allocations(${sub.id})`, attempts: 2, fallback: [] },
+        );
         for (const a of allocs) {
           if (a.address && a.address !== operator) {
             addedAddrs.add(a.address);
@@ -1087,14 +1069,16 @@ async function getNodesForPlan(planId) {
 
   // RPC-first
   try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      // status:0 (unspecified) = ALL plan members, not just active ones. The
-      // LCD fallback below has no status filter, so this aligns RPC with LCD.
-      // Critical for Add Nodes exclusion (excludeInPlan) and Your Nodes: a
-      // just-linked or temporarily-inactive member must still count as "in plan"
-      // or it reappears in the browse list as if it were never added.
-      const rpcNodes = await rpcQueryNodesForPlan(rpc, planId, { status: 0, limit: 5000 });
+    // status:0 (unspecified) = ALL plan members, not just active ones. The
+    // LCD fallback below has no status filter, so this aligns RPC with LCD.
+    // Critical for Add Nodes exclusion (excludeInPlan) and Your Nodes: a
+    // just-linked or temporarily-inactive member must still count as "in plan"
+    // or it reappears in the browse list as if it were never added.
+    const rpcNodes = await rpcCall(
+      (c) => rpcQueryNodesForPlan(c, planId, { status: 0, limit: 5000 }),
+      { label: `nodesForPlan(${planId})`, fallback: null },
+    );
+    if (rpcNodes) {
       for (const n of rpcNodes) {
         const rawAddr = (n.remote_addrs || [])[0] || '';
         nodes.push({
@@ -1113,21 +1097,31 @@ async function getNodesForPlan(planId) {
       // sentinel.lease.v1 Lease (start_at + hours). A node can hold leases from
       // several providers; we take OUR lease (prov_address === getProvAddr()),
       // preferring the one expiring last. Per-node query, run in parallel.
+      // ONE QueryLeasesForProvider replaces N per-node queries. The per-node
+      // fan-out hammered a single endpoint with hundreds of concurrent ABCI
+      // calls, which is what pushed it into repeated 8s timeouts; the provider
+      // holds at most a few hundred leases, so one call is both faster and far
+      // gentler. Falls back to [] => lease fields render as "--", never wrong.
       const myProv = getProvAddr();
-      await Promise.all(nodes.map(async (node) => {
-        try {
-          const leases = await rpcQueryLeasesForNode(rpc, node.address);
-          const mine = leases
-            .filter(l => l.prov_address === myProv && l.expires_at)
-            .sort((a, b) => new Date(b.expires_at) - new Date(a.expires_at));
-          node.leaseExpiresAt = mine[0]?.expires_at || null;
-          node.leaseHours = mine[0]?.hours ?? null;
-          node.leaseMaxHours = mine[0]?.max_hours ?? null;
-        } catch (e) {
-          console.log(`[LEASE] leases-for-node ${node.address} failed: ${e.message}`);
-          node.leaseExpiresAt = null;
+      const allLeases = await rpcCall(
+        (c) => rpcQueryLeasesForProvider(c, myProv),
+        { label: `leasesForProvider(${planId})`, fallback: [] },
+      );
+      const bestByNode = new Map();
+      for (const l of allLeases) {
+        if (l.prov_address !== myProv || !l.expires_at || !l.node_address) continue;
+        const cur = bestByNode.get(l.node_address);
+        // Keep the lease expiring LAST, matching the previous per-node sort.
+        if (!cur || new Date(l.expires_at) > new Date(cur.expires_at)) {
+          bestByNode.set(l.node_address, l);
         }
-      }));
+      }
+      for (const node of nodes) {
+        const mine = bestByNode.get(node.address);
+        node.leaseExpiresAt = mine?.expires_at || null;
+        node.leaseHours = mine?.hours ?? null;
+        node.leaseMaxHours = mine?.max_hours ?? null;
+      }
       return nodes;
     }
   } catch (err) {
@@ -1179,23 +1173,21 @@ async function getAllNodeInfo() {
   const nodeMap = {};
 
   // RPC-first: single call returns full list, no pagination needed.
-  try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const nodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
-      for (const n of nodes) {
-        const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
-        const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
-        nodeMap[n.address] = {
-          hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
-          gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
-        };
-      }
-      console.log(`[RPC] getAllNodeInfo: ${Object.keys(nodeMap).length} nodes loaded`);
-      return nodeMap;
+  const nodes = await rpcCall(
+    (c) => rpcQueryNodes(c, { status: 1, limit: 10000 }),
+    { label: 'allNodeInfo', fallback: null },
+  );
+  if (nodes) {
+    for (const n of nodes) {
+      const hourlyPrice = (n.hourly_prices || []).find(p => p.denom === 'udvpn');
+      const gbPrice = (n.gigabyte_prices || []).find(p => p.denom === 'udvpn');
+      nodeMap[n.address] = {
+        hourlyUdvpn: hourlyPrice ? parseInt(hourlyPrice.quote_value) : 0,
+        gbUdvpn: gbPrice ? parseInt(gbPrice.quote_value) : 0,
+      };
     }
-  } catch (err) {
-    console.log(`[RPC] getAllNodeInfo failed (${err.message}), falling back to LCD`);
+    console.log(`[RPC] getAllNodeInfo: ${Object.keys(nodeMap).length} nodes loaded`);
+    return nodeMap;
   }
 
   // LCD fallback: paginated scan.
@@ -2175,12 +2167,11 @@ app.get('/api/wallet', async (req, res) => {
         // sessions (which have no signing client; getClient() throws
         // 'client-signs') can still fetch their balance. Falls back to the
         // LCD if RPC is unavailable.
-        try {
-          const rpc = await getRpcClient();
-          if (rpc) return await rpcQueryBalance(rpc, getAddr(), 'udvpn');
-        } catch (e) {
-          console.log(`[RPC] Balance query failed: ${e.message} — LCD fallback`);
-        }
+        const viaRpc = await rpcCall(
+          (c) => rpcQueryBalance(c, getAddr(), 'udvpn'),
+          { label: 'balance', fallback: null },
+        );
+        if (viaRpc) return viaRpc;
         const data = await lcd(`/cosmos/bank/v1beta1/balances/${getAddr()}`);
         const bal = data.balances?.find(b => b.denom === 'udvpn');
         return { denom: 'udvpn', amount: bal ? bal.amount : '0' };
@@ -2188,17 +2179,13 @@ app.get('/api/wallet', async (req, res) => {
       getDvpnPrice(),
       cached(`provider:${getAddr()}`, 600_000, async () => {
         // RPC-first: direct lookup by sentprov address — single round trip vs scanning 500 providers.
-        try {
-          const rpc = await getRpcClient();
-          if (rpc) {
-            const prov = await rpcQueryProvider(rpc, getProvAddr());
-            if (prov) return prov;
-          }
-        } catch (err) {
-          // Read-only query — never produces KEPLR_SIGN_REQUIRED. Don't write
-          // to `res` from inside a cached() callback or we'd double-respond.
-          console.log(`[RPC] provider lookup failed: ${err.message} — LCD fallback`);
-        }
+        // Read-only query — never produces KEPLR_SIGN_REQUIRED. Don't write to
+        // `res` from inside a cached() callback or we'd double-respond.
+        const prov = await rpcCall(
+          (c) => rpcQueryProvider(c, getProvAddr()),
+          { label: 'provider', fallback: null },
+        );
+        if (prov) return prov;
         // LCD fallback
         try {
           const provs = await lcd('/sentinel/provider/v2/providers?pagination.limit=500');
@@ -3195,9 +3182,11 @@ app.get('/api/nodes/chain-count', async (req, res) => {
     return res.json({ count: chainCountCache.count, cached: true });
   }
   try {
-    const rpc = await getRpcClient();
-    if (rpc) {
-      const nodes = await rpcQueryNodes(rpc, { status: 1, limit: 10000 });
+    const nodes = await rpcCall(
+      (c) => rpcQueryNodes(c, { status: 1, limit: 10000 }),
+      { label: 'chainCount', fallback: null },
+    );
+    if (nodes) {
       chainCountCache = { count: nodes.length, ts: now };
       return res.json({ count: nodes.length, cached: false });
     }
@@ -3364,14 +3353,14 @@ app.get('/api/all-nodes', async (req, res) => {
     const leasedAddrs = new Set();
     if (excludeInPlan) {
       try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const now = Date.now();
-          const leases = await rpcQueryLeasesForProvider(rpc, getProvAddr());
-          for (const l of leases) {
-            if (l.node_address && (!l.expires_at || new Date(l.expires_at).getTime() > now)) {
-              leasedAddrs.add(l.node_address);
-            }
+        const now = Date.now();
+        const leases = await rpcCall(
+          (c) => rpcQueryLeasesForProvider(c, getProvAddr()),
+          { label: 'leasesForProvider', fallback: [] },
+        );
+        for (const l of leases) {
+          if (l.node_address && (!l.expires_at || new Date(l.expires_at).getTime() > now)) {
+            leasedAddrs.add(l.node_address);
           }
         }
       } catch (err) {
@@ -4096,18 +4085,13 @@ app.get('/api/feegrant/grants', async (req, res) => {
       // SDK swallows protobuf decode errors and returns []; we can't distinguish
       // "zero grants" from "decode failed". Fall through to LCD when empty so
       // users see real data if any exists.
-      try {
-        const rpc = await getRpcClient();
-        if (rpc) {
-          const rpcResult = await rpcQueryFeeGrantsIssued(rpc, getAddr(), { limit: 10000 });
-          if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
-        }
-      } catch (err) {
-        // Inside cached() callback — never write to res from here (callers
-        // wait on the promise then write). Read-only RPC can't produce
-        // KEPLR_SIGN_REQUIRED anyway. Fall through to LCD.
-        console.log(`[RPC] feegrant/grants failed: ${err.message} — LCD fallback`);
-      }
+      // Inside cached() callback — never write to res from here (callers wait on
+      // the promise then write). Read-only RPC can't produce KEPLR_SIGN_REQUIRED.
+      const rpcResult = await rpcCall(
+        (c) => rpcQueryFeeGrantsIssued(c, getAddr(), { limit: 10000 }),
+        { label: 'feegrant:issued', fallback: null },
+      );
+      if (rpcResult && rpcResult.length > 0) return { allowances: rpcResult };
       return lcd(`/cosmos/feegrant/v1beta1/issued/${getAddr()}?pagination.limit=500`);
     });
     const allowances = (d.allowances || []).map(a => {
@@ -5053,6 +5037,37 @@ app.get('/api/rpc-providers', async (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// RPC transport health — which endpoint is serving, what is cooling down, and
+// whether the chain is reachable at all. Read-only and unauthenticated (it
+// exposes no wallet or session data), so it can be curled from prod to tell
+// "the chain is down" apart from "we are pinned to a bad endpoint" without
+// tailing logs.
+app.get('/health/rpc', async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const height = await rpcCall(
+      async (c) => Number((await c.tmClient.status()).syncInfo.latestBlockHeight),
+      { label: 'health', attempts: 2, fallback: null },
+    );
+    const client = await getRpcClient();
+    res.json({
+      status: height ? 'ok' : 'degraded',
+      endpoint: client?.url ?? null,
+      height,
+      latencyMs: Date.now() - t0,
+      cooldown: rpcCooldownState(),
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(503).json({
+      status: 'down',
+      error: err.message,
+      cooldown: rpcCooldownState(),
+      checkedAt: new Date().toISOString(),
+    });
+  }
 });
 
 // SPA fallback — any non-API GET returns index.html so deep-link refreshes work.
